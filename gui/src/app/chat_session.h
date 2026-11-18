@@ -75,9 +75,14 @@ class ChatSession : public QObject
 
 public:
 	// `backend` is shared by all sessions of the window and outlives them.
-	ChatSession(refgui::client::Backend& backend, const refgui::workspace::BackendConfig& config, QString sessionId, QObject* parent = nullptr);
+	ChatSession(refgui::client::Backend& backend,
+	            const refgui::workspace::BackendConfig& config,
+	            QString sessionId,
+	            QObject* parent = nullptr,
+	            const refgui::workspace::SessionDirectory* directory = nullptr);
 
 	const QString& sessionId() const { return m_sessionId; }
+	QString cwd() const { return m_controller.info().cwd; }
 	bool isAttached() const { return m_controller.isAttached(); }
 	bool isForeground() const { return m_controller.isForeground(); }
 	// Shows the session's conversation: it replaces the model with the backend's snapshot.

@@ -45,6 +45,20 @@ void SessionDirectory::refreshHistory()
 	m_historyTimer.start();
 }
 
+QList<proto::SessionInfo> SessionDirectory::allSessions() const
+{
+	QList<proto::SessionInfo> all = m_liveSessions;
+	for(proto::SessionInfo info : m_persisted)
+	{
+		if(!m_live.contains(info.id))
+		{
+			info.live = false;
+			all.append(std::move(info));
+		}
+	}
+	return all;
+}
+
 void SessionDirectory::update(const proto::SessionInfo& info)
 {
 	QList<proto::SessionInfo> sessions = m_liveSessions;
@@ -154,9 +168,9 @@ QCoro::Task<SessionDirectory::Result<std::optional<proto::SessionInfo>>> Session
 	co_return history->isEmpty() ? std::nullopt : std::optional<proto::SessionInfo>(history->first());
 }
 
-QCoro::Task<SessionDirectory::Result<proto::DirListing>> SessionDirectory::listDirs(QString path)
+QCoro::Task<SessionDirectory::Result<proto::DirListing>> SessionDirectory::listDirs(QString path, std::optional<QString> cwd, bool includeFiles)
 {
-	return m_backend.client().listDirs(std::move(path));
+	return m_backend.client().listDirs(std::move(path), std::move(cwd), includeFiles);
 }
 
 QCoro::Task<SessionDirectory::Result<void>> SessionDirectory::setWatchAll(bool enabled)

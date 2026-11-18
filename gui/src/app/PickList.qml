@@ -18,6 +18,8 @@ FocusScope {
 	property var sectionLabel: section => section
 	property int visibleHeight: 7 * Theme.pickRowHeight // the list is this tall at most
 	property string emptyText: qsTr("Nothing found")
+	property string emptyActionText: ""
+	signal emptyActionTriggered()
 	property bool searchable: true
 	property int initialIndex: -1
 	// Optional `index => bool` so off-screen disabled rows are skipped without instantiating delegates.
@@ -102,8 +104,7 @@ FocusScope {
 	}
 
 	focus: searchable
-	implicitHeight: (searchable ? Theme.paletteSearchHeight + 1 : 0) + Math.max(Math.min(view.contentHeight, visibleHeight), view.count === 0 ? Theme.emptyStateHeight : 0)
-
+	implicitHeight: (searchable ? Theme.paletteSearchHeight + 1 : 0) + Math.max(Math.min(view.contentHeight, visibleHeight), view.count === 0 ? (emptyActionText !== "" ? Theme.emptyStateHeight + 40 : Theme.emptyStateHeight) : 0)
 	Behavior on implicitHeight {
 		enabled: pick.ready
 		NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
@@ -251,12 +252,24 @@ FocusScope {
 		ScrollBar.vertical: ThemedScrollBar {}
 	}
 
-	Text {
-		textFormat: Text.PlainText
-		anchors { horizontalCenter: parent.horizontalCenter; top: divider.bottom; topMargin: 22 }
-		text: pick.emptyText
-		color: Theme.textMuted
-		font.pixelSize: Theme.secondaryFontSize
+	Column {
+		anchors { horizontalCenter: parent.horizontalCenter; top: divider.bottom; topMargin: 18 }
+		spacing: 10
 		visible: view.count === 0
+
+		Text {
+			textFormat: Text.PlainText
+			anchors.horizontalCenter: parent.horizontalCenter
+			text: pick.emptyText
+			color: Theme.textMuted
+			font.pixelSize: Theme.secondaryFontSize
+		}
+		DialogButton {
+			visible: pick.emptyActionText !== ""
+			anchors.horizontalCenter: parent.horizontalCenter
+			small: true
+			text: pick.emptyActionText
+			onClicked: pick.emptyActionTriggered()
+		}
 	}
 }

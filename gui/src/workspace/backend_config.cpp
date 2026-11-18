@@ -70,12 +70,28 @@ QVariantList toList(const QList<T>& items)
 
 BackendConfig::BackendConfig(Connection& connection, QObject* parent)
 	: QObject(parent)
+	, m_connection(connection)
 	, m_backend(connection.backend())
 {
-	connect(&connection, &Connection::connected, this, [this] {
-		load();
-		loadMcp();
-	});
+	connect(&connection, &Connection::connected, this, &BackendConfig::refresh);
+}
+
+void BackendConfig::setCwd(const QString& cwd)
+{
+	if(cwd == m_cwd)
+	{
+		return;
+	}
+	m_cwd = cwd;
+	if(m_connection.isConnected())
+	{
+		refresh();
+	}
+}
+
+std::optional<QString> BackendConfig::optionalCwd() const
+{
+	return m_cwd.isEmpty() ? std::nullopt : std::optional<QString>(m_cwd);
 }
 
 QStringList BackendConfig::variantsOf(const QString& provider, const QString& modelId) const
@@ -90,14 +106,47 @@ QStringList BackendConfig::variantsOf(const QString& provider, const QString& mo
 	return {};
 }
 
+void BackendConfig::refresh()
+{
+	load();
+	loadMcp();
+}
+
 void BackendConfig::refreshMcp()
 {
 	loadMcp();
 }
 
+void BackendConfig::apply(proto::ServerConfig config)
+{
+	++m_configSerial;
+	m_config = std::move(config);
+	m_agents = toList(m_config.agents);
+	m_models = toList(m_config.models);
+	m_commands = toList(m_config.commands);
+	emit changed();
+}
+
+QCoro::Task<client::Result<proto::ReloadConfigResult>> BackendConfig::reload(std::optional<QString> cwdOverride)
+{
+	const std::optional<QString> targetCwd = cwdOverride ? std::move(cwdOverride) : optionalCwd();
+	const auto result = co_await m_backend.client().reloadConfig(targetCwd);
+	if(result)
+	{
+		apply(result->config);
+		loadMcp();
+	}
+	co_return result;
+}
+
 QCoro::Task<> BackendConfig::load()
 {
-	const auto config = co_await m_backend.client().getConfig();
+	const int serial = ++m_configSerial;
+	const auto config = co_await m_backend.client().getConfig(optionalCwd());
+	if(serial != m_configSerial)
+	{
+		co_return;
+	}
 	if(!config)
 	{
 		emit failed(config.error());
@@ -112,7 +161,12 @@ QCoro::Task<> BackendConfig::load()
 
 QCoro::Task<> BackendConfig::loadMcp()
 {
-	const auto servers = co_await m_backend.client().mcpStatus(std::nullopt);
+	const int serial = ++m_mcpSerial;
+	const auto servers = co_await m_backend.client().mcpStatus(optionalCwd());
+	if(serial != m_mcpSerial)
+	{
+		co_return;
+	}
 	if(!servers)
 	{
 		emit failed(servers.error());
@@ -121,5 +175,4 @@ QCoro::Task<> BackendConfig::loadMcp()
 	m_mcpServers = toList(*servers);
 	emit mcpChanged();
 }
-
 } // namespace refgui::workspace

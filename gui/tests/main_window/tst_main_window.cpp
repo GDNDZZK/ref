@@ -21,6 +21,8 @@
 
 #include <QCoreApplication>
 #include <QJsonArray>
+#include <QJsonDocument>
+#include "workspace/config_json_patcher.h"
 #include <QJsonObject>
 #include <QQmlComponent>
 #include <QPointer>
@@ -62,7 +64,11 @@ public:
 	}
 
 	void setMessages(const QString& id, const QJsonArray& messages) { m_messages.insert(id, messages); }
-
+	QString savedConfigRawText() const { return m_configRawText; }
+	int saveConfigCalls() const { return m_saveConfigCalls; }
+	int setAgentCalls() const { return m_setAgentCalls; }
+	QStringList shellCommands() const { return m_shellCommands; }
+	QList<QJsonObject> listDirsRequests() const { return m_listDirsRequests; }
 private:
 	QJsonArray list() const
 	{
@@ -106,12 +112,70 @@ private:
 			m_fake.respond(request,
 			               {{u"config"_s,
 			                 QJsonObject{{u"default_agent"_s, u"build"_s},
-			                             {u"agents"_s, QJsonArray{QJsonObject{{u"name"_s, u"build"_s}, {u"description"_s, u""_s}}}},
-			                             {u"models"_s, QJsonArray()}}}});
+			                             {u"agents"_s, QJsonArray{QJsonObject{{u"name"_s, u"build"_s}, {u"description"_s, u"Build"_s}},
+			                                                      QJsonObject{{u"name"_s, u"plan"_s}, {u"description"_s, u"Plan"_s}}}},
+			                             {u"models"_s, QJsonArray()},
+			                             {u"commands"_s, QJsonArray{QJsonObject{{u"name"_s, u"review"_s}, {u"description"_s, u"Review diff"_s}, {u"source"_s, u"config"_s}}}}}}});
+		}
+		else if(op == u"set_agent"_s)
+		{
+			++m_setAgentCalls;
+			m_sessions[id][u"agent"_s] = request.value(u"agent"_s);
+			m_fake.respond(request, {{u"session"_s, m_sessions.value(id)}});
+		}
+		else if(op == u"shell"_s)
+		{
+			m_shellCommands.append(request.value(u"command"_s).toString());
+			m_fake.respond(request, {});
+		}
+		else if(op == u"list_dirs"_s)
+		{
+			m_listDirsRequests.append(request);
+			const bool wantFiles = request.value(u"include_files"_s).toBool();
+			m_fake.respond(request, {{u"path"_s, u"/work"_s}, {u"dirs"_s, QJsonArray{u"docs"_s, u"src"_s}}, {u"files"_s, wantFiles ? QJsonArray{u"README.md"_s} : QJsonArray()}});
+		}
+		else if(op == u"list_binaries"_s)
+		{
+			m_fake.respond(request, {{u"binaries"_s, QJsonArray{u"cargo"_s, u"cat"_s, u"catfish"_s}}});
 		}
 		else if(op == u"mcp_status"_s)
 		{
 			m_fake.respond(request, {{u"servers"_s, QJsonArray()}});
+		}
+		else if(op == u"get_config_files"_s || op == u"save_config_file"_s || op == u"create_config_file"_s || op == u"select_config_file"_s || op == u"delete_config_file"_s)
+		{
+			if(op == u"save_config_file"_s)
+			{
+				m_configRawText = request.value(u"content"_s).toString();
+				++m_saveConfigCalls;
+			}
+			const auto parsed = refgui::workspace::ConfigJsonPatcher::parseJsonc(m_configRawText);
+			const QJsonObject rootObj = parsed ? parsed->root() : QJsonObject{};
+			const QJsonObject fileEntry{
+				{u"file"_s, u"ref.json"_s},
+				{u"active"_s, true},
+				{u"exists"_s, true},
+				{u"label"_s, rootObj.value(u"$name"_s)},
+				{u"summary"_s, u"anthropic/claude-sonnet-4-5"_s},
+				{u"modified_at"_s, 1700000000},
+				{u"size"_s, m_configRawText.toUtf8().size()},
+			};
+			QJsonObject infoObj{
+				{u"config_dir"_s, u"/tmp/ref-cfg"_s},
+				{u"files"_s, QJsonArray{fileEntry}},
+				{u"selected_file"_s, u"ref.json"_s},
+				{u"raw_text"_s, m_configRawText},
+				{u"parsed"_s, parsed ? QJsonValue(rootObj) : QJsonValue::Null},
+				{u"has_jsonc_override"_s, false},
+				{u"project_overrides"_s, QJsonArray{}},
+				{u"warnings"_s, QJsonArray{}},
+				{u"env_status"_s, QJsonObject{{u"ANTHROPIC_API_KEY"_s, true}}},
+			};
+			if(!parsed)
+			{
+				infoObj.insert(u"parse_error"_s, parsed.error().message);
+			}
+			m_fake.respond(request, infoObj);
 		}
 		else if(op == u"get_image"_s)
 		{
@@ -135,6 +199,11 @@ private:
 	QMap<QString, QJsonObject> m_sessions;
 	QMap<QString, QJsonArray> m_messages;
 	int m_created = 0;
+	QString m_configRawText = u"// Keep user header comment\n{\n  \"model\": \"anthropic/claude-sonnet-4-5\",\n  \"extraFutureSetting\": {\"preserve\": true}\n}\n"_s;
+	int m_saveConfigCalls = 0;
+	int m_setAgentCalls = 0;
+	QStringList m_shellCommands;
+	QList<QJsonObject> m_listDirsRequests;
 };
 
 QJsonArray manyMessagesJson()
@@ -283,6 +352,8 @@ private slots:
 	void emptyWorkspaceStateAndDetachTransitionCleanly();
 	void tileZoomRemovesBorderRepeatsSlowTravelAndCompensatesScroll();
 	void reusableConfigFormControlsInstantiateAndOperateWithoutWarnings();
+	void configDialogSwitchesCategoriesEditsVisualAndJsoncAndGuardsDirtyClose();
+	void paletteAndComposerCompletionsAndShellModeOperateWithoutWarnings();
 };
 
 void TestMainWindow::initTestCase()
@@ -1039,6 +1110,198 @@ void TestMainWindow::reusableConfigFormControlsInstantiateAndOperateWithoutWarni
 
 	QCoreApplication::processEvents();
 	QVERIFY2(warningSpy.isEmpty(), "Reusable config form controls emitted QML warnings");
+}
+
+void TestMainWindow::configDialogSwitchesCategoriesEditsVisualAndJsoncAndGuardsDirtyClose()
+{
+	MainFixture f;
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+
+	f.workspace->commands()->run(u"config"_s);
+	QCOMPARE(f.workspace->dialog(), u"config"_s);
+
+	QQuickItem* configDialog = nullptr;
+	const auto findByName = [](QQuickItem* root, const QString& name) {
+		return findItem(root, [&name](QQuickItem* item) { return item->objectName() == name; });
+	};
+	QTRY_VERIFY([&] {
+		configDialog = findByName(window->contentItem(), u"configDialog"_s);
+		return configDialog != nullptr && !f.workspace->configEditor()->isLoading();
+	}());
+	QCOMPARE(f.workspace->configEditor()->selectedFile(), u"ref.json"_s);
+	QCOMPARE(f.workspace->configEditor()->mode(), u"visual"_s);
+
+	// Walk all 6 visual categories to verify every section instantiates cleanly with zero QML warnings.
+	for(const QString& cat : {u"providers"_s, u"agents"_s, u"permissions"_s, u"mcp"_s, u"commands"_s, u"general"_s})
+	{
+		QMetaObject::invokeMethod(configDialog, "selectCategory", Q_ARG(QVariant, cat));
+		QCoreApplication::processEvents();
+	}
+	QVERIFY2(warningSpy.isEmpty(), "Switching ConfigDialog categories emitted QML warnings");
+
+	// Unmodified Visual -> JSON preserves raw JSONC comments verbatim.
+	QVERIFY(f.workspace->configEditor()->setMode(u"json"_s));
+	auto* rawEditor = findByName(configDialog, u"configRawJsonEditor"_s);
+	QVERIFY(rawEditor);
+	QVERIFY(rawEditor->property("text").toString().contains(u"// Keep user header comment"_s));
+	QVERIFY(f.workspace->configEditor()->setMode(u"visual"_s));
+
+	// Add Anthropic provider preset and verify dirty guard blocks accidental close.
+	QMetaObject::invokeMethod(configDialog, "selectCategory", Q_ARG(QVariant, u"providers"_s));
+	QCoreApplication::processEvents();
+	auto* presetBtn = findByName(configDialog, u"presetProvider_anthropic"_s);
+	QVERIFY(presetBtn);
+	QMetaObject::invokeMethod(presetBtn, "clicked");
+	QVERIFY(f.workspace->configEditor()->isDirty());
+
+	QMetaObject::invokeMethod(configDialog, "requestClose");
+	QCOMPARE(f.workspace->dialog(), u"config"_s);
+	auto* dirtyBar = findByName(configDialog, u"configDirtyConfirmBar"_s);
+	QVERIFY(dirtyBar && dirtyBar->isVisible());
+	configDialog->setProperty("pendingDirtyAction", QVariant());
+	QVERIFY(!dirtyBar->isVisible());
+
+	// Switch to JSON mode: new provider preset and untouched extraFutureSetting are both present.
+	QVERIFY(f.workspace->configEditor()->setMode(u"json"_s));
+	QVERIFY(rawEditor->property("text").toString().contains(u"\"anthropic\""_s));
+	QVERIFY(rawEditor->property("text").toString().contains(u"\"extraFutureSetting\""_s));
+
+	// Broken JSONC shows parse error banner and blocks Visual mode until fixed/discarded.
+	rawEditor->setProperty("text", u"{ broken json "_s);
+	QVERIFY(!f.workspace->configEditor()->parseError().isEmpty());
+	auto* parseBanner = findByName(configDialog, u"configParseErrorBanner"_s);
+	QVERIFY(parseBanner && parseBanner->isVisible());
+	QVERIFY(!f.workspace->configEditor()->setMode(u"visual"_s));
+
+	// Discard restores clean baseline (including header comment), switch back to Visual, set $name, Save, and Close.
+	f.workspace->configEditor()->discard();
+	QVERIFY(!f.workspace->configEditor()->isDirty());
+	QVERIFY(f.workspace->configEditor()->parseError().isEmpty());
+	QVERIFY(rawEditor->property("text").toString().contains(u"// Keep user header comment"_s));
+	QVERIFY(f.workspace->configEditor()->setMode(u"visual"_s));
+	f.workspace->configEditor()->setStringAt({u"$name"_s}, u"Main Profile"_s);
+	QVERIFY(f.workspace->configEditor()->isDirty());
+	QMetaObject::invokeMethod(configDialog, "triggerSave");
+	QTRY_COMPARE(f.stub.saveConfigCalls(), 1);
+	QTRY_VERIFY(!f.workspace->configEditor()->isDirty());
+	QVERIFY(f.stub.savedConfigRawText().contains(u"\"$name\": \"Main Profile\""_s));
+	QVERIFY(f.stub.savedConfigRawText().contains(u"\"extraFutureSetting\""_s));
+	QMetaObject::invokeMethod(configDialog, "requestClose");
+	QCOMPARE(f.workspace->dialog(), QString());
+	QVERIFY2(warningSpy.isEmpty(), "ConfigDialog operations emitted QML warnings");
+}
+
+void TestMainWindow::paletteAndComposerCompletionsAndShellModeOperateWithoutWarnings()
+{
+	MainFixture f;
+	QTRY_COMPARE(f.workspace->config()->agents().size(), 2);
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+	window->requestActivate();
+
+	// 1) CommandPalette: choosing "cd" opens CdDialog directly; choosing "custom:review" enters askingArgument, and Esc returns to list.
+	f.workspace->openDialog(u"palette"_s);
+	QQuickItem* palette = nullptr;
+	QTRY_VERIFY([&] {
+		palette = findByTypePrefix(window->contentItem(), "CommandPalette");
+		return palette != nullptr && palette->isVisible() && palette->property("entered").toBool();
+	}());
+	const QVariantMap cdCmd{{u"commandId"_s, u"cd"_s}, {u"title"_s, u"Change dir"_s}, {u"hint"_s, u"[DIR]"_s}};
+	QMetaObject::invokeMethod(palette, "choose", Q_ARG(QVariant, cdCmd));
+	QCOMPARE(f.workspace->dialog(), u"cd"_s);
+	QTRY_VERIFY(!f.stub.listDirsRequests().isEmpty());
+	QCOMPARE(f.stub.listDirsRequests().last().value(u"cwd"_s).toString(), u"/work"_s);
+	QCOMPARE(f.stub.listDirsRequests().last().value(u"include_files"_s).toBool(), false);
+	f.workspace->closeDialog();
+	QTRY_VERIFY(findByTypePrefix(window->contentItem(), "CommandPalette") == nullptr);
+
+	// ExportDialog passes session cwd and includeFiles: true to PathField.
+	f.workspace->commands()->run(u"export"_s);
+	QCOMPARE(f.workspace->dialog(), u"export"_s);
+	QTRY_VERIFY([&] {
+		const auto reqs = f.stub.listDirsRequests();
+		return !reqs.isEmpty() && reqs.last().value(u"include_files"_s).toBool();
+	}());
+	QCOMPARE(f.stub.listDirsRequests().last().value(u"cwd"_s).toString(), u"/work"_s);
+	f.workspace->closeDialog();
+
+	// CommandPalette Esc while askingArgument returns to command list instead of closing palette.
+	f.workspace->openDialog(u"palette"_s);
+	palette = nullptr;
+	QTRY_VERIFY([&] {
+		palette = findByTypePrefix(window->contentItem(), "CommandPalette");
+		return palette != nullptr && palette->isVisible() && palette->property("entered").toBool();
+	}());
+	const QVariantMap reviewCmd{{u"commandId"_s, u"custom:review"_s}, {u"title"_s, u"Review diff"_s}, {u"hint"_s, u"[args]"_s}};
+	QMetaObject::invokeMethod(palette, "choose", Q_ARG(QVariant, reviewCmd));
+	QVERIFY(palette->property("askingArgument").toBool());
+	QQuickItem* paletteInput = findByTypePrefix(palette, "QQuickTextInput");
+	QVERIFY(paletteInput);
+	paletteInput->forceActiveFocus();
+	QTest::keyClick(window, Qt::Key_Escape);
+	QVERIFY(!palette->property("askingArgument").toBool());
+	QCOMPARE(f.workspace->dialog(), u"palette"_s);
+	f.workspace->closeDialog();
+	QCOMPARE(f.workspace->dialog(), QString());
+
+	// 2) Composer: unknown single-token /modles warns once (no duplicate toast) and keeps draft.
+	QQuickItem* composerItem = findByTypePrefix(window->contentItem(), "Composer");
+	QVERIFY(composerItem);
+	QMetaObject::invokeMethod(composerItem, "focusInput");
+	QSignalSpy toastSpy(f.workspace.get(), &Workspace::toastRequested);
+	auto* composerModel = f.workspace->current()->composer();
+	composerModel->edit(u"/modles"_s, 7);
+	QMetaObject::invokeMethod(composerItem, "submit");
+	QCOMPARE(toastSpy.count(), 1);
+	QVERIFY(toastSpy.first().at(1).toString().contains(u"/models"_s));
+	QCOMPARE(composerModel->text(), u"/modles"_s);
+	composerModel->clearDraft();
+
+	// 3) `!` shell mode: Tab and Backtab never cycle agent; unnavigated Enter runs free-form typed command directly.
+	QMetaObject::invokeMethod(composerItem, "focusInput");
+	composerModel->edit(u"!"_s, 1);
+	QVERIFY(composerModel->shellMode());
+	QTest::keyClick(window, Qt::Key_Tab);
+	QCOMPARE(f.stub.setAgentCalls(), 0);
+	QTRY_VERIFY(composerModel->completions()->rowCount() > 0);
+	QTest::keyClick(window, Qt::Key_Backtab, Qt::ShiftModifier);
+	QCOMPARE(f.stub.setAgentCalls(), 0);
+
+	composerModel->edit(u"ca"_s, 2);
+	QQuickItem* popup = findByTypePrefix(composerItem, "CompletionPopup");
+	QVERIFY(popup);
+	QTRY_VERIFY(popup->property("open").toBool());
+	QVERIFY(!popup->property("explicitlySelected").toBool());
+	QTest::keyClick(window, Qt::Key_Return); // free-form Enter submits "ca", NOT "cargo "!
+	QTRY_COMPARE(f.stub.shellCommands(), (QStringList{u"ca"_s}));
+	QVERIFY(!composerModel->shellMode());
+	QVERIFY2(warningSpy.isEmpty(), "Palette, PathField, and Composer completions emitted QML warnings");
 }
 
 QTEST_MAIN(TestMainWindow)

@@ -51,6 +51,8 @@ signals:
 	void connected();
 	// The backend has a message for the user.
 	void toastReceived(const proto::ToastFrame& toast);
+	// Configuration was reloaded or modified on the backend.
+	void configChangedReceived(const QStringList& warnings);
 
 private:
 	void onFrame(const proto::ServerFrame& frame);

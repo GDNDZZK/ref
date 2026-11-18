@@ -93,6 +93,8 @@ public:
 	// How the stub answers shutdown: with this error, or by closing the connection.
 	void failShutdown(const QString& error) { m_shutdownError = error; }
 	void closeOnShutdown() { m_closeOnShutdown = true; }
+	void setModels(const QJsonArray& models) { m_models = models; }
+	void setConfigWarnings(const QJsonArray& warnings) { m_configWarnings = warnings; }
 
 	// While held, a detach is recorded but neither carried out nor answered.
 	void holdDetach(bool hold) { m_holdDetach = hold; }
@@ -267,7 +269,20 @@ private:
 			               {{u"config"_s,
 			                 QJsonObject{{u"default_agent"_s, u"build"_s},
 			                             {u"agents"_s, QJsonArray{QJsonObject{{u"name"_s, u"build"_s}, {u"description"_s, u""_s}}, QJsonObject{{u"name"_s, u"plan"_s}, {u"description"_s, u""_s}}}},
-			                             {u"models"_s, QJsonArray()}}}});
+			                             {u"models"_s, m_models},
+			                             {u"warnings"_s, m_configWarnings}}}});
+		}
+		else if(op == u"reload_config"_s)
+		{
+			m_fake.send({{u"kind"_s, u"config_changed"_s}, {u"warnings"_s, m_configWarnings}});
+			m_fake.respond(request,
+			               {{u"config"_s,
+			                 QJsonObject{{u"default_agent"_s, u"build"_s},
+			                             {u"agents"_s, QJsonArray{QJsonObject{{u"name"_s, u"build"_s}, {u"description"_s, u""_s}}, QJsonObject{{u"name"_s, u"plan"_s}, {u"description"_s, u""_s}}}},
+			                             {u"models"_s, m_models},
+			                             {u"warnings"_s, m_configWarnings}}},
+			                {u"mcp_servers"_s, QJsonArray()},
+			                {u"warnings"_s, m_configWarnings}});
 		}
 		else if(op == u"mcp_status"_s)
 		{
@@ -276,6 +291,26 @@ private:
 		else if(op == u"set_agent"_s)
 		{
 			m_sessions[id][u"agent"_s] = request.value(u"agent"_s);
+			m_fake.respond(request, {{u"session"_s, m_sessions.value(id)}});
+		}
+		else if(op == u"set_model"_s)
+		{
+			m_sessions[id][u"model"_s] = request.value(u"model"_s).toObject();
+			m_fake.respond(request, {{u"session"_s, m_sessions.value(id)}});
+		}
+		else if(op == u"set_variant"_s)
+		{
+			QJsonObject model = m_sessions[id].value(u"model"_s).toObject();
+			const QString v = request.value(u"variant"_s).toString();
+			if(v.isEmpty())
+			{
+				model.remove(u"variant"_s);
+			}
+			else
+			{
+				model.insert(u"variant"_s, v);
+			}
+			m_sessions[id][u"model"_s] = model;
 			m_fake.respond(request, {{u"session"_s, m_sessions.value(id)}});
 		}
 		else if(op == u"undo"_s)
@@ -337,6 +372,8 @@ private:
 	bool m_holdDetach = false;
 	bool m_holdWatchAll = false;
 	std::optional<QJsonObject> m_heldDetach;
+	QJsonArray m_models;
+	QJsonArray m_configWarnings;
 };
 
 // An assistant message whose only tool call waits for the user's permission.
@@ -474,6 +511,8 @@ private slots:
 	void leavingSplitWhileZoomedPromotesZoomedSession();
 	void openingNonTileInSplitViewExitsSplitAndShowsTarget();
 	void requestCloseSessionConfirmsWhenBusyAndClosesWhenIdle();
+	void reloadAndConfigCommandsUpdateStateAndDeduplicateBroadcast();
+	void directArgumentsForModelsAgentsVariantsSessionsAndMultiClose();
 };
 
 void TestWorkspace::opensTheSessionFromTheCommandLine()
@@ -766,10 +805,13 @@ void TestWorkspace::slashCommandsRunTheirHandlers()
 	f.workspace->closeDialog();
 	QCOMPARE(f.workspace->dialog(), QString());
 
+	// /variant without arguments opens the variants dialog; setVariant() without arguments rotates; clearVariant() sends empty string.
 	QVERIFY(commands->run(u"variant"_s));
+	QCOMPARE(f.workspace->dialog(), u"variants"_s);
+	f.workspace->closeDialog();
+	f.workspace->setVariant(u"ses_a"_s);
 	QTRY_COMPARE(f.stub.requests(u"set_variant"_s).size(), 1);
 	QVERIFY(!f.stub.requests(u"set_variant"_s).first().contains(u"variant"_s) || f.stub.requests(u"set_variant"_s).first().value(u"variant"_s).isNull());
-
 	QVERIFY(!commands->runSlash(u"/no-such-command"_s));
 	QVERIFY(commands->run(u"sidebar"_s));
 	QVERIFY(!f.workspace->settings()->sidebarVisible());
@@ -1593,6 +1635,110 @@ void TestWorkspace::requestCloseSessionConfirmsWhenBusyAndClosesWhenIdle()
 	QCOMPARE(f.workspace->dialog(), QString());
 	QTRY_COMPARE(f.stub.requests(u"close"_s).size(), 1);
 	QCOMPARE(f.stub.requests(u"close"_s).first().value(u"session_id"_s).toString(), u"ses_b"_s);
+}
+
+void TestWorkspace::reloadAndConfigCommandsUpdateStateAndDeduplicateBroadcast()
+{
+	Fixture f;
+	QTRY_VERIFY(f.workspace->current() != nullptr);
+
+	// /config opens the ConfigDialog.
+	f.workspace->commands()->run(u"config"_s);
+	QCOMPARE(f.workspace->dialog(), u"config"_s);
+	f.workspace->closeDialog();
+	QCOMPARE(f.workspace->dialog(), QString());
+
+	// /reload sends reload_config for the active session's cwd, updates models, and deduplicates ConfigChanged warnings.
+	const int getConfigsBefore = int(f.stub.requests(u"get_config"_s).size());
+	f.stub.setModels(QJsonArray{QJsonObject{{u"id"_s, u"claude-sonnet-4-5"_s}, {u"provider"_s, u"anthropic"_s}, {u"provider_name"_s, u"Anthropic"_s}, {u"name"_s, u"Claude Sonnet 4.5"_s}}});
+	f.stub.setConfigWarnings(QJsonArray{u"bad mcp server entry"_s});
+	QSignalSpy toasts(f.workspace.get(), &Workspace::toastRequested);
+
+	f.workspace->commands()->run(u"reload"_s);
+	QTRY_COMPARE(f.stub.requests(u"reload_config"_s).size(), 1);
+	QCOMPARE(f.stub.requests(u"reload_config"_s).first().value(u"cwd"_s).toString(), u"/work"_s);
+	QTRY_COMPARE(f.workspace->config()->models().size(), 1);
+	QCOMPARE(f.stub.requests(u"get_config"_s).size(), getConfigsBefore);
+	QCOMPARE(toasts.count(), 2);
+	QCOMPARE(toasts.at(0).at(0).toString(), refgui::workspace::ToastLevel::Info);
+	QCOMPARE(toasts.at(1).at(0).toString(), refgui::workspace::ToastLevel::Warn);
+	QVERIFY(toasts.at(1).at(1).toString().contains(u"bad mcp server entry"_s));
+
+	// External ConfigChanged broadcast (from another client) refreshes BackendConfig via get_config.
+	toasts.clear();
+	f.stub.setModels(QJsonArray{QJsonObject{{u"id"_s, u"gpt-5"_s}, {u"provider"_s, u"openai"_s}, {u"provider_name"_s, u"OpenAI"_s}, {u"name"_s, u"GPT-5"_s}}});
+	f.stub.setConfigWarnings(QJsonArray{u"external warning"_s});
+	f.fake.send({{u"kind"_s, u"config_changed"_s}, {u"warnings"_s, QJsonArray{u"external warning"_s}}});
+	QTRY_COMPARE(f.stub.requests(u"get_config"_s).size(), getConfigsBefore + 1);
+	QTRY_COMPARE(f.workspace->config()->models().first().toMap().value(u"id"_s).toString(), u"gpt-5"_s);
+	QTRY_COMPARE(toasts.count(), 1);
+	QCOMPARE(toasts.at(0).at(0).toString(), refgui::workspace::ToastLevel::Warn);
+}
+
+void TestWorkspace::directArgumentsForModelsAgentsVariantsSessionsAndMultiClose()
+{
+	Fixture f(refgui::proto::ProtocolVersion, true, {}, [](StubServer& stub) {
+		stub.add(u"ses_c"_s, 3);
+		stub.addHistory(u"ses_hist"_s, 4);
+		stub.setModels(QJsonArray{QJsonObject{{u"id"_s, u"claude-sonnet-4"_s},
+		                                      {u"provider"_s, u"anthropic"_s},
+		                                      {u"provider_name"_s, u"Anthropic"_s},
+		                                      {u"name"_s, u"Claude Sonnet 4"_s},
+		                                      {u"variants"_s, QJsonArray{u"low"_s, u"high"_s}}}});
+	});
+	QTRY_COMPARE(f.workspace->config()->models().size(), 1);
+	QTRY_VERIFY(f.workspace->historyLoaded());
+	auto* commands = f.workspace->commands();
+	QSignalSpy toasts(f.workspace.get(), &Workspace::toastRequested);
+
+	// /model (singular alias, case-insensitive) with provider/model#variant, bare id, and unknown warnings.
+	QVERIFY(commands->runSlash(u"/MODEL anthropic/claude-sonnet-4#HIGH"_s));
+	QTRY_COMPARE(f.stub.requests(u"set_model"_s).size(), 1);
+	QCOMPARE(f.stub.requests(u"set_model"_s).last().value(u"model"_s).toObject().value(u"provider"_s).toString(), u"anthropic"_s);
+	QCOMPARE(f.stub.requests(u"set_model"_s).last().value(u"model"_s).toObject().value(u"model"_s).toString(), u"claude-sonnet-4"_s);
+	QCOMPARE(f.stub.requests(u"set_model"_s).last().value(u"model"_s).toObject().value(u"variant"_s).toString(), u"high"_s);
+
+	QVERIFY(commands->runSlash(u"/model claude-sonnet-4#nope"_s));
+	QCOMPARE(toasts.count(), 1);
+	QCOMPARE(toasts.last().at(0).toString(), refgui::workspace::ToastLevel::Warn);
+	QCOMPARE(f.stub.requests(u"set_model"_s).size(), 1);
+
+	QVERIFY(commands->runSlash(u"/models no-such-model"_s));
+	QCOMPARE(toasts.count(), 2);
+	QCOMPARE(toasts.last().at(0).toString(), refgui::workspace::ToastLevel::Warn);
+
+	// /variant <v> and /variant default.
+	QVERIFY(commands->runSlash(u"/variant low"_s));
+	QTRY_COMPARE(f.stub.requests(u"set_variant"_s).size(), 1);
+	QCOMPARE(f.stub.requests(u"set_variant"_s).last().value(u"variant"_s).toString(), u"low"_s);
+	QVERIFY(commands->runSlash(u"/variant DEFAULT"_s));
+	QTRY_COMPARE(f.stub.requests(u"set_variant"_s).size(), 2);
+	QVERIFY(f.stub.requests(u"set_variant"_s).last().contains(u"variant"_s));
+	QCOMPARE(f.stub.requests(u"set_variant"_s).last().value(u"variant"_s).toString(), QString());
+
+	// /agent (singular alias) and unknown agent warning.
+	QVERIFY(commands->runSlash(u"/agent PLAN"_s));
+	QTRY_COMPARE(f.stub.requests(u"set_agent"_s).size(), 1);
+	QCOMPARE(f.stub.requests(u"set_agent"_s).last().value(u"agent"_s).toString(), u"plan"_s);
+	toasts.clear();
+	QVERIFY(commands->runSlash(u"/agents ghost"_s));
+	QCOMPARE(toasts.count(), 1);
+	QCOMPARE(toasts.last().at(0).toString(), refgui::workspace::ToastLevel::Warn);
+
+	// /sessions <s> opens live or history session directly, warns on unknown.
+	QVERIFY(commands->runSlash(u"/sessions Title ses_hist"_s));
+	QTRY_COMPARE(f.workspace->currentId(), u"ses_hist"_s);
+	toasts.clear();
+	QVERIFY(commands->runSlash(u"/sessions missing_session"_s));
+	QCOMPARE(toasts.count(), 1);
+	QCOMPARE(toasts.last().at(0).toString(), refgui::workspace::ToastLevel::Warn);
+
+	// /close-session <s1> <s2> <missing> closes multiple live sessions and warns on unknown token.
+	toasts.clear();
+	QVERIFY(commands->runSlash(u"/close-session ses_b ses_c nope_ses"_s));
+	QTRY_COMPARE(f.stub.requests(u"close"_s).size(), 2);
+	QCOMPARE(toasts.count(), 1);
+	QVERIFY(toasts.last().at(1).toString().contains(u"nope_ses"_s));
 }
 
 QTEST_MAIN(TestWorkspace)

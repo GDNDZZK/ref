@@ -219,9 +219,42 @@ QCoro::Task<Result<void>> ServerClient::detach(QString sessionId)
 	co_return asVoidResult(co_await request(proto::request::detach(sessionId)));
 }
 
-QCoro::Task<Result<proto::ServerConfig>> ServerClient::getConfig()
+QCoro::Task<Result<proto::ServerConfig>> ServerClient::getConfig(std::optional<QString> cwd)
 {
-	co_return asResult(co_await request(proto::request::getConfig()), proto::parseConfigResult);
+	co_return asResult(co_await request(proto::request::getConfig(cwd)), proto::parseConfigResult);
+}
+
+QCoro::Task<Result<proto::ReloadConfigResult>> ServerClient::reloadConfig(std::optional<QString> cwd)
+{
+	co_return asResult(co_await request(proto::request::reloadConfig(cwd)), proto::parseReloadConfigResult);
+}
+
+QCoro::Task<Result<proto::ConfigFilesInfo>> ServerClient::getConfigFiles(std::optional<QString> file, std::optional<QString> cwd)
+{
+	co_return asResult(co_await request(proto::request::getConfigFiles(file, cwd)), proto::parseConfigFilesResult);
+}
+
+QCoro::Task<Result<proto::ConfigFilesInfo>> ServerClient::saveConfigFile(QString file, QString content, std::optional<QString> cwd)
+{
+	co_return asResult(co_await request(proto::request::saveConfigFile(file, content, cwd)), proto::parseConfigFilesResult);
+}
+
+QCoro::Task<Result<proto::ConfigFilesInfo>> ServerClient::createConfigFile(std::optional<QString> label,
+                                                                           bool cloneCurrent,
+                                                                           std::optional<QString> content,
+                                                                           std::optional<QString> cwd)
+{
+	co_return asResult(co_await request(proto::request::createConfigFile(label, cloneCurrent, content, cwd)), proto::parseConfigFilesResult);
+}
+
+QCoro::Task<Result<proto::ConfigFilesInfo>> ServerClient::selectConfigFile(QString file, std::optional<QString> cwd)
+{
+	co_return asResult(co_await request(proto::request::selectConfigFile(file, cwd)), proto::parseConfigFilesResult);
+}
+
+QCoro::Task<Result<proto::ConfigFilesInfo>> ServerClient::deleteConfigFile(QString file, std::optional<QString> cwd)
+{
+	co_return asResult(co_await request(proto::request::deleteConfigFile(file, cwd)), proto::parseConfigFilesResult);
 }
 
 QCoro::Task<Result<QList<proto::SessionInfo>>> ServerClient::listSessions()
@@ -349,9 +382,14 @@ QCoro::Task<Result<QList<proto::McpServerStatus>>> ServerClient::mcpStatus(std::
 	co_return asResult(co_await request(proto::request::mcpStatus(cwd)), proto::parseMcpResult);
 }
 
-QCoro::Task<Result<proto::DirListing>> ServerClient::listDirs(QString path)
+QCoro::Task<Result<proto::DirListing>> ServerClient::listDirs(QString path, std::optional<QString> cwd, bool includeFiles)
 {
-	co_return asResult(co_await request(proto::request::listDirs(path)), proto::parseDirsResult);
+	co_return asResult(co_await request(proto::request::listDirs(path, cwd, includeFiles)), proto::parseDirsResult);
+}
+
+QCoro::Task<Result<QStringList>> ServerClient::listBinaries(QString query, std::optional<int> limit)
+{
+	co_return asResult(co_await request(proto::request::listBinaries(query, limit)), proto::parseBinariesResult);
 }
 
 QCoro::Task<Result<proto::MessagesPage>> ServerClient::messages(QString sessionId, QString before, int limit)

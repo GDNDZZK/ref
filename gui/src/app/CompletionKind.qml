@@ -6,4 +6,7 @@ QtObject {
 	readonly property string none: "none"
 	readonly property string file: "file"
 	readonly property string command: "command"
+	readonly property string argument: "argument"
+	readonly property string shellCommand: "shellCommand"
+	readonly property string shellPath: "shellPath"
 }

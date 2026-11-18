@@ -43,16 +43,22 @@ public:
 	bool browsing() const { return m_position.has_value(); }
 
 	// The older entry, or nullopt when there is none (empty history, or at the oldest).
-	std::optional<QString> previous(const QString& current);
+	// When `shellOnly` is true on the first step, only `!`-prefixed entries are visited.
+	std::optional<QString> previous(const QString& current, bool shellOnly = false);
 	// The newer entry, the saved text after the newest, or nullopt when not browsing.
 	std::optional<QString> next();
 	// Typing or sending ends the browsing.
-	void reset() { m_position.reset(); }
+	void reset()
+	{
+		m_position.reset();
+		m_shellOnly = false;
+	}
 
 private:
 	const PromptHistory& m_history;
 	std::optional<qsizetype> m_position;
 	QString m_draft;
+	bool m_shellOnly = false;
 };
 
 } // namespace refgui::compose

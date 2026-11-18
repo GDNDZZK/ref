@@ -92,6 +92,11 @@ public:
 	// unavailable commands, for the `/` list.
 	Q_INVOKABLE QVariantList matching(const QString& query, bool slashOnly) const;
 
+	// True when `line` (trimmed) is a single `/name` token (`^/[A-Za-z][A-Za-z0-9_-]*$`).
+	static bool isSingleSlashToken(const QString& line);
+	// Closest slash or alias name for a mistyped `name` (without leading `/`), or empty.
+	Q_INVOKABLE QString suggestSlash(const QString& name) const;
+	static QString suggestSlashFrom(const QString& name, const QList<proto::CommandInfo>& customCommands = {});
 	// Tells the views the titles changed (after the language did).
 	void retranslate();
 

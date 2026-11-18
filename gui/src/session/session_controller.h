@@ -99,6 +99,10 @@ public:
 	QCoro::Task<Result<void>> runShell(QString command);
 	// The files and directories under the session's directory that match `query`, at most `limit`.
 	QCoro::Task<Result<QStringList>> listFiles(QString query, int limit);
+	// The subdirectories (and optionally files) of `path` relative to the session's directory.
+	QCoro::Task<Result<proto::DirListing>> listDirs(QString path, bool includeFiles = false);
+	// Executables and shell builtins matching `query`, at most `limit`.
+	QCoro::Task<Result<QStringList>> listBinaries(QString query, int limit);
 	// The prompt text of the user-defined command `name` with `args`, for the session's directory.
 	QCoro::Task<Result<QString>> expandCommand(QString name, QString args);
 	// The bytes of an image the backend holds for the session.

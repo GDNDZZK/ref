@@ -3,6 +3,7 @@
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QList>
+#include <QMap>
 #include <QPair>
 #include <QString>
 #include <QStringList>
@@ -16,7 +17,7 @@ namespace refgui::proto
 {
 
 // Sent in Hello; the backend answers with its own version.
-constexpr int ProtocolVersion = 4;
+constexpr int ProtocolVersion = 5;
 
 // Written by ref-server to `<state dir>/instances/<pid>.json`.
 struct InstanceInfo
@@ -342,13 +343,48 @@ struct ServerConfig
 	QList<ModelInfo> models;
 	QList<CommandInfo> commands;
 	QList<QPair<QString, QString>> mcp{}; // name and status text
+	QJsonValue tui{};
+	QStringList warnings{};
 };
 
-// The sub-directories of `path` (an absolute, normalized path).
+struct ConfigFileEntry
+{
+	QString file;
+	bool active = false;
+	bool exists = false;
+	std::optional<QString> label{};
+	QString summary;
+	qint64 modifiedAt = 0;
+	quint64 size = 0;
+};
+
+struct ConfigFilesInfo
+{
+	QString configDir;
+	QList<ConfigFileEntry> files;
+	QString selectedFile;
+	QString rawText;
+	QJsonValue parsed;
+	std::optional<QString> parseError{};
+	QMap<QString, bool> envStatus{};
+	bool hasJsoncOverride = false;
+	std::optional<QString> envConfigOverride{};
+	QStringList projectOverrides{};
+	QStringList warnings{};
+};
+
+struct ReloadConfigResult
+{
+	ServerConfig config;
+	QStringList warnings{};
+};
+
+// The sub-directories (and optionally files) of `path` (an absolute, normalized path).
 struct DirListing
 {
 	QString path;
 	QStringList dirs;
+	QStringList files{};
 };
 
 // ---- Session events -----------------------------------------------------------------
@@ -471,7 +507,12 @@ struct NotifyFrame
 	std::optional<QString> detail{};
 };
 
-using ServerFrame = std::variant<ResponseFrame, EventFrame, SessionsFrame, ToastFrame, NotifyFrame>;
+struct ConfigChangedFrame
+{
+	QStringList warnings{};
+};
+
+using ServerFrame = std::variant<ResponseFrame, EventFrame, SessionsFrame, ToastFrame, NotifyFrame, ConfigChangedFrame>;
 
 // ---- Results of requests --------------------------------------------------------------
 

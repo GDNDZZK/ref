@@ -88,9 +88,52 @@ ServerConfig readServerConfig(const Fields& fields)
 	        .defaultAgent = fields.string("default_agent"_L1),
 	        .models = fields.list<ModelInfo>("models"_L1, readModelInfo),
 	        .commands = fields.listOrEmpty<CommandInfo>("commands"_L1, readCommand),
-	        .mcp = readMcpLines(fields)};
+	        .mcp = readMcpLines(fields),
+	        .tui = fields.value("tui"_L1),
+	        .warnings = readStrings(fields, "warnings"_L1)};
 }
 
+ConfigFileEntry readConfigFileEntry(const Fields& fields)
+{
+	return {.file = fields.string("file"_L1),
+	        .active = fields.boolean("active"_L1),
+	        .exists = fields.boolean("exists"_L1),
+	        .label = fields.optionalString("label"_L1),
+	        .summary = fields.string("summary"_L1),
+	        .modifiedAt = fields.integer("modified_at"_L1),
+	        .size = fields.unsignedInteger("size"_L1)};
+}
+
+QMap<QString, bool> readEnvStatus(const Fields& fields)
+{
+	QMap<QString, bool> status;
+	const QJsonObject obj = fields.object("env_status"_L1);
+	const QString basePath = fields.childPath("env_status"_L1);
+	for(auto it = obj.begin(); it != obj.end(); ++it)
+	{
+		if(!it.value().isBool())
+		{
+			fail(basePath + u'.' + it.key(), u"expected a boolean"_s);
+		}
+		status.insert(it.key(), it.value().toBool());
+	}
+	return status;
+}
+
+ConfigFilesInfo readConfigFilesInfo(const Fields& fields)
+{
+	return {.configDir = fields.string("config_dir"_L1),
+	        .files = fields.list<ConfigFileEntry>("files"_L1, readConfigFileEntry),
+	        .selectedFile = fields.string("selected_file"_L1),
+	        .rawText = fields.string("raw_text"_L1),
+	        .parsed = fields.value("parsed"_L1),
+	        .parseError = fields.optionalString("parse_error"_L1),
+	        .envStatus = readEnvStatus(fields),
+	        .hasJsoncOverride = fields.boolean("has_jsonc_override"_L1),
+	        .envConfigOverride = fields.optionalString("env_config_override"_L1),
+	        .projectOverrides = readStrings(fields, "project_overrides"_L1),
+	        .warnings = readStrings(fields, "warnings"_L1)};
+}
 } // namespace
 } // namespace json
 
@@ -102,6 +145,20 @@ Parsed<ServerConfig> parseConfigResult(const QJsonObject& result)
 	});
 }
 
+Parsed<ReloadConfigResult> parseReloadConfigResult(const QJsonObject& result)
+{
+	return json::guarded([&] {
+		const json::Fields fields = json::resultFields(result);
+		return ReloadConfigResult{.config = json::readServerConfig(fields.child("config"_L1)),
+		                          .warnings = json::readStrings(fields, "warnings"_L1)};
+	});
+}
+
+Parsed<ConfigFilesInfo> parseConfigFilesResult(const QJsonObject& result)
+{
+	return json::guarded([&] { return json::readConfigFilesInfo(json::resultFields(result)); });
+}
+
 Parsed<QList<McpServerStatus>> parseMcpResult(const QJsonObject& result)
 {
 	return json::guarded([&] { return json::resultFields(result).list<McpServerStatus>("servers"_L1, json::readMcpServer); });
@@ -111,7 +168,27 @@ Parsed<DirListing> parseDirsResult(const QJsonObject& result)
 {
 	return json::guarded([&] {
 		const json::Fields fields = json::resultFields(result);
-		return DirListing{.path = fields.string("path"_L1), .dirs = json::readStrings(fields, "dirs"_L1)};
+		return DirListing{.path = fields.string("path"_L1),
+		                  .dirs = json::readStrings(fields, "dirs"_L1),
+		                  .files = json::readStrings(fields, "files"_L1)};
+	});
+}
+
+Parsed<QStringList> parseBinariesResult(const QJsonObject& result)
+{
+	return json::guarded([&] {
+		const json::Fields fields = json::resultFields(result);
+		QStringList binaries;
+		const QJsonArray array = fields.array("binaries"_L1);
+		for(qsizetype i = 0; i < array.size(); ++i)
+		{
+			if(!array.at(i).isString())
+			{
+				json::fail(fields.childPath("binaries"_L1) + u"[%1]"_s.arg(i), u"expected a string"_s);
+			}
+			binaries.append(array.at(i).toString());
+		}
+		return binaries;
 	});
 }
 

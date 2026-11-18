@@ -154,9 +154,14 @@ Window {
 			required property var model
 
 			sequence: model.shortcut
-			enabled: model.shortcut !== "" && model.enabled
+			enabled: model.shortcut !== "" && model.enabled && (Workspace.dialog === "" || (Workspace.dialog === DialogId.palette && model.commandId === CommandId.palette))
 			autoRepeat: false
-			onActivated: Commands.run(model.commandId)
+			onActivated: {
+				if (Workspace.dialog === DialogId.palette && model.commandId === CommandId.palette)
+					Workspace.closeDialog()
+				else
+					Commands.run(model.commandId)
+			}
 		}
 	}
 

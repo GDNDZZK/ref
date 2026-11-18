@@ -2,9 +2,8 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import RefGui
 
-// The list over the input box for the `/` command or the `@` file under the cursor. The text
+// The list over the input box for `/`, `@`, and `!` completions under the cursor. The text
 // area keeps the focus and drives it: it moves the selection and asks for the current entry.
-// `entries` holds command maps (kind "command") or the model of files (kind "file").
 Rectangle {
 	id: popup
 
@@ -18,9 +17,13 @@ Rectangle {
 
 	property string kind: CompletionKind.none
 	property var entries: []
+	property var fileModel: null
+	property var itemModel: null
 	readonly property int count: view.count
 	readonly property bool open: kind !== CompletionKind.none && count > 0
 	property alias currentIndex: view.currentIndex
+	// True once the user navigated or pointed at an entry in the current list.
+	property bool explicitlySelected: false
 
 	property bool animateHighlight: false
 
@@ -28,6 +31,7 @@ Rectangle {
 
 	function resetSelection() {
 		animateHighlight = false
+		explicitlySelected = false
 		hoverGuard.reset()
 		view.currentIndex = 0
 		view.positionViewAtBeginning()
@@ -36,6 +40,7 @@ Rectangle {
 	function move(delta) {
 		if (count > 0) {
 			animateHighlight = true
+			explicitlySelected = true
 			view.currentIndex = (view.currentIndex + delta + count) % count
 		}
 	}
@@ -46,6 +51,25 @@ Rectangle {
 		if (!isCommandIndex)
 			return null
 		return entries[index]
+	}
+
+	function syncView() {
+		if (kind === CompletionKind.none) {
+			view.model = null
+			resetSelection()
+			return
+		}
+		const wantedDelegate = kind === CompletionKind.file ? fileRow
+			: (kind === CompletionKind.command ? commandRow : entryRow)
+		const wantedModel = kind === CompletionKind.file ? fileModel
+			: (kind === CompletionKind.command ? entries : itemModel)
+		if (view.delegate !== wantedDelegate) {
+			view.model = null
+			view.delegate = wantedDelegate
+		}
+		if (view.model !== wantedModel)
+			view.model = wantedModel
+		resetSelection()
 	}
 
 	readonly property real shownHeight: Math.min(count, popupMaxRows) * popupRowHeight + 2 * popupPadding
@@ -69,24 +93,26 @@ Rectangle {
 		Behavior on y { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 	}
 
-	// A new result list starts at its best entry.
-	onEntriesChanged: resetSelection()
-	onKindChanged: resetSelection()
-	onOpenChanged: if (!open) hoverGuard.reset()
+	// A new result list starts at its best entry; delegate and model switch atomically.
+	onEntriesChanged: if (kind === CompletionKind.command) syncView()
+	onFileModelChanged: if (kind === CompletionKind.file) syncView()
+	onItemModelChanged: if (kind !== CompletionKind.none && kind !== CompletionKind.command && kind !== CompletionKind.file) syncView()
+	onKindChanged: syncView()
+	Component.onCompleted: syncView()
+	onOpenChanged: if (!open) { hoverGuard.reset(); explicitlySelected = false }
 	PointerMoveGuard { id: hoverGuard }
 	Connections {
-		target: popup.kind === CompletionKind.file ? popup.entries : null
+		target: popup.kind === CompletionKind.file ? popup.fileModel
+			: (popup.kind !== CompletionKind.none && popup.kind !== CompletionKind.command ? popup.itemModel : null)
 		function onModelReset() { popup.resetSelection() }
 	}
 	ListView {
 		id: view
 		anchors { fill: parent; margins: popup.popupPadding }
-		model: popup.entries
 		currentIndex: 0
 		clip: true
 		highlightFollowsCurrentItem: false
 		boundsBehavior: Flickable.StopAtBounds
-		delegate: popup.kind === CompletionKind.file ? fileRow : commandRow
 
 		highlight: Rectangle {
 			y: view.currentItem ? view.currentItem.y : 0
@@ -110,6 +136,7 @@ Rectangle {
 				const index = view.indexAt(point.position.x + view.contentX, point.position.y + view.contentY)
 				if (index >= 0) {
 					popup.animateHighlight = true
+					popup.explicitlySelected = true
 					view.currentIndex = index
 				}
 			}
@@ -172,7 +199,12 @@ Rectangle {
 			}
 
 			HoverHandler { cursorShape: Qt.PointingHandCursor }
-			TapHandler { onTapped: popup.accepted(row.index) }
+			TapHandler {
+				onTapped: {
+					popup.explicitlySelected = true
+					popup.accepted(row.index)
+				}
+			}
 		}
 	}
 
@@ -227,7 +259,97 @@ Rectangle {
 			}
 
 			HoverHandler { cursorShape: Qt.PointingHandCursor }
-			TapHandler { onTapped: popup.accepted(row.index) }
+			TapHandler {
+				onTapped: {
+					popup.explicitlySelected = true
+					popup.accepted(row.index)
+				}
+			}
+		}
+	}
+
+	Component {
+		id: entryRow
+
+		Item {
+			id: row
+
+			required property int index
+			required property string value
+			required property string label
+			required property string prefixLabel
+			required property string detail
+			required property string icon
+			required property bool isDirectory
+			required property bool mono
+
+			width: ListView.view.width
+			height: popup.popupRowHeight
+
+			Icon {
+				id: entryIcon
+				x: popup.rowPaddingX
+				y: (parent.height - height) / 2
+				name: row.icon !== "" ? row.icon : (row.isDirectory ? "folder" : "slash")
+				size: popup.iconSize
+				color: Theme.textMuted
+			}
+
+			Row {
+				id: labelRow
+				anchors { left: entryIcon.right; leftMargin: popup.rowSpacing; verticalCenter: parent.verticalCenter }
+				readonly property real maxLabelRowWidth: Math.max(80, row.width - x - popup.rowPaddingX - (detailLabel.visible ? Math.min(detailLabel.implicitWidth, Math.floor(row.width * 0.42)) + popup.rowSpacing : 0))
+				width: Math.min(prefixText.implicitWidth + mainLabel.implicitWidth, maxLabelRowWidth)
+
+				Text {
+					id: prefixText
+					textFormat: Text.PlainText
+					width: Math.min(implicitWidth, Math.max(0, labelRow.maxLabelRowWidth - mainLabel.implicitWidth))
+					text: row.prefixLabel
+					color: Theme.textMuted
+					font.family: row.mono ? Theme.monoFamily : undefined
+					font.pixelSize: row.mono ? Theme.codeFontSize : Theme.fontSize
+					elide: Text.ElideLeft
+					visible: row.prefixLabel !== ""
+				}
+
+				Text {
+					id: mainLabel
+					textFormat: Text.PlainText
+					width: Math.min(implicitWidth, labelRow.maxLabelRowWidth)
+					text: row.label + (row.isDirectory ? "/" : "")
+					color: Theme.text
+					font.family: row.mono ? Theme.monoFamily : undefined
+					font.pixelSize: row.mono ? Theme.codeFontSize : Theme.fontSize
+					elide: Text.ElideRight
+				}
+			}
+
+			Text {
+				id: detailLabel
+				textFormat: Text.PlainText
+				anchors {
+					left: labelRow.right
+					leftMargin: popup.rowSpacing
+					right: parent.right
+					rightMargin: popup.rowPaddingX
+					verticalCenter: parent.verticalCenter
+				}
+				horizontalAlignment: Text.AlignRight
+				text: row.detail
+				color: Theme.textMuted
+				font.pixelSize: Theme.smallFontSize
+				elide: Text.ElideRight
+				visible: row.detail !== ""
+			}
+
+			HoverHandler { cursorShape: Qt.PointingHandCursor }
+			TapHandler {
+				onTapped: {
+					popup.explicitlySelected = true
+					popup.accepted(row.index)
+				}
+			}
 		}
 	}
 }

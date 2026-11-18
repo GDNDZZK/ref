@@ -79,6 +79,42 @@ ModalDialog {
 			settings: Workspace.settings
 		}
 
+		Rectangle { x: Theme.dialogPadding; width: parent.width - 2 * Theme.dialogPadding; height: 1; color: Theme.border }
+
+		SectionLabel { text: qsTr("Configuration") }
+
+		Item {
+			width: parent.width
+			height: dialog.rowHeight
+
+			Text {
+				textFormat: Text.PlainText
+				anchors { left: parent.left; leftMargin: Theme.dialogPadding; right: configButtons.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+				text: "ref.json"
+				color: Theme.text
+				font { family: Theme.monoFamily; pixelSize: Theme.secondaryFontSize }
+				elide: Text.ElideRight
+			}
+			Row {
+				id: configButtons
+				anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
+				spacing: 8
+
+				DialogButton {
+					small: true
+					text: qsTr("Reload configuration")
+					enabled: Workspace.connectionState === "connected"
+					onClicked: Commands.run(CommandId.reload)
+				}
+				DialogButton {
+					small: true
+					kind: DialogButton.Primary
+					text: qsTr("Edit ref.json…")
+					enabled: Workspace.connectionState === "connected"
+					onClicked: Commands.run(CommandId.config)
+				}
+			}
+		}
 		TextEdit {
 			textFormat: TextEdit.PlainText
 			x: Theme.dialogPadding

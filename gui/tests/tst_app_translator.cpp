@@ -69,6 +69,13 @@ private slots:
 		QCOMPARE(grepChip(1, 1), u"1 个文件中有 1 处匹配"_s);
 		QCOMPARE(grepChip(5, 2), u"2 个文件中有 5 处匹配"_s);
 		QCOMPARE(moreLines(3), u"再显示 3 行"_s);
+		QCOMPARE(QCoreApplication::translate("ConfigDialog", "Providers & Models"), u"提供商与模型"_s);
+		QCOMPARE(QCoreApplication::translate("Commands", "Reload configuration"), u"重新加载配置"_s);
+		QCOMPARE(QCoreApplication::translate("refgui::composer::ComposerModel", "Unknown command /%1 — did you mean /%2?")
+		             .arg(u"modl"_s, u"models"_s),
+		         u"未知命令 /modl — 你是指 /models 吗？"_s);
+		QCOMPARE(QCoreApplication::translate("Workspace", "Unknown model \"%1\".").arg(u"foo"_s), u"未知模型“foo”。"_s);
+		QCOMPARE(QCoreApplication::translate("refgui::workspace::ConfigEditorController", "Saved %1").arg(u"ref.json"_s), u"已保存 ref.json"_s);
 	}
 
 	void changingTheLanguageTakesEffectAtOnce()

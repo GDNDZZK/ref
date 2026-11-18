@@ -19,6 +19,9 @@ SessionDialog {
 		id: list
 		width: parent.width
 		placeholderText: qsTr("Search agents")
+		emptyText: Workspace.config.agents.length === 0 ? qsTr("No agents configured") : qsTr("Nothing found")
+		emptyActionText: Workspace.config.agents.length === 0 ? qsTr("Open configuration…") : ""
+		onEmptyActionTriggered: Workspace.openDialog(DialogId.config)
 		initialIndex: dialog.shown.findIndex(agent => agent.name === dialog.session.agent)
 		model: dialog.shown
 		delegate: PickRow {
