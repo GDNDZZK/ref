@@ -570,7 +570,12 @@ pub(crate) async fn prepare(
         })
         .await
         .map_err(|e| format!("building the system prompt failed: {e}"))?;
-        s.lock().system = Some(parts.clone());
+        {
+            let mut st = s.lock();
+            if Arc::ptr_eq(&st.cfg, &cfg) && st.info.agent == agent {
+                st.system = Some(parts.clone());
+            }
+        }
         parts
     };
     let (provider, model) = crate::models::resolve(&cfg, &model_ref, &agent)?;

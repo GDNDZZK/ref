@@ -66,9 +66,16 @@ const BINARIES_DEFAULT_LIMIT: usize = 50;
 const BINARIES_MAX_LIMIT: usize = 200;
 const BINARIES_CACHE_TTL: Duration = Duration::from_secs(30);
 
+const DEFAULT_PATHEXT: &str = ".COM;.EXE;.BAT;.CMD";
+
 const SHELL_BUILTINS: &[&str] = &[
     "alias", "bg", "cd", "echo", "exit", "export", "false", "fg", "jobs", "kill", "pwd", "source",
     "test", "true", "type", "unset", "wait", "which",
+];
+
+const MOCK_DEV_BINARIES: &[&str] = &[
+    "awk", "cargo", "cat", "curl", "find", "git", "grep", "ls", "node", "pnpm", "printf",
+    "python3", "rg", "seq", "sleep",
 ];
 /// Timeout of a `Shell` request (the `bash` tool takes seconds).
 const SHELL_TIMEOUT_SECS: u64 = 600;
@@ -523,10 +530,13 @@ fn set_agent(hub: &Arc<Hub>, session_id: String, agent: String) -> Reply {
     let Some(a) = st.cfg.agents.get(&agent) else {
         return Err(format!("Unknown agent: {agent}").into());
     };
-    if a.model.is_some()
-        && let Some(m) = st.cfg.default_model_for(&agent)
-    {
+    let mut model_changed = false;
+    let mut explicit_changed = false;
+    if a.model.is_some() || !st.model_explicit {
+        let m = st.cfg.default_model_for(&agent).unwrap_or_default();
         st.info.context = crate::models::context_keeping_used(&st.cfg, &m, st.info.context.used);
+        model_changed = st.info.model != m;
+        explicit_changed = st.model_explicit;
         st.info.model = m;
         st.model_explicit = false;
     }
@@ -535,34 +545,40 @@ fn set_agent(hub: &Arc<Hub>, session_id: String, agent: String) -> Reply {
     if changed {
         st.info.agent = agent;
         st.system = None;
-    }
-    if changed {
         crate::agent_switch::switched(hub, &mut st, &old);
     }
     hub.emit_info(&st);
+    let info = st.info.clone();
     drop(st);
-    if changed {
+    if changed || model_changed || explicit_changed {
         crate::ops::persist(hub, &s);
     }
-    Ok(json!({ "session": s.info() }))
+    Ok(json!({ "session": info }))
 }
 
 /// Sets or cycles the model variant of a live session.
 fn set_variant(hub: &Arc<Hub>, session_id: String, variant: Option<String>) -> Reply {
     let s = live(hub, &session_id)?;
-    let mut st = s.lock();
-    let list = crate::models::variants(&st.cfg, &st.info.model);
-    let next = match variant {
-        Some(v) if v.is_empty() => None,
-        Some(v) if list.contains(&v) => Some(v),
-        Some(v) => {
-            return Err(format!("Model {} has no variant {v}.", st.info.model.key()).into());
-        }
-        None => crate::models::next_variant(&list, st.info.model.variant.as_deref()),
+    let (info, changed) = {
+        let mut st = s.lock();
+        let list = crate::models::variants(&st.cfg, &st.info.model);
+        let next = match variant {
+            Some(v) if v.is_empty() => None,
+            Some(v) if list.contains(&v) => Some(v),
+            Some(v) => {
+                return Err(format!("Model {} has no variant {v}.", st.info.model.key()).into());
+            }
+            None => crate::models::next_variant(&list, st.info.model.variant.as_deref()),
+        };
+        let changed = st.info.model.variant != next;
+        st.info.model.variant = next;
+        hub.emit_info(&st);
+        (st.info.clone(), changed)
     };
-    st.info.model.variant = next;
-    hub.emit_info(&st);
-    Ok(json!({ "session": st.info.clone() }))
+    if changed {
+        crate::ops::persist(hub, &s);
+    }
+    Ok(json!({ "session": info }))
 }
 
 /// Drops the conversation from a message on and returns the prompt to edit again.
@@ -652,10 +668,11 @@ async fn set_cwd(hub: &Arc<Hub>, s: &Arc<Session>, path: &str) -> Result<(), Api
             return Err(BUSY_CWD.into());
         }
         st.info.cwd = new.clone();
-        st.cfg = Arc::new(cfg);
-        st.system = None;
+        let (info_changed, _) = crate::ops::apply_reloaded_config(hub, &mut st, cfg);
         hub.mcp.start_servers(&st.cfg);
-        hub.emit_info(&st);
+        if !info_changed {
+            hub.emit_info(&st);
+        }
     }
     let text = format!(
         "{REMINDER_PREFIX} The user changed the working directory from {old} to {new}. Relative paths and commands now resolve against {new}."
@@ -731,26 +748,49 @@ fn dir_entries(
     (dirs, files)
 }
 
+fn mock_binaries() -> Vec<String> {
+    let set: std::collections::BTreeSet<String> = SHELL_BUILTINS
+        .iter()
+        .chain(MOCK_DEV_BINARIES.iter())
+        .map(|s| (*s).to_string())
+        .collect();
+    let mut list: Vec<String> = set.into_iter().collect();
+    list.sort_by_key(|b| (b.to_lowercase(), b.clone()));
+    list
+}
+
 async fn list_binaries(hub: &Arc<Hub>, query: &str, limit: Option<usize>) -> Reply {
     let limit = limit
         .unwrap_or(BINARIES_DEFAULT_LIMIT)
         .clamp(1, BINARIES_MAX_LIMIT);
+    if hub.opts.sandbox_cwd.is_some() {
+        let matched = filter_binaries(&mock_binaries(), query, limit);
+        return Ok(json!({ "binaries": matched }));
+    }
     let path_os = std::env::var_os("PATH").unwrap_or_default();
+    let pathext_os = if cfg!(windows) {
+        std::env::var_os("PATHEXT")
+    } else {
+        None
+    };
+    let cache_key = (path_os, pathext_os);
     let cached = {
         let guard = lock(&hub.binaries_cache);
-        guard.as_ref().and_then(|(cached_path, at, list)| {
-            (cached_path == &path_os && at.elapsed() < BINARIES_CACHE_TTL).then(|| list.clone())
+        guard.as_ref().and_then(|(cached_key, at, list)| {
+            (cached_key == &cache_key && at.elapsed() < BINARIES_CACHE_TTL).then(|| list.clone())
         })
     };
     let binaries = match cached {
         Some(list) => list,
         None => {
-            let path_for_scan = path_os.clone();
-            let scanned = tokio::task::spawn_blocking(move || collect_binaries(&path_for_scan))
-                .await
-                .map_err(|e| e.to_string())?;
+            let (path_for_scan, pathext_for_scan) = cache_key.clone();
+            let scanned = tokio::task::spawn_blocking(move || {
+                collect_binaries(&path_for_scan, pathext_for_scan.as_deref())
+            })
+            .await
+            .map_err(|e| e.to_string())?;
             let list = Arc::new(scanned);
-            *lock(&hub.binaries_cache) = Some((path_os, Instant::now(), list.clone()));
+            *lock(&hub.binaries_cache) = Some((cache_key, Instant::now(), list.clone()));
             list
         }
     };
@@ -761,7 +801,39 @@ async fn list_binaries(hub: &Arc<Hub>, query: &str, limit: Option<usize>) -> Rep
     Ok(json!({ "binaries": matched }))
 }
 
-fn is_executable(path: &Path) -> bool {
+fn parse_pathext(pathext: Option<&std::ffi::OsStr>) -> Vec<String> {
+    let raw = pathext
+        .filter(|v| !v.is_empty())
+        .map(|v| v.to_string_lossy().into_owned())
+        .unwrap_or_else(|| DEFAULT_PATHEXT.to_string());
+    let parsed: Vec<String> = raw
+        .split(';')
+        .map(str::trim)
+        .map(|ext| ext.strip_prefix('.').unwrap_or(ext))
+        .filter(|ext| !ext.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect();
+    if parsed.is_empty() {
+        parse_pathext(None)
+    } else {
+        parsed
+    }
+}
+
+fn windows_binary_stem(file_name: &str, pathext: &[String]) -> Option<String> {
+    let path = Path::new(file_name);
+    let ext = path.extension()?.to_str()?;
+    if !pathext
+        .iter()
+        .any(|allowed| allowed.eq_ignore_ascii_case(ext))
+    {
+        return None;
+    }
+    let stem = path.file_stem()?.to_str()?;
+    (!stem.is_empty()).then(|| stem.to_string())
+}
+
+fn is_unix_executable(path: &Path) -> bool {
     let Ok(meta) = path.metadata() else {
         return false;
     };
@@ -773,45 +845,74 @@ fn is_executable(path: &Path) -> bool {
         use std::os::unix::fs::PermissionsExt;
         meta.permissions().mode() & 0o111 != 0
     }
-    #[cfg(windows)]
-    {
-        path.extension()
-            .and_then(|e| e.to_str())
-            .is_some_and(|ext| {
-                matches!(
-                    ext.to_ascii_lowercase().as_str(),
-                    "exe" | "cmd" | "bat" | "com"
-                )
-            })
-    }
-    #[cfg(not(any(unix, windows)))]
+    #[cfg(not(unix))]
     {
         true
     }
 }
 
-fn collect_binaries(path_env: &std::ffi::OsStr) -> Vec<String> {
-    let mut set: std::collections::BTreeSet<String> =
-        SHELL_BUILTINS.iter().map(|s| (*s).to_string()).collect();
-    for dir in std::env::split_paths(path_env) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
+fn collect_dir_binaries(dir: &Path, pathext: &[String], windows_mode: bool) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(file_name) = entry.file_name().into_string() else {
             continue;
         };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !is_executable(&path) {
-                continue;
-            }
-            if let Ok(name) = entry.file_name().into_string()
-                && !name.is_empty()
+        if file_name.is_empty() {
+            continue;
+        }
+        if windows_mode {
+            if path.metadata().is_ok_and(|m| m.is_file())
+                && let Some(stem) = windows_binary_stem(&file_name, pathext)
             {
-                set.insert(name);
+                names.push(stem);
             }
+        } else if is_unix_executable(&path) {
+            names.push(file_name);
         }
     }
-    let mut list: Vec<String> = set.into_iter().collect();
+    names.sort_by_key(|b| (b.to_lowercase(), b.clone()));
+    names
+}
+
+fn collect_binaries_for_platform(
+    path_env: &std::ffi::OsStr,
+    pathext: Option<&std::ffi::OsStr>,
+    windows_mode: bool,
+) -> Vec<String> {
+    let exts = if windows_mode {
+        parse_pathext(pathext)
+    } else {
+        Vec::new()
+    };
+    let mut list: Vec<String> = if windows_mode {
+        let mut seen: std::collections::BTreeMap<String, String> = SHELL_BUILTINS
+            .iter()
+            .map(|s| (s.to_lowercase(), (*s).to_string()))
+            .collect();
+        for dir in std::env::split_paths(path_env) {
+            for stem in collect_dir_binaries(&dir, &exts, true) {
+                seen.entry(stem.to_lowercase()).or_insert(stem);
+            }
+        }
+        seen.into_values().collect()
+    } else {
+        let mut set: std::collections::BTreeSet<String> =
+            SHELL_BUILTINS.iter().map(|s| (*s).to_string()).collect();
+        for dir in std::env::split_paths(path_env) {
+            set.extend(collect_dir_binaries(&dir, &exts, false));
+        }
+        set.into_iter().collect()
+    };
     list.sort_by_key(|b| (b.to_lowercase(), b.clone()));
     list
+}
+
+fn collect_binaries(path_env: &std::ffi::OsStr, pathext: Option<&std::ffi::OsStr>) -> Vec<String> {
+    collect_binaries_for_platform(path_env, pathext, cfg!(windows))
 }
 
 fn filter_binaries(all: &[String], query: &str, limit: usize) -> Vec<String> {
@@ -1280,20 +1381,26 @@ mod tests {
     fn binary_completions_include_builtins_and_rank_prefix_before_substring() {
         let dir = std::env::temp_dir().join(format!("ref-bin-{}", crate::util::random_hex(8)));
         std::fs::create_dir_all(&dir).unwrap();
-        let exe_1 = dir.join("git-custom");
-        let exe_2 = dir.join("my-git-helper");
-        let non_exe = dir.join("git-not-executable");
-        std::fs::write(&exe_1, "#!/bin/sh\n").unwrap();
-        std::fs::write(&exe_2, "#!/bin/sh\n").unwrap();
-        std::fs::write(&non_exe, "plain text").unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
+            let exe_1 = dir.join("git-custom");
+            let exe_2 = dir.join("my-git-helper");
+            let non_exe = dir.join("git-not-executable");
+            std::fs::write(&exe_1, "#!/bin/sh\n").unwrap();
+            std::fs::write(&exe_2, "#!/bin/sh\n").unwrap();
+            std::fs::write(&non_exe, "plain text").unwrap();
             std::fs::set_permissions(&exe_1, std::fs::Permissions::from_mode(0o755)).unwrap();
             std::fs::set_permissions(&exe_2, std::fs::Permissions::from_mode(0o755)).unwrap();
             std::fs::set_permissions(&non_exe, std::fs::Permissions::from_mode(0o644)).unwrap();
         }
-        let all = collect_binaries(dir.as_os_str());
+        #[cfg(windows)]
+        {
+            std::fs::write(dir.join("git-custom.exe"), "").unwrap();
+            std::fs::write(dir.join("my-git-helper.cmd"), "").unwrap();
+            std::fs::write(dir.join("git-not-executable.txt"), "plain text").unwrap();
+        }
+        let all = collect_binaries(dir.as_os_str(), None);
         std::fs::remove_dir_all(&dir).unwrap();
         for builtin in SHELL_BUILTINS {
             assert!(
@@ -1301,14 +1408,77 @@ mod tests {
                 "missing builtin {builtin}"
             );
         }
-        #[cfg(unix)]
-        {
-            assert!(all.contains(&"git-custom".to_string()));
-            assert!(all.contains(&"my-git-helper".to_string()));
-            assert!(!all.contains(&"git-not-executable".to_string()));
-            let git_matches = filter_binaries(&all, "git", 50);
-            assert_eq!(git_matches, vec!["git-custom", "my-git-helper"]);
-            assert_eq!(filter_binaries(&all, "git", 1), vec!["git-custom"]);
-        }
+        assert!(all.contains(&"git-custom".to_string()), "{all:?}");
+        assert!(all.contains(&"my-git-helper".to_string()), "{all:?}");
+        assert!(!all.contains(&"git-custom.exe".to_string()), "{all:?}");
+        assert!(!all.contains(&"git-not-executable".to_string()), "{all:?}");
+        assert!(
+            !all.contains(&"git-not-executable.txt".to_string()),
+            "{all:?}"
+        );
+        let git_matches = filter_binaries(&all, "git", 50);
+        assert_eq!(git_matches, vec!["git-custom", "my-git-helper"]);
+        assert_eq!(filter_binaries(&all, "git", 1), vec!["git-custom"]);
+    }
+
+    #[test]
+    fn windows_pathext_stripping_custom_extensions_and_case_dedup() {
+        use std::ffi::OsStr;
+        let root = std::env::temp_dir().join(format!("ref-winbin-{}", crate::util::random_hex(8)));
+        let dir_a = root.join("a");
+        let dir_b = root.join("b");
+        std::fs::create_dir_all(&dir_a).unwrap();
+        std::fs::create_dir_all(&dir_b).unwrap();
+
+        std::fs::write(dir_a.join("cargo.exe"), "").unwrap();
+        std::fs::write(dir_a.join("NPM.CMD"), "").unwrap();
+        std::fs::write(dir_a.join("my.tool.bat"), "").unwrap();
+        std::fs::write(dir_a.join("Git.EXE"), "").unwrap();
+        std::fs::write(dir_a.join("ECHO.EXE"), "").unwrap();
+        std::fs::write(dir_a.join("runner.py"), "").unwrap();
+        std::fs::write(dir_a.join("README.md"), "").unwrap();
+        std::fs::write(dir_a.join("bare-no-ext"), "").unwrap();
+        std::fs::write(dir_b.join("git.cmd"), "").unwrap();
+        std::fs::write(dir_b.join("npm.exe"), "").unwrap();
+
+        let joined_path = std::env::join_paths([&dir_a, &dir_b]).unwrap();
+        let default_bins = collect_binaries_for_platform(&joined_path, None, true);
+        assert!(
+            default_bins.contains(&"cargo".to_string()),
+            "{default_bins:?}"
+        );
+        assert!(!default_bins.contains(&"cargo.exe".to_string()));
+        assert!(
+            default_bins.contains(&"NPM".to_string()),
+            "{default_bins:?}"
+        );
+        assert!(
+            !default_bins.contains(&"npm".to_string()),
+            "{default_bins:?}"
+        );
+        assert!(default_bins.contains(&"my.tool".to_string()));
+        assert!(default_bins.contains(&"Git".to_string()));
+        assert!(!default_bins.contains(&"git".to_string()));
+        assert!(default_bins.contains(&"echo".to_string()));
+        assert!(!default_bins.contains(&"ECHO".to_string()));
+        assert!(!default_bins.contains(&"runner".to_string()));
+        assert!(!default_bins.contains(&"README".to_string()));
+        assert!(!default_bins.contains(&"bare-no-ext".to_string()));
+
+        let custom_bins =
+            collect_binaries_for_platform(&joined_path, Some(OsStr::new(".EXE;.PY")), true);
+        assert!(custom_bins.contains(&"runner".to_string()));
+        assert!(custom_bins.contains(&"cargo".to_string()));
+        assert!(!custom_bins.contains(&"my.tool".to_string()));
+        // npm.exe from dir_b matches .EXE while NPM.CMD from dir_a is excluded!
+        assert!(custom_bins.contains(&"npm".to_string()));
+        assert!(!custom_bins.contains(&"NPM".to_string()));
+
+        assert_eq!(
+            parse_pathext(Some(OsStr::new(" ; . "))),
+            vec!["com", "exe", "bat", "cmd"]
+        );
+        assert_eq!(windows_binary_stem(".exe", &["exe".into()]), None);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }
