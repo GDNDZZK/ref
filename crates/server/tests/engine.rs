@@ -2161,3 +2161,40 @@ async fn stated_image_limit_is_learned_and_the_request_resent() {
             .contains(&pasted.data)
     );
 }
+
+#[tokio::test]
+async fn export_expands_tilde_and_backslash_tilde() {
+    let m = mock(Arc::new(|_, _| Reply::Text("exported answer".into()))).await;
+    let home_dir = temp_dir("export-home");
+    std::fs::create_dir_all(home_dir.join("sub")).unwrap();
+    let home_for_hub = home_dir.clone();
+    let (hub, work) = hub_with(config(&m.url), "export-tilde", move |opts| {
+        opts.home = Some(home_for_hub);
+    });
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
+    prompt(&hub, &s, "hello");
+    wait_idle(&s).await;
+    let conn = hello_conn(&hub);
+
+    for (raw, expected) in [
+        ("~/out.md", home_dir.join("out.md")),
+        (r"~\sub\win_out.md", home_dir.join("sub").join("win_out.md")),
+    ] {
+        let r = call(
+            &hub,
+            &conn,
+            ref_proto::Request::Export {
+                session_id: s.id.clone(),
+                path: raw.into(),
+            },
+        )
+        .await;
+        assert_eq!(r["path"], expected.to_string_lossy().as_ref());
+        let body = std::fs::read_to_string(&expected).unwrap();
+        assert!(body.contains("exported answer"), "{body}");
+        assert!(
+            !work.join("~").exists(),
+            "must not create literal ~ under cwd"
+        );
+    }
+}

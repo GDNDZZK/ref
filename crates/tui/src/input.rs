@@ -283,13 +283,14 @@ fn dialog_key(app: &mut App, k: KeyEvent) {
                 if d.kind == Kind::Cd
                     && k.modifiers.is_empty()
                     && d.filter.selection().is_none()
-                    && d.filter.cursor == d.filter.text.len()
-                    && d.filter.text.ends_with('/')
-                    && d.filter.text != "/" =>
+                    && d.filter.cursor == d.filter.text.len() =>
             {
-                let up = crate::ui::autocomplete::parent_dir_input(&d.filter.text);
-                d.filter.set_text(&up);
-                app.refresh_cd_dialog();
+                if let Some(up) = crate::ui::autocomplete::parent_dir_input(&d.filter.text) {
+                    d.filter.set_text(&up);
+                    app.on_cd_filter_edited();
+                } else if edit_key(&mut d.filter, &k, false) {
+                    app.on_cd_filter_edited();
+                }
             }
             KeyCode::Char('d') if k.modifiers == CTRL => {
                 if d.asking_arg.is_none() && matches!(d.kind, Kind::Sessions | Kind::CloseSessions)
@@ -305,7 +306,7 @@ fn dialog_key(app: &mut App, k: KeyEvent) {
                 } else {
                     d.filter.clear();
                     if d.kind == Kind::Cd {
-                        app.refresh_cd_dialog();
+                        app.on_cd_filter_edited();
                     } else {
                         d.refilter();
                     }
@@ -314,7 +315,7 @@ fn dialog_key(app: &mut App, k: KeyEvent) {
             _ => {
                 if edit_key(&mut d.filter, &k, false) {
                     if d.kind == Kind::Cd {
-                        app.refresh_cd_dialog();
+                        app.on_cd_filter_edited();
                     } else {
                         d.refilter();
                     }
@@ -417,6 +418,42 @@ fn history_prev(app: &mut App) {
         set_from_history(app, &h);
     }
 }
+
+/// Down on the last prompt row: newer history while browsing, else to the end of the text.
+fn history_next(app: &mut App) {
+    if !app.history.browsing() {
+        app.editor.buf_end();
+        return;
+    }
+    let Some((h, restore_shell)) = app.history.next_mode() else {
+        return;
+    };
+    if restore_shell {
+        app.shell_mode = true;
+        app.editor.set_text(h.strip_prefix('!').unwrap_or(&h));
+        app.ac = None;
+    } else {
+        set_from_history(app, &h);
+    }
+}
+
+fn edit_chat_input(app: &mut App, k: &KeyEvent, before: &str) {
+    if !edit_key(&mut app.editor, k, true) {
+        return;
+    }
+    if app.editor.text != before {
+        app.history.reset();
+        app.suppress_ac = false;
+        app.update_autocomplete_on_edit();
+        // Typed / pasted path to an image → attachment (disabled in `!` shell mode).
+        if !app.shell_mode {
+            maybe_image_path(app);
+        }
+    }
+    if app.has_selection() {
+        app.clear_selection();
+    }
+}
 fn chat_key(app: &mut App, k: KeyEvent) {
     let m = k.modifiers;
     // ctrl+c: clear editor / exit twice.
@@ -494,12 +531,13 @@ fn chat_key(app: &mut App, k: KeyEvent) {
                         ac_keeps_open_on_tab(app.ac.as_ref().map(|a| &a.kind), v)
                     });
                 let executed = app.accept_completion(true);
-                if !executed {
-                    if keep_open {
-                        refresh_autocomplete_after_accept(app);
-                    } else {
-                        app.ac = None;
-                    }
+                if executed {
+                    return;
+                }
+                if keep_open {
+                    refresh_autocomplete_after_accept(app);
+                } else {
+                    app.ac = None;
                 }
                 return;
             }
@@ -511,6 +549,8 @@ fn chat_key(app: &mut App, k: KeyEvent) {
             _ => {}
         }
     }
+    let before = app.editor.text.clone();
+    let before_cursor = app.editor.cursor;
     match k.code {
         KeyCode::Esc => {
             if app.has_selection() {
@@ -569,19 +609,7 @@ fn chat_key(app: &mut App, k: KeyEvent) {
         }
         KeyCode::Down if !m.contains(SHIFT) => {
             if app.editor.on_last_row() {
-                if app.history.browsing() {
-                    if let Some((h, restore_shell)) = app.history.next_mode() {
-                        if restore_shell {
-                            app.shell_mode = true;
-                            app.editor.set_text(h.strip_prefix('!').unwrap_or(&h));
-                            app.ac = None;
-                        } else {
-                            set_from_history(app, &h);
-                        }
-                    }
-                } else {
-                    app.editor.buf_end();
-                }
+                history_next(app);
             } else {
                 app.editor.select_mode(false);
                 app.editor.down();
@@ -606,24 +634,10 @@ fn chat_key(app: &mut App, k: KeyEvent) {
         KeyCode::Backspace if app.shell_mode && app.editor.text.is_empty() => {
             app.shell_mode = false;
         }
-        _ => {
-            let before = app.editor.text.clone();
-            if edit_key(&mut app.editor, &k, true) {
-                if app.editor.text != before {
-                    app.history.reset();
-                    app.suppress_ac = false;
-                    app.update_autocomplete();
-
-                    // Typed / pasted path to an image → attachment (disabled in `!` shell mode).
-                    if !app.shell_mode {
-                        maybe_image_path(app);
-                    }
-                }
-                if app.has_selection() {
-                    app.clear_selection();
-                }
-            }
-        }
+        _ => edit_chat_input(app, &k, &before),
+    }
+    if app.editor.text == before && app.editor.cursor != before_cursor && app.ac.is_some() {
+        app.update_autocomplete();
     }
 }
 
@@ -662,8 +676,8 @@ fn ac_keeps_open_on_tab(kind: Option<&crate::app::AcKind>, value: &str) -> bool 
     use crate::app::AcKind;
     match kind {
         Some(AcKind::Slash) => true,
-        Some(AcKind::SlashArg) => value.ends_with('/') || value.ends_with(' '),
-        Some(AcKind::ShellPath) => value.ends_with('/'),
+        Some(AcKind::SlashArg) => value.ends_with(['/', '\\']) || value.ends_with(' '),
+        Some(AcKind::ShellPath) => value.ends_with(['/', '\\']),
         Some(AcKind::File | AcKind::ShellCmd) | None => false,
     }
 }
@@ -684,6 +698,7 @@ fn maybe_image_path(app: &mut App) {
         Ok(Some((img, name))) => {
             app.editor.clear();
             app.editor.attach_image(img, Some(name.clone()));
+            app.ac = None;
             app.toasts.info(format!("Attached image {name}"));
         }
         Ok(None) => {}
@@ -692,17 +707,35 @@ fn maybe_image_path(app: &mut App) {
 }
 
 fn clipboard_paste(app: &mut App) {
-    let img_err = match crate::clipboard::paste_image() {
-        Ok(Some(img)) => {
-            let target = target_editor(app);
-            target.attach_image(img, Some("clipboard".into()));
-            app.toasts.info("Pasted image from clipboard");
-            return;
+    clipboard_paste_with(
+        app,
+        crate::clipboard::paste_image,
+        crate::clipboard::paste_text,
+    );
+}
+
+pub(crate) fn clipboard_paste_with(
+    app: &mut App,
+    read_image: impl FnOnce() -> Result<Option<ImageData>, String>,
+    read_text: impl FnOnce() -> Result<Option<String>, String>,
+) {
+    let in_shell = app.mode == Mode::Chat && app.shell_mode;
+    let img_err = if in_shell {
+        None
+    } else {
+        match read_image() {
+            Ok(Some(img)) => {
+                let target = target_editor(app);
+                target.attach_image(img, Some("clipboard".into()));
+                app.ac = None;
+                app.toasts.info("Pasted image from clipboard");
+                return;
+            }
+            Ok(None) => None,
+            Err(e) => Some(e),
         }
-        Ok(None) => None,
-        Err(e) => Some(e),
     };
-    match crate::clipboard::paste_text() {
+    match read_text() {
         Ok(Some(t)) => paste(app, t),
         Ok(None) => match img_err {
             Some(e) => app.toasts.error(format!("Clipboard image error: {e}")),
@@ -786,7 +819,7 @@ fn paste(app: &mut App, s: String) {
     if let Some(Dialog::List(d)) = app.dialog.as_mut() {
         d.filter.insert(&crate::text::one_line(&s));
         if d.kind == Kind::Cd {
-            app.refresh_cd_dialog();
+            app.on_cd_filter_edited();
         } else {
             d.refilter();
         }
@@ -808,6 +841,7 @@ fn paste(app: &mut App, s: String) {
             match crate::clipboard::paste_image() {
                 Ok(Some(img)) => {
                     target_editor(app).attach_image(img, Some("clipboard".into()));
+                    app.ac = None;
                     app.toasts.info("Pasted image from clipboard");
                 }
                 Ok(None) => {}
@@ -825,6 +859,7 @@ fn paste(app: &mut App, s: String) {
                 for (img, name) in imgs {
                     ed.attach_image(img, Some(name));
                 }
+                app.ac = None;
                 app.toasts.info(format!(
                     "Attached {n} image{}",
                     if n > 1 { "s" } else { "" }
@@ -846,7 +881,7 @@ fn paste(app: &mut App, s: String) {
     app.editor.paste(&s);
     app.history.reset();
     app.suppress_ac = false;
-    app.update_autocomplete();
+    app.update_autocomplete_on_edit();
 }
 
 // ---------------------------------------------------------------------------
@@ -1265,15 +1300,23 @@ fn mouse(app: &mut App, me: MouseEvent) {
                 // Click in the editor: move the cursor; drag / double / triple click select.
                 let e = lay.editor;
                 if y >= e.y && y < e.y + e.height {
+                    let before_cursor = app.editor.cursor;
                     let off = app.editor.offset_at(e, x, y);
                     let n = click_count(app, x, y);
                     app.editor.mouse_down(off, n);
+                    if app.editor.cursor != before_cursor && app.ac.is_some() {
+                        app.update_autocomplete();
+                    }
                 }
             }
         }
         MouseEventKind::Drag(MouseButton::Left) if app.editor.dragging => {
+            let before_cursor = app.editor.cursor;
             let off = app.editor.offset_at(lay.editor, x, y);
             app.editor.mouse_drag(off);
+            if app.editor.cursor != before_cursor && app.ac.is_some() {
+                app.update_autocomplete();
+            }
         }
         MouseEventKind::Up(MouseButton::Left) if app.editor.dragging => app.editor.mouse_up(),
         MouseEventKind::Drag(MouseButton::Left) => {

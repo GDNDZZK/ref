@@ -254,6 +254,24 @@ impl Editor {
             None => i,
         }
     }
+
+    /// Snaps `pos` out of a token, moving in `dir` whenever nearest-boundary snapping would stall.
+    fn snap_token_in_dir(&self, pos: usize, dir: i32) -> usize {
+        let Some((s, e)) = self.token_containing(pos) else {
+            return pos;
+        };
+        let near = if pos - s <= e - pos { s } else { e };
+        let stalled = if dir < 0 {
+            near >= self.cursor
+        } else {
+            near <= self.cursor
+        };
+        if stalled {
+            if dir < 0 { s } else { e }
+        } else {
+            near
+        }
+    }
     pub fn backspace(&mut self) {
         if self.delete_selection() {
             return;
@@ -501,7 +519,10 @@ impl Editor {
             x += w;
             pos = row.start + i + g.len();
         }
-        self.cursor = self.snap_out_of_token(pos);
+        if !row.last && pos == row.end && row.end > row.start && self.token_around(pos).is_some() {
+            pos = self.prev_boundary(row.end);
+        }
+        self.cursor = self.snap_token_in_dir(pos, dir);
         if self.anchor.is_some() {
             self.snap_selection();
         }
@@ -1408,5 +1429,52 @@ mod tests {
         let mut h = History::with_path(dir.clone());
         assert!(h.push("hello").is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn vmove_never_stalls_on_wrapped_paste_or_image_tokens() {
+        for w in [6usize, 8, 10] {
+            let mut e = Editor::default();
+            e.insert("top\n");
+            e.paste("l1\nl2\nl3\nl4\nl5\n");
+            e.insert("\nbot_tail");
+            e.last_width = w;
+            let rows = e.layout(w);
+            assert!(rows.len() >= 4, "token wraps across multiple rows at w={w}");
+
+            // Stepping `down()` from start reaches the bottom row without ever repeating a cursor pos.
+            e.cursor = 0;
+            e.pref_col = None;
+            let mut steps = 0usize;
+            while !e.on_last_row() {
+                let prev = e.cursor;
+                assert!(e.down());
+                assert!(e.cursor > prev, "down stalled at {} (w={w})", e.cursor);
+                steps += 1;
+                assert!(steps <= rows.len());
+            }
+            // Stepping `up()` from both end-of-line and start-of-line reaches row 0 without stalling.
+            for start_pos in [e.text.len(), e.text.rfind("bot_tail").unwrap()] {
+                e.cursor = start_pos;
+                e.pref_col = None;
+                let mut up_steps = 0usize;
+                while !e.on_first_row() {
+                    let prev = e.cursor;
+                    assert!(e.up());
+                    assert!(e.cursor < prev, "up stalled at {} (w={w})", e.cursor);
+                    up_steps += 1;
+                    assert!(up_steps <= rows.len());
+                }
+            }
+        }
+        // Wrapped `[Image 1]` token at narrow width also advances cleanly in both directions.
+        let mut e = Editor::default();
+        e.attach_image(ImageData::new("image/png", "AA"), None);
+        e.last_width = 6;
+        e.cursor = 0;
+        assert!(e.down());
+        assert!(e.cursor >= "[Image 1]".len());
+        assert!(e.up());
+        assert_eq!(e.cursor, 0);
     }
 }
