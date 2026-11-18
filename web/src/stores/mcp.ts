@@ -18,12 +18,17 @@ export const useMcpStore = defineStore('mcp', () => {
   const servers = shallowRef<readonly McpServerStatus[]>([])
   let recheck: ReturnType<typeof setTimeout> | undefined
 
-  const effectiveCwd = computed(() => workspace.current?.info?.cwd ?? (workspace.cwd || undefined))
+  const effectiveCwd = computed(() => workspace.effectiveCwd)
 
   async function refresh(): Promise<void> {
     clearTimeout(recheck)
-    servers.value = await connection.getApi().mcpStatus(effectiveCwd.value)
-    // Servers start in the background: look again until none is still connecting.
+    let api
+    try {
+      api = connection.getApi()
+    } catch {
+      return
+    }
+    servers.value = await api.mcpStatus(effectiveCwd.value)
     if (servers.value.some((server) => server.status === CONNECTING)) {
       recheck = setTimeout(() => void refresh().catch(notices.pushError), RECHECK_MS)
     }

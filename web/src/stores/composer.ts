@@ -4,7 +4,7 @@
 import { defineStore } from 'pinia'
 import { SessionComposer } from '../composer/sessionComposer.ts'
 import type { ComposerHost } from '../composer/sessionComposer.ts'
-import type { SlashCommand } from '../composer/completion.ts'
+import type { SessionChoice, SlashCommand } from '../composer/completion.ts'
 import { HISTORY_STORAGE_KEY, StoredPromptHistory } from '../composer/historyStorage.ts'
 import { labelText } from '../commands/label.ts'
 import { translate } from '../i18n/index.ts'
@@ -61,6 +61,43 @@ export const useComposerStore = defineStore('composer', () => {
       isBusy: () => session().busy,
       hasDelayedTool: () => hasDelayedTool(session()),
       slashCommands,
+      models: () =>
+        (connection.config?.models ?? []).map((m) => ({
+          provider: m.provider,
+          providerName: m.provider_name,
+          id: m.id,
+          name: m.name,
+        })),
+      agents: () =>
+        (connection.config?.agents ?? [])
+          .filter((a) => a.creatable)
+          .map((a) => ({ name: a.name, description: a.description })),
+      variants: () => {
+        const modelRef = workspace.infoOf(sessionId)?.model
+        const info = connection.config?.models.find(
+          (m) => m.provider === modelRef?.provider && m.id === modelRef?.model,
+        )
+        return info?.variants ?? []
+      },
+      sessions: (): SessionChoice[] => {
+        const liveIds = new Set(workspace.live.map((s) => s.id))
+        const past = workspace.history.filter((s) => !liveIds.has(s.id))
+        return [...workspace.live, ...past].map((s) => ({
+          id: s.id,
+          name: s.name,
+          title: s.title,
+          cwd: s.cwd,
+          live: s.live,
+        }))
+      },
+      liveSessions: (): SessionChoice[] =>
+        workspace.live.map((s) => ({
+          id: s.id,
+          name: s.name,
+          title: s.title,
+          cwd: s.cwd,
+          live: s.live,
+        })),
       runSlash: (line) => commands.runSlash(line, sessionId).then(() => undefined),
       abort: () => session().stop(),
       toast: (level, messageKey, params) => notices.push(level, translate(messageKey, params)),

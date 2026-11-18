@@ -38,6 +38,7 @@ export interface Command {
   palette?: boolean // listed in the command palette; default true
   enabled?(sessionId: string): boolean // `sessionId` is "" when no session is open; default: always
   run(sessionId: string, args: string): void | Promise<void>
+  runPalette?(sessionId: string): void | Promise<void> // overrides `run(sessionId, '')` when chosen in CommandPalette
 }
 
 export interface SlashEntry {

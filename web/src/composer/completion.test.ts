@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { CompletionController, FILE_QUERY_DELAY_MS, slashItems } from './completion.ts'
+import { CompletionController, FILE_QUERY_DELAY_MS, parseShellContext, slashItems } from './completion.ts'
 import type { CompletionDeps, SlashCommand } from './completion.ts'
 
 const COMMANDS: SlashCommand[] = [
@@ -157,5 +157,144 @@ describe('CompletionController', () => {
     expect(controller.completion).toBeUndefined()
     await settle()
     expect(controller.completion?.kind).toBe('file')
+  })
+
+  it('completes /cd and /export paths with session cwd and 0-flicker parent-dir cache', async () => {
+    const listDirs = vi.fn(async (path: string) => ({
+      path,
+      dirs: ['crates', 'docs', '.git'],
+      files: ['README.md'],
+    }))
+    const controller = new CompletionController({
+      sessionId: 'ses_7',
+      cwd: () => '/repo',
+      commands: () => [
+        ...COMMANDS,
+        { name: 'cd', aliases: ['cwd'], title: 'cd', takesArgs: true, custom: false },
+        { name: 'export', aliases: [], title: 'export', takesArgs: true, custom: false },
+      ],
+      listFiles: async () => [],
+      listDirs,
+      reportError: () => {},
+    })
+
+    controller.update('/cd ', 4, false, true)
+    await settle()
+    expect(listDirs).toHaveBeenCalledWith('.', { cwd: '/repo', includeFiles: false })
+    expect(controller.completion).toMatchObject({
+      kind: 'path',
+      explicitlySelected: false,
+      freeformEnter: true,
+    })
+    expect(controller.completion?.items.map((i) => i.value)).toEqual(['crates/', 'docs/'])
+
+    // Typing additional letters in the same parent directory resolves synchronously from cache (0 extra RPCs).
+    controller.update('/cd cr', 6, false, true)
+    expect(listDirs).toHaveBeenCalledTimes(1)
+    expect(controller.completion?.items.map((i) => i.value)).toEqual(['crates/'])
+
+    // /export includes default ref-session-<id>.md and regular files.
+    controller.update('/export ', 8, false, true)
+    await settle()
+    expect(controller.completion?.items.map((i) => i.value)).toEqual([
+      'ref-session-ses_7.md',
+      'crates/',
+      'docs/',
+      'README.md',
+    ])
+  })
+
+  it('completes /models, /agents, /variant, /sessions, multi-token /close-session, and @file in custom commands', async () => {
+    const listFiles = vi.fn(async () => ['src/index.ts'])
+    const controller = new CompletionController({
+      commands: () => [
+        ...COMMANDS,
+        { name: 'models', aliases: ['model'], title: 'Models', takesArgs: true, custom: false },
+        { name: 'agents', aliases: ['agent'], title: 'Agents', takesArgs: true, custom: false },
+        { name: 'variant', aliases: [], title: 'Variant', takesArgs: true, custom: false },
+        { name: 'sessions', aliases: [], title: 'Sessions', takesArgs: true, custom: false },
+        { name: 'close-session', aliases: [], title: 'Close', takesArgs: true, custom: false },
+      ],
+      listFiles,
+      models: () => [
+        { provider: 'anthropic', providerName: 'Anthropic', id: 'claude-sonnet-4-5', name: 'Sonnet' },
+      ],
+      agents: () => [{ name: 'build', description: 'Builder' }],
+      variants: () => ['low', 'high'],
+      sessions: () => [{ id: 's1', name: 'alpha', title: 'Alpha', cwd: '/a', live: true }],
+      liveSessions: () => [
+        { id: 's1', name: 'alpha', title: 'Alpha', cwd: '/a', live: true },
+        { id: 's2', name: 'beta', title: 'Beta', cwd: '/b', live: true },
+      ],
+      reportError: () => {},
+    })
+
+    controller.update('/model son', 10, false, true)
+    expect(controller.completion?.items.map((i) => i.value)).toEqual(['anthropic/claude-sonnet-4-5'])
+
+    controller.update('/agent bu', 9, false, true)
+    expect(controller.completion?.items.map((i) => i.value)).toEqual(['build'])
+
+    controller.update('/variant ', 9, false, true)
+    expect(controller.completion?.items.map((i) => i.value)).toEqual(['default', 'low', 'high'])
+
+    controller.update('/sessions al', 12, false, true)
+    expect(controller.completion?.items.map((i) => i.value)).toEqual(['alpha'])
+
+    // Multi-token /close-session excludes already-listed sessions.
+    controller.update('/close-session alpha ', 21, false, true)
+    expect(controller.completion?.items.map((i) => i.value)).toEqual(['beta '])
+    expect(controller.completion?.freeformEnter).toBe(true)
+
+    // Custom command `/review` supports @file mentions inside arguments.
+    controller.update('/review check @src/', 19, false, true)
+    await settle()
+    expect(listFiles).toHaveBeenCalledWith('src/')
+    expect(controller.completion?.items.map((i) => i.value)).toEqual(['@src/index.ts '])
+  })
+
+  it('completes ! shell history, binaries after pipes/&&, and non-flag path arguments', async () => {
+    expect(parseShellContext('git status && car', 17)).toMatchObject({
+      role: 'command',
+      segmentIndex: 1,
+      token: 'car',
+    })
+    expect(parseShellContext('ls -la', 6)).toBeUndefined()
+    expect(parseShellContext('ls -la ./sr', 11)).toMatchObject({ role: 'arg', token: './sr' })
+
+    const listBinaries = vi.fn(async () => ['cargo', 'cargo-clippy'])
+    const listDirs = vi.fn(async () => ({ path: '/repo/src', dirs: ['stores'], files: ['main.ts'] }))
+    const controller = new CompletionController({
+      cwd: () => '/repo',
+      commands: () => COMMANDS,
+      listFiles: async () => [],
+      listBinaries,
+      listDirs,
+      shellHistory: () => ['hello', '!cargo test --workspace'],
+      reportError: () => {},
+    })
+
+    // Empty shell input stays closed so Esc/Backspace exit shell mode cleanly.
+    controller.update('', 0, true, true)
+    expect(controller.completion).toBeUndefined()
+
+    controller.update('car', 3, true, true)
+    expect(controller.completion?.items.map((i) => i.value)).toEqual(['cargo test --workspace'])
+    await settle()
+    expect(listBinaries).toHaveBeenCalledWith('car', 50)
+    expect(controller.completion?.items.map((i) => i.value)).toEqual([
+      'cargo test --workspace',
+      'cargo ',
+      'cargo-clippy ',
+    ])
+    expect(controller.completion?.explicitlySelected).toBe(false)
+    controller.move(1)
+    expect(controller.completion?.explicitlySelected).toBe(true)
+
+    // Argument path preserves ./ prefix.
+    controller.update('ls ./src/', 9, true, true)
+    await settle()
+    expect(listDirs).toHaveBeenCalledWith('./src/', { cwd: '/repo', includeFiles: true })
+    expect(controller.completion?.items.map((i) => i.value)).toEqual(['./src/stores/', './src/main.ts '])
   })
 })
