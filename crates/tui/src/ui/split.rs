@@ -30,83 +30,21 @@ const VERTICAL_WEIGHT: i64 = 2;
 const TILE_INPUT_ROWS: u16 = 2;
 const ROOT_CHIP_NAME_MAX: usize = 16;
 
-#[derive(Clone, Copy)]
-struct BorderChars {
-    h: &'static str,
-    v: &'static str,
-    tl: &'static str,
-    tr: &'static str,
-    bl: &'static str,
-    br: &'static str,
-}
-
-const ROOT_BORDERS: [BorderChars; 4] = [
-    BorderChars {
-        h: "═",
-        v: "║",
-        tl: "╔",
-        tr: "╗",
-        bl: "╚",
-        br: "╝",
-    },
-    BorderChars {
-        h: "━",
-        v: "┃",
-        tl: "┏",
-        tr: "┓",
-        bl: "┗",
-        br: "┛",
-    },
-    BorderChars {
-        h: "┄",
-        v: "┆",
-        tl: "┌",
-        tr: "┐",
-        bl: "└",
-        br: "┘",
-    },
-    BorderChars {
-        h: "┈",
-        v: "┊",
-        tl: "┌",
-        tr: "┐",
-        bl: "└",
-        br: "┘",
-    },
-];
-
-fn root_border(root_id: &str) -> BorderChars {
-    let h = root_id
-        .bytes()
-        .fold(0usize, |a, b| a.wrapping_mul(31).wrapping_add(b as usize));
-    ROOT_BORDERS[h % ROOT_BORDERS.len()]
-}
-
-fn draw_border(buf: &mut Buffer, r: Rect, style: Style, b: BorderChars) {
-    for xx in r.x + 1..r.x + r.width.saturating_sub(1) {
-        buf.set_string(xx, r.y, b.h, style);
-        buf.set_string(xx, r.y + r.height - 1, b.h, style);
-    }
-    for yy in r.y + 1..r.y + r.height.saturating_sub(1) {
-        buf.set_string(r.x, yy, b.v, style);
-        buf.set_string(r.x + r.width - 1, yy, b.v, style);
-    }
-    buf.set_string(r.x, r.y, b.tl, style);
-    buf.set_string(r.x + r.width - 1, r.y, b.tr, style);
-    buf.set_string(r.x, r.y + r.height - 1, b.bl, style);
-    buf.set_string(r.x + r.width - 1, r.y + r.height - 1, b.br, style);
-}
-
-/// Walks `parent` up the live session list to resolve the root task `(id, name)`.
+/// Walks `parent` up the live + history session lists to resolve the root task `(id, name)`.
 /// User-created sessions (no `parent`) return `None`; cycles terminate safely.
-pub fn root_task(info: &SessionInfo, live: &[SessionInfo]) -> Option<(String, String)> {
+pub fn root_task(
+    info: &SessionInfo,
+    live: &[SessionInfo],
+    history: &[SessionInfo],
+) -> Option<(String, String)> {
+    let find = |id: &str| live.iter().chain(history.iter()).find(|s| s.id == id);
     let mut cur = info.parent.as_deref().filter(|p| !p.is_empty())?;
     let mut visited = HashSet::from([info.id.as_str()]);
     loop {
         if !visited.insert(cur) {
             break;
         }
-        let Some(ancestor) = live.iter().find(|s| s.id == cur) else {
+        let Some(ancestor) = find(cur) else {
             break;
         };
         let Some(next) = ancestor.parent.as_deref().filter(|p| !p.is_empty()) else {
@@ -117,9 +55,7 @@ pub fn root_task(info: &SessionInfo, live: &[SessionInfo]) -> Option<(String, St
         }
         cur = next;
     }
-    let name = live
-        .iter()
-        .find(|s| s.id == cur)
+    let name = find(cur)
         .map(|s| s.name.as_str())
         .filter(|n| !n.is_empty())
         .unwrap_or(cur)
@@ -250,10 +186,22 @@ pub fn draw_frame(
         return Rect::default();
     }
     let busy = v.is_busy();
+    let needs_attention = !v.permissions.is_empty()
+        || !v.questions.is_empty()
+        || matches!(
+            v.info.status,
+            ref_proto::SessionStatus::WaitingPermission | ref_proto::SessionStatus::WaitingQuestion
+        );
+    let has_error = v.info.last_error.is_some() || v.error.is_some();
+    let root_color = root.map(|(root_id, _)| theme::root_task_color(root_id));
     let bc = if focused {
         theme::PRIMARY
-    } else if !v.permissions.is_empty() {
+    } else if needs_attention {
         theme::WARNING
+    } else if has_error {
+        theme::ERROR
+    } else if let Some(rc) = root_color {
+        rc
     } else if busy {
         theme::BORDER_ACTIVE
     } else {
@@ -261,10 +209,7 @@ pub fn draw_frame(
     };
     let bst = Style::new().fg(bc);
     let (x0, y0, x1, y1) = (r.x, r.y, r.x + r.width - 1, r.y + r.height - 1);
-    match root {
-        Some((root_id, _)) => draw_border(buf, r, bst, root_border(root_id)),
-        None => draw_rounded_border(buf, r, bst),
-    }
+    draw_rounded_border(buf, r, bst);
     let (st, sc) = status_text(v, tick);
     let ac = theme::agent_color(agents, &v.info.agent);
     let mut x = x0 + 2;
@@ -285,12 +230,12 @@ pub fn draw_frame(
         theme::bold(theme::TEXT)
     };
     put(&v.info.name, name_style, &mut x);
-    if let Some((_, rname)) = root {
+    if let Some((root_id, rname)) = root {
         let chip = format!(
             " ⟲ {}",
             text::truncate(&text::one_line(rname), ROOT_CHIP_NAME_MAX)
         );
-        put(&chip, theme::fg(theme::ACCENT), &mut x);
+        put(&chip, theme::fg(theme::root_task_color(root_id)), &mut x);
     }
     put(text::SEPARATOR, theme::muted(), &mut x);
     put(&v.info.agent, theme::fg(ac), &mut x);
@@ -327,15 +272,27 @@ pub fn draw_frame(
     )
 }
 
+/// Input rect of a focused tile `r`, if `r` is large enough to host one.
+pub fn input_rect(r: Rect) -> Option<Rect> {
+    if r.width < 6 || r.height < 5 {
+        return None;
+    }
+    let y = r.y + r.height - TILE_INPUT_ROWS;
+    Some(Rect::new(r.x + 3, y, r.width - 5, 1))
+}
+
 /// Draws the focused tile's input separator; returns the input rect.
 pub fn draw_input_sep(buf: &mut Buffer, r: Rect) -> Rect {
+    if r.width < 4 || r.height < 5 {
+        return Rect::default();
+    }
     let y = r.y + r.height - (TILE_INPUT_ROWS + 1);
     let st = Style::new().fg(theme::BORDER);
     for x in r.x + 1..r.x + r.width - 1 {
         buf.set_string(x, y, "┄", st);
     }
     buf.set_string(r.x + 1, y + 1, "›", theme::fg(theme::PRIMARY));
-    Rect::new(r.x + 3, y + 1, r.width.saturating_sub(5), 1)
+    input_rect(r).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -401,20 +358,26 @@ mod tests {
             mk("cyc2", "c2", Some("cyc1")),
             mk("self", "self", Some("self")),
         ];
-        assert_eq!(root_task(&live[0], &live), None);
+        let hist = vec![mk("hist_r", "closed-root", None)];
+        let from_hist = mk("ch_h", "child-h", Some("hist_r"));
+        assert_eq!(root_task(&live[0], &live, &hist), None);
         assert_eq!(
-            root_task(&live[1], &live),
+            root_task(&live[1], &live, &hist),
             Some(("r".into(), "root-a".into()))
         );
         assert_eq!(
-            root_task(&live[2], &live),
+            root_task(&live[2], &live, &hist),
             Some(("r".into(), "root-a".into()))
         );
         assert_eq!(
-            root_task(&live[3], &live),
+            root_task(&live[3], &live, &hist),
             Some(("gone".into(), "gone".into()))
         );
-        assert!(root_task(&live[4], &live).is_some());
-        assert!(root_task(&live[6], &live).is_some());
+        assert_eq!(
+            root_task(&from_hist, &live, &hist),
+            Some(("hist_r".into(), "closed-root".into()))
+        );
+        assert!(root_task(&live[4], &live, &hist).is_some());
+        assert!(root_task(&live[6], &live, &hist).is_some());
     }
 }

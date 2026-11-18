@@ -392,23 +392,57 @@ impl McpDialog {
         tick: u64,
         loaded: bool,
     ) {
-        if let Some(w) = self.want.clone()
-            && let Some(p) = entries.iter().position(|e| e.name == w)
-        {
-            self.sel = p;
-            self.want = None;
-            self.follow = true;
+        if screen.width < 6 || screen.height < 4 {
+            self.rect = Rect::default();
+            self.rows.clear();
+            return;
+        }
+        if let Some(w) = self.want.clone() {
+            let wl = w.to_lowercase();
+            let pos = entries
+                .iter()
+                .position(|e| e.name.eq_ignore_ascii_case(&w))
+                .or_else(|| {
+                    entries
+                        .iter()
+                        .position(|e| e.name.to_lowercase().starts_with(&wl))
+                })
+                .or_else(|| {
+                    entries
+                        .iter()
+                        .position(|e| e.name.to_lowercase().contains(&wl))
+                });
+            if let Some(p) = pos {
+                self.sel = p;
+                self.expanded.insert(entries[p].name.clone());
+                self.want = None;
+                self.follow = true;
+            } else if loaded {
+                self.want = None;
+            }
         }
         self.sel = self.sel.min(entries.len().saturating_sub(1));
         let t = dialog::open_progress(self.opened);
-        let w = screen.width.saturating_sub(4).clamp(30, 90);
-        let iw = w.saturating_sub(4) as usize;
+        let w = screen
+            .width
+            .saturating_sub(4)
+            .clamp(6, 90)
+            .min(screen.width);
+        let iw = w.saturating_sub(4).max(1) as usize;
         let (lines, blocks) = self.content(entries, iw, tick, loaded);
         // Rows: border, gap, content, gap, footer, border.
-        let max_h = screen.height.saturating_sub(4).clamp(6, 40);
-        let h = (lines.len() as u16 + 5).clamp(6, max_h);
+        let max_h = screen
+            .height
+            .saturating_sub(4)
+            .clamp(4, 40)
+            .min(screen.height);
+        let h = (lines.len() as u16 + 5).clamp(4, max_h).min(screen.height);
         let r = dialog::frame(buf, screen, w, h, "MCP servers", t);
         self.rect = r;
+        if r.width < 6 || r.height < 4 {
+            self.rows.clear();
+            return;
+        }
         let inner = Rect::new(
             r.x + 2,
             r.y + 2,
@@ -420,7 +454,6 @@ impl McpDialog {
         if self.follow
             && let Some(&(s, e)) = blocks.get(self.sel)
         {
-            // Show the whole block if it fits, else at least its header.
             if e > self.scroll + vh {
                 self.scroll = e.saturating_sub(vh);
             }
@@ -451,8 +484,9 @@ impl McpDialog {
                 }
             }
             if selected {
+                let hl_w = (inner.width + 2).min(r.width.saturating_sub(2));
                 buf.set_style(
-                    Rect::new(inner.x.saturating_sub(1), y, inner.width + 2, 1),
+                    Rect::new(inner.x.saturating_sub(1), y, hl_w, 1),
                     Style::new().bg(theme::PRIMARY),
                 );
             }
@@ -461,31 +495,45 @@ impl McpDialog {
                 self.rows.push((y, *i));
             }
         }
+        if self.max_scroll > 0 && vh > 0 {
+            super::chat::draw_scrollbar(
+                buf,
+                Rect::new(r.x + r.width - 2, inner.y, 1, vh as u16),
+                lines.len(),
+                self.scroll as f64,
+                self.max_scroll as f64,
+                ("┃", theme::BORDER_ACTIVE),
+                Some(("│", theme::BORDER_SUBTLE)),
+            );
+        }
         // Scroll hint + footer.
-        let fy = r.y + r.height.saturating_sub(2);
-        let more = if self.scroll < self.max_scroll {
-            " · pgdn more"
-        } else {
-            ""
-        };
-        let hint = format!("↑↓ select · enter/→ tools · ← hide{more} · esc close");
-        let total: usize = entries.iter().map(|e| e.n_tools).sum();
-        let count = format!("{} connected · {}", summary(entries), tools_label(total));
-        let iwf = inner.width as usize;
-        let cw = width(&count);
-        buf.set_string(
-            inner.x,
-            fy,
-            text::truncate(&hint, iwf.saturating_sub(cw + 2)),
-            Style::new().fg(theme::blend(bg, theme::DIM, t)).bg(bg),
-        );
-        if cw + 2 < iwf {
+        if r.height >= 4 && inner.width > 0 {
+            let fy = r.y + r.height - 2;
+            let more = if self.scroll < self.max_scroll {
+                " · pgdn more"
+            } else {
+                ""
+            };
+            let hint = format!("↑↓ select · enter/→ tools · ← hide · r refresh{more} · esc close");
+            let total: usize = entries.iter().map(|e| e.n_tools).sum();
+            let count = format!("{} connected · {}", summary(entries), tools_label(total));
+            let iwf = inner.width as usize;
+            let cw = width(&count);
+            let hint_max = if cw + 2 < iwf { iwf - cw - 2 } else { iwf };
             buf.set_string(
-                inner.x + inner.width - cw as u16,
+                inner.x,
                 fy,
-                &count,
+                text::truncate(&hint, hint_max),
                 Style::new().fg(theme::blend(bg, theme::DIM, t)).bg(bg),
             );
+            if cw + 2 < iwf {
+                buf.set_string(
+                    inner.x + inner.width - cw as u16,
+                    fy,
+                    &count,
+                    Style::new().fg(theme::blend(bg, theme::DIM, t)).bg(bg),
+                );
+            }
         }
     }
 }

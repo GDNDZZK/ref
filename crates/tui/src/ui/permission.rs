@@ -65,20 +65,37 @@ impl PermissionView {
         session_name: Option<&str>,
         queued: usize,
     ) {
+        if screen.width < 6 || screen.height < 4 {
+            self.rect = Rect::default();
+            self.buttons.clear();
+            return;
+        }
         let t = open_progress(self.opened);
-        let w = screen.width.saturating_sub(4).clamp(30, 96);
+        let w = screen
+            .width
+            .saturating_sub(4)
+            .clamp(6, 96)
+            .min(screen.width);
         let title = match session_name {
             Some(n) => format!("△ Permission required · {n}"),
             None => "△ Permission required".to_string(),
         };
         // Content is laid out for the final (fully opened) width; the frame only grows in.
-        let iw = w.min(screen.width).saturating_sub(4) as usize;
+        let iw = w.saturating_sub(4).max(1) as usize;
         let lines = content(req, iw);
         // Height fits the content (borders + top pad + gap + scroll hint + buttons), capped.
-        let max_h = screen.height.saturating_sub(2).clamp(10, 36);
-        let h = (lines.len() as u16 + 5).clamp(10, max_h);
+        let max_h = screen
+            .height
+            .saturating_sub(2)
+            .clamp(4, 36)
+            .min(screen.height);
+        let h = (lines.len() as u16 + 5).clamp(4, max_h).min(screen.height);
         let r = frame(buf, screen, w, h, &title, t);
         self.rect = r;
+        if r.width < 6 || r.height < 4 {
+            self.buttons.clear();
+            return;
+        }
         let bg = theme::PANEL;
         let inner = Rect::new(
             r.x + 2,
@@ -98,37 +115,94 @@ impl PermissionView {
             }
             buf.set_line(inner.x, inner.y + i as u16, &l, inner.width);
         }
-        if self.max_scroll > 0 {
-            let more = format!("↑↓ scroll ({}/{})", self.scroll, self.max_scroll);
-            buf.set_string(
-                inner.x + inner.width.saturating_sub(width(&more) as u16),
-                inner.y + body_h as u16,
-                more,
-                Style::new().fg(theme::DIM).bg(bg),
+        if self.max_scroll > 0 && body_h > 0 {
+            super::chat::draw_scrollbar(
+                buf,
+                Rect::new(r.x + r.width - 2, inner.y, 1, body_h as u16),
+                lines.len(),
+                self.scroll as f64,
+                self.max_scroll as f64,
+                ("┃", theme::BORDER_ACTIVE),
+                Some(("│", theme::BORDER_SUBTLE)),
             );
         }
-        // Buttons.
+        if self.max_scroll > 0 && inner.height >= 2 && inner.width > 0 {
+            let more = text::truncate(
+                &format!("↑↓ scroll ({}/{})", self.scroll, self.max_scroll),
+                inner.width as usize,
+            );
+            let my = inner.y + body_h as u16;
+            if my < inner.y + inner.height.saturating_sub(1) {
+                buf.set_string(
+                    inner.x + inner.width.saturating_sub(width(&more) as u16),
+                    my,
+                    more,
+                    Style::new().fg(theme::DIM).bg(bg),
+                );
+            }
+        }
+        // Adaptive 3-tier buttons fitting narrow widths without overflow.
         let by = inner.y + inner.height.saturating_sub(1);
         self.buttons.clear();
+        if inner.width == 0 {
+            return;
+        }
+        let inner_right = inner.x + inner.width;
+        const PERM_FULL_BTNS_MIN_W: u16 = 45;
+        const PERM_SHORT_BTNS_MIN_W: u16 = 31;
+        let (btns, gap): (
+            [(&str, &str, PermissionAction, ratatui::style::Color); 3],
+            u16,
+        ) = if inner.width >= PERM_FULL_BTNS_MIN_W {
+            (
+                [
+                    (
+                        " a ",
+                        " Allow once ",
+                        PermissionAction::AllowOnce,
+                        theme::SUCCESS,
+                    ),
+                    (
+                        " s ",
+                        " Always allow ",
+                        PermissionAction::AllowAlways,
+                        theme::INFO,
+                    ),
+                    (" d ", " Deny ", PermissionAction::Deny, theme::ERROR),
+                ],
+                2,
+            )
+        } else if inner.width >= PERM_SHORT_BTNS_MIN_W {
+            (
+                [
+                    (" a ", " Once ", PermissionAction::AllowOnce, theme::SUCCESS),
+                    (
+                        " s ",
+                        " Always ",
+                        PermissionAction::AllowAlways,
+                        theme::INFO,
+                    ),
+                    (" d ", " Deny ", PermissionAction::Deny, theme::ERROR),
+                ],
+                1,
+            )
+        } else {
+            (
+                [
+                    (" a ", "", PermissionAction::AllowOnce, theme::SUCCESS),
+                    (" s ", "", PermissionAction::AllowAlways, theme::INFO),
+                    (" d ", "", PermissionAction::Deny, theme::ERROR),
+                ],
+                1,
+            )
+        };
         let mut x = inner.x;
-        let btns: [(&str, &str, PermissionAction, ratatui::style::Color); 3] = [
-            (
-                " a ",
-                "Allow once ",
-                PermissionAction::AllowOnce,
-                theme::SUCCESS,
-            ),
-            (
-                " s ",
-                "Always allow ",
-                PermissionAction::AllowAlways,
-                theme::INFO,
-            ),
-            (" d ", "Deny ", PermissionAction::Deny, theme::ERROR),
-        ];
         for (k, label, act, c) in btns {
             let kw = width(k) as u16;
             let lw = width(label) as u16;
+            if x.saturating_add(kw) > inner_right {
+                break;
+            }
             buf.set_string(
                 x,
                 by,
@@ -138,23 +212,33 @@ impl PermissionView {
                     .bg(c)
                     .add_modifier(Modifier::BOLD),
             );
-            buf.set_string(
-                x + kw,
-                by,
-                format!(" {label}"),
-                Style::new().fg(theme::TEXT).bg(theme::PANEL_HOVER),
-            );
-            self.buttons.push((by, x, x + kw + lw + 1, act));
-            x += kw + lw + 3;
+            let mut end_x = x + kw;
+            if lw > 0 && end_x < inner_right {
+                let avail = (inner_right - end_x) as usize;
+                let fit = text::truncate(label, avail);
+                let fw = width(&fit) as u16;
+                buf.set_string(
+                    end_x,
+                    by,
+                    fit,
+                    Style::new().fg(theme::TEXT).bg(theme::PANEL_HOVER),
+                );
+                end_x += fw;
+            }
+            self.buttons.push((by, x, end_x, act));
+            x = end_x.saturating_add(gap);
         }
         if queued > 0 {
             let q = format!("+{queued} more pending");
-            buf.set_string(
-                inner.x + inner.width.saturating_sub(width(&q) as u16),
-                by,
-                q,
-                Style::new().fg(theme::MUTED).bg(bg),
-            );
+            let qw = width(&q) as u16;
+            if x.saturating_add(qw) <= inner_right {
+                buf.set_string(
+                    inner_right - qw,
+                    by,
+                    q,
+                    Style::new().fg(theme::MUTED).bg(bg),
+                );
+            }
         }
     }
 }
@@ -162,11 +246,14 @@ impl PermissionView {
 /// Modal body: headline, prominent fields (command / path) and the full pretty-printed input.
 fn content(req: &PermissionRequest, iw: usize) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
-    // Headline.
-    lines.push(Line::from(vec![
-        Span::styled(req.tool.clone(), theme::bold(theme::WARNING)),
-        Span::styled(format!("  {}", text::one_line(&req.purpose)), theme::text()),
-    ]));
+    // Headline (wrapped for narrow terminals).
+    lines.extend(text::wrap_spans(
+        &[
+            Span::styled(req.tool.clone(), theme::bold(theme::WARNING)),
+            Span::styled(format!("  {}", text::one_line(&req.purpose)), theme::text()),
+        ],
+        iw.max(1),
+    ));
     lines.push(Line::default());
     // Prominent fields.
     let s = |k: &str| req.input.get(k).and_then(Value::as_str).map(str::to_string);
@@ -175,7 +262,7 @@ fn content(req: &PermissionRequest, iw: usize) -> Vec<Line<'static>> {
         for l in text::sanitize(&cmd).lines() {
             for wl in text::wrap_hard(
                 &[Span::styled(format!("$ {l}"), theme::bold(theme::TEXT))],
-                iw,
+                iw.max(1),
             ) {
                 lines.push(wl);
             }
@@ -183,10 +270,13 @@ fn content(req: &PermissionRequest, iw: usize) -> Vec<Line<'static>> {
         lines.push(Line::default());
     }
     if let Some(p) = s("path") {
-        lines.push(Line::from(vec![
-            Span::styled("path  ", theme::muted()),
-            Span::styled(p, theme::bold(theme::INFO)),
-        ]));
+        lines.extend(text::wrap_hard(
+            &[
+                Span::styled("path  ", theme::muted()),
+                Span::styled(text::one_line(&p), theme::bold(theme::INFO)),
+            ],
+            iw.max(1),
+        ));
         lines.push(Line::default());
     }
     if let Some(preview) = &req.preview {

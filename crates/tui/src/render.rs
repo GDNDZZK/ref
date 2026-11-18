@@ -6,7 +6,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use crate::app::{AcKind, App, Mode};
+use crate::app::{App, Mode};
 use crate::state::SessionView;
 use crate::text::{self, width};
 use crate::ui::chat::{self, Env};
@@ -36,11 +36,6 @@ const PROMPT_CHROME_ROWS: u16 = 4;
 const MIN_PROMPT_ROWS: u16 = 3;
 /// The disconnected banner needs a screen taller than this.
 const BANNER_MIN_SCREEN_H: u16 = 4;
-/// Most rows shown in the autocomplete popup.
-const AC_MAX_ROWS: usize = 10;
-/// Minimum column where the autocomplete description starts.
-const AC_MIN_DESC_COL: usize = 24;
-
 pub struct Layout {
     pub chat: Rect,
     pub prompt: Rect,
@@ -59,7 +54,9 @@ pub fn chat_layout(app: &App, area: Rect) -> Layout {
                 area.height,
             )
         });
-    let main_w = area.width - sidebar.map(|s| s.width + 1).unwrap_or(0);
+    let main_w = area
+        .width
+        .saturating_sub(sidebar.map(|s| s.width + 1).unwrap_or(0));
     let main = Rect::new(area.x, area.y, main_w, area.height);
     // Prompt box: bar(1) + pad(2) + text + pad(2) inside the side margins.
     let px = main.x + PROMPT_MARGIN_X;
@@ -98,6 +95,9 @@ pub fn chat_layout(app: &App, area: Rect) -> Layout {
 pub fn draw(f: &mut Frame<'_>, app: &mut App) {
     let area = f.area();
     app.screen = area;
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
     let now = ref_proto::now_ms();
     let tick = app.tick();
     let buf = f.buffer_mut();
@@ -115,7 +115,12 @@ pub fn draw(f: &mut Frame<'_>, app: &mut App) {
     let cursor = draw_overlays(buf, area, app, tick, cursor);
     draw_disconnected_banner(buf, area, app, tick);
     app.toasts.draw(buf, area);
-    if let Some((x, y)) = cursor {
+    if let Some((x, y)) = cursor
+        && x >= area.x
+        && x < area.x.saturating_add(area.width)
+        && y >= area.y
+        && y < area.y.saturating_add(area.height)
+    {
         f.set_cursor_position((x, y));
     }
 }
@@ -159,7 +164,7 @@ fn draw_overlays(
     match app.dialog.as_mut() {
         Some(Dialog::List(d)) => {
             d.draw(buf, area, tick);
-            Some(d.cursor())
+            d.cursor()
         }
         Some(Dialog::Help(h)) => {
             h.draw(buf, area);
@@ -237,6 +242,7 @@ fn draw_disconnected_banner(buf: &mut Buffer, area: Rect, app: &App, tick: u64) 
         || !app.ever_connected
         || app.refused.is_some()
         || area.height <= BANNER_MIN_SCREEN_H
+        || area.width < 4
     {
         return;
     }
@@ -244,10 +250,13 @@ fn draw_disconnected_banner(buf: &mut Buffer, area: Rect, app: &App, tick: u64) 
     let r = Rect::new(area.x, area.y, area.width, 1);
     fill(buf, r, Style::new().bg(theme::ERROR));
     let w = width(&msg) as u16;
-    buf.set_string(
-        area.x + area.width.saturating_sub(w) / 2,
+    let x = area.x + area.width.saturating_sub(w) / 2;
+    let max_w = (area.x + area.width - x) as usize;
+    buf.set_stringn(
+        x,
         area.y,
         msg,
+        max_w,
         Style::new()
             .fg(theme::PANEL)
             .bg(theme::ERROR)
@@ -301,8 +310,9 @@ fn draw_chat_mode(
     let focused = app.dialog.is_none() && app.perm.is_none();
     let cursor = draw_prompt(buf, &lay, app, focused);
     // Autocomplete popup above the prompt.
-    draw_autocomplete(buf, &lay, app);
-    // Status line.
+    if let Some(ac) = app.ac.as_mut() {
+        crate::ui::autocomplete::draw(buf, lay.prompt, lay.chat.height, ac);
+    }
     let view = app.current.as_ref().and_then(|c| app.views.get(c));
     let hint = app.hint.as_ref().map(|h| (h.0.clone(), h.1));
     let sc = StatusCtx {
@@ -356,6 +366,9 @@ fn connect_text(app: &App, max_w: usize) -> Vec<Line<'static>> {
 }
 
 fn draw_center(buf: &mut Buffer, area: Rect, lines: &[Line<'static>]) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
     let h = lines.len() as u16;
     let y0 = area.y + area.height.saturating_sub(h) / 2;
     for (i, l) in lines.iter().enumerate() {
@@ -496,69 +509,6 @@ fn draw_prompt(buf: &mut Buffer, lay: &Layout, app: &mut App, focused: bool) -> 
     cursor
 }
 
-fn draw_autocomplete(buf: &mut Buffer, lay: &Layout, app: &mut App) {
-    let Some(ac) = app.ac.as_mut() else { return };
-    if ac.items.is_empty() {
-        return;
-    }
-    let max_h = AC_MAX_ROWS.min(lay.chat.height.saturating_sub(1) as usize);
-    let n = ac.items.len().min(max_h);
-    if n == 0 {
-        return;
-    }
-    let h = n as u16 + 2;
-    let x = lay.prompt.x;
-    let w = lay.prompt.width;
-    let y = lay.prompt.y.saturating_sub(h);
-    let r = Rect::new(x, y, w, h);
-    ac.rect = r;
-    crate::ui::dialog::clear_wide_edges(buf, r);
-    let bg = theme::PANEL;
-    fill(buf, r, Style::new().bg(bg));
-    let bst = Style::new().fg(theme::BORDER).bg(bg);
-    for xx in r.x..r.x + r.width {
-        buf.set_string(xx, r.y, "─", bst);
-    }
-    let title = match ac.kind {
-        AcKind::Slash => " commands ",
-        AcKind::File => " files ",
-    };
-    buf.set_string(r.x + 2, r.y, title, Style::new().fg(theme::MUTED).bg(bg));
-    let start = ac.sel.saturating_sub(n - 1);
-    for (i, (_, label, desc)) in ac.items.iter().enumerate().skip(start).take(n) {
-        let yy = r.y + 1 + (i - start) as u16;
-        let sel = i == ac.sel;
-        let rbg = if sel { theme::PRIMARY } else { bg };
-        let fgc = if sel { theme::PANEL } else { theme::TEXT };
-        fill(buf, Rect::new(r.x, yy, r.width, 1), Style::new().bg(rbg));
-        let lw = (r.width as usize).saturating_sub(4);
-        let label_w = width(label).min(lw);
-        buf.set_stringn(
-            r.x + 2,
-            yy,
-            label,
-            lw,
-            Style::new().fg(fgc).bg(rbg).add_modifier(if sel {
-                Modifier::BOLD
-            } else {
-                Modifier::empty()
-            }),
-        );
-        let dx = (label_w + 2).max(AC_MIN_DESC_COL.min(lw / 2));
-        if !desc.is_empty() && dx + 4 < lw {
-            buf.set_stringn(
-                r.x + 2 + dx as u16,
-                yy,
-                text::truncate(desc, lw - dx),
-                lw - dx,
-                Style::new()
-                    .fg(if sel { theme::PANEL } else { theme::MUTED })
-                    .bg(rbg),
-            );
-        }
-    }
-}
-
 /// Click target of a sidebar row.
 #[derive(Clone)]
 enum SbClick {
@@ -644,8 +594,10 @@ fn draw_sidebar(buf: &mut Buffer, r: Rect, app: &mut App, now: i64, tick: u64) {
     app.sidebar_rect = r;
     let Some(v) = app.cur() else { return };
     // Separator.
-    for y in r.y..r.y + r.height {
-        buf.set_string(r.x - 1, y, "│", theme::fg(theme::BORDER_SUBTLE));
+    if r.x > 0 {
+        for y in r.y..r.y + r.height {
+            buf.set_string(r.x - 1, y, "│", theme::fg(theme::BORDER_SUBTLE));
+        }
     }
     let w = r.width.saturating_sub(2) as usize;
     if w < 4 || r.height < 2 {
@@ -947,7 +899,7 @@ fn draw_watch_mode(
             // Not yet attached: draw an empty frame.
             if let Some(info) = app.live.iter().find(|s| s.id == sid).cloned() {
                 let tmp = SessionView::new(info, false);
-                let root = split::root_task(&tmp.info, &app.live);
+                let root = split::root_task(&tmp.info, &app.live, &app.history_list);
                 let inner = split::draw_frame(
                     buf,
                     r,
@@ -965,7 +917,7 @@ fn draw_watch_mode(
             }
             continue;
         };
-        let root = split::root_task(&v.info, &app.live);
+        let root = split::root_task(&v.info, &app.live, &app.history_list);
         let inner = split::draw_frame(
             buf,
             r,
@@ -1000,7 +952,8 @@ fn draw_watch_mode(
             } else {
                 "message · enter on empty = zoom"
             };
-            cursor = ed.draw(buf, ir, ph, app.perm.is_none());
+            let tile_focused = app.perm.is_none() && app.question.is_none() && app.dialog.is_none();
+            cursor = ed.draw_single_line(buf, ir, None, ph, tile_focused);
         }
         app.views.insert(sid, v);
     }
