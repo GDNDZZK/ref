@@ -173,3 +173,69 @@ export function patchSkillsPaths(doc: JsonObject, nextPaths: readonly string[]):
   }
   return setAt(doc, ['skills', 'paths'], cleaned.length > 0 ? cleaned : undefined)
 }
+
+// Preserves trailing spaces while typing prose, collapsing blank strings to `undefined`.
+export function normalizeProseInput(value: string): string | undefined {
+  return value.trim() === '' ? undefined : value
+}
+
+// Trims leading/trailing whitespace on blur or identifier commit, collapsing blank strings to `undefined`.
+export function normalizeTrimmedString(value: string): string | undefined {
+  const trimmed = value.trim()
+  return trimmed === '' ? undefined : trimmed
+}
+
+export const MANAGED_PROVIDER_OPTION_KEYS: ReadonlySet<string> = new Set([
+  'baseURL',
+  'baseUrl',
+  'base_url',
+  'apiKey',
+  'api_key',
+  'setCacheKey',
+  'chunkTimeout',
+  'headers',
+])
+
+export function extractExtraProviderOptions(provider: JsonObject): JsonObject | undefined {
+  const options = getObjectAt(provider, ['options'])
+  if (!options) return undefined
+  const extra: JsonObject = {}
+  let count = 0
+  for (const [key, value] of Object.entries(options)) {
+    if (MANAGED_PROVIDER_OPTION_KEYS.has(key)) continue
+    setOwn(extra, key, cloneJson(value))
+    count += 1
+  }
+  return count > 0 ? extra : undefined
+}
+
+// Merges user-edited extra `provider.<id>.options` keys with dedicated managed keys without erasing
+// or reordering existing managed keys (`apiKey`, `baseURL`, `setCacheKey`, `chunkTimeout`, `headers`).
+export function mergeExtraProviderOptions(
+  provider: JsonObject,
+  extraOptions: JsonObject | undefined,
+): JsonObject | undefined {
+  const existing = getObjectAt(provider, ['options']) ?? {}
+  const merged: JsonObject = {}
+  const writtenExtra = new Set<string>()
+
+  for (const [key, value] of Object.entries(existing)) {
+    if (MANAGED_PROVIDER_OPTION_KEYS.has(key)) {
+      setOwn(merged, key, cloneJson(value))
+      continue
+    }
+    if (extraOptions && Object.hasOwn(extraOptions, key)) {
+      setOwn(merged, key, cloneJson(extraOptions[key]))
+      writtenExtra.add(key)
+    }
+  }
+
+  if (extraOptions) {
+    for (const [key, value] of Object.entries(extraOptions)) {
+      if (MANAGED_PROVIDER_OPTION_KEYS.has(key) || writtenExtra.has(key)) continue
+      setOwn(merged, key, cloneJson(value))
+    }
+  }
+
+  return Object.keys(merged).length > 0 ? merged : undefined
+}

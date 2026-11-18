@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // MCP Servers configuration section (`mcp.*`): Local (`command[]`, paste-command splitter, `cwd`,
 // `environment`) and Remote (`url`, `headers`), plus `enabled` and `timeout`.
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   getAt,
@@ -15,7 +15,14 @@ import {
   setAt,
   type JsonObject,
 } from '../../../config/jsonPatch.ts'
-import { renameObjectKey, splitShellWords, uniqueObjectKey } from '../../../config/sectionHelpers.ts'
+import {
+  normalizeProseInput,
+  normalizeTrimmedString,
+  renameObjectKey,
+  splitShellWords,
+  uniqueObjectKey,
+} from '../../../config/sectionHelpers.ts'
+import { useConfigSubEditorScope, useInlineRenameDrafts } from '../../../config/subEditorState.ts'
 import Chevron from '../../Chevron.vue'
 import DialogButton from '../../DialogButton.vue'
 import Icon from '../../Icon.vue'
@@ -35,13 +42,51 @@ const { t } = useI18n()
 
 const openServers = reactive(new Set<string>())
 const pasteLines = reactive<Record<string, string>>({})
-const renameDrafts = reactive<Record<string, string>>({})
 const addingKind = ref<McpKind | null>(null)
 const newServerName = ref('')
+let lastEmittedDoc: JsonObject | undefined
 
 const mcpMap = computed(() => getObjectAt(props.doc, ['mcp']) ?? {})
 const serverNames = computed(() => Object.keys(mcpMap.value))
 
+function emitDoc(next: JsonObject): void {
+  lastEmittedDoc = next
+  emit('update:doc', next)
+}
+
+const renames = useInlineRenameDrafts({
+  exists: (key) => Object.hasOwn(mcpMap.value, key),
+  collisionMessage: () => t('config.editor.renameExists'),
+  onCommit(oldName, target) {
+    const renamed = renameObjectKey(mcpMap.value, oldName, target)
+    if (openServers.has(oldName)) {
+      openServers.delete(oldName)
+      openServers.add(target)
+    }
+    if (Object.hasOwn(pasteLines, oldName)) {
+      pasteLines[target] = pasteLines[oldName]!
+      delete pasteLines[oldName]
+    }
+    emitDoc(setAt(props.doc, ['mcp'], renamed))
+  },
+})
+
+const subEditorScope = useConfigSubEditorScope(
+  () => ({ dirty: renames.hasDirty.value, committable: renames.hasCommittable.value, invalid: false }),
+  () => renames.flushAll(),
+)
+
+watch(
+  () => props.doc,
+  (nextDoc) => {
+    if (nextDoc === lastEmittedDoc) return
+    renames.reconcileKeys(serverNames.value, !subEditorScope.hasHost)
+  },
+)
+
+if (subEditorScope.resetVersion) {
+  watch(subEditorScope.resetVersion, () => renames.clearAll())
+}
 const kindOptions = computed(() => [
   { value: 'local' as const, label: t('config.editor.mcp.typeLocal') },
   { value: 'remote' as const, label: t('config.editor.mcp.typeRemote') },
@@ -77,7 +122,7 @@ function confirmAdd(): void {
   openServers.add(name)
   const initial: JsonObject =
     kind === 'local' ? { type: 'local', command: ['npx'] } : { type: 'remote', url: 'https://' }
-  emit('update:doc', setAt(props.doc, ['mcp', name], initial))
+  emitDoc(setAt(props.doc, ['mcp', name], initial))
 }
 
 function toggleServer(name: string): void {
@@ -88,31 +133,22 @@ function toggleServer(name: string): void {
 function removeServer(name: string): void {
   openServers.delete(name)
   delete pasteLines[name]
-  delete renameDrafts[name]
-  emit('update:doc', setAt(props.doc, ['mcp', name], undefined))
-}
-
-function applyRename(oldName: string): void {
-  const target = (renameDrafts[oldName] ?? oldName).trim()
-  if (target === '' || target === oldName || Object.hasOwn(mcpMap.value, target)) return
-  const renamed = renameObjectKey(mcpMap.value, oldName, target)
-  delete renameDrafts[oldName]
-  if (openServers.has(oldName)) {
-    openServers.delete(oldName)
-    openServers.add(target)
-  }
-  emit('update:doc', setAt(props.doc, ['mcp'], renamed))
+  renames.remove(name)
+  emitDoc(setAt(props.doc, ['mcp', name], undefined))
 }
 
 function patchServer(name: string, subPath: readonly string[], value: unknown): void {
-  emit('update:doc', setAt(props.doc, ['mcp', name, ...subPath], value))
+  const nextServer = setAt(serverObj(name), subPath, value)
+  emitDoc(setAt(props.doc, ['mcp', name], nextServer))
+}
+
+function patchServerProse(name: string, subPath: readonly string[], value: string): void {
+  patchServer(name, subPath, normalizeProseInput(value))
 }
 
 function patchServerString(name: string, subPath: readonly string[], value: string): void {
-  const trimmed = value.trim()
-  patchServer(name, subPath, trimmed === '' ? undefined : trimmed)
+  patchServer(name, subPath, normalizeTrimmedString(value))
 }
-
 function switchKind(name: string, nextKind: McpKind): void {
   patchServer(name, ['type'], nextKind)
 }
@@ -130,7 +166,7 @@ function readCommandList(name: string): string[] {
 function writeCommandList(name: string, items: readonly string[]): void {
   let next = setAt(props.doc, ['mcp', name, 'args'], undefined)
   next = setAt(next, ['mcp', name, 'command'], [...items])
-  emit('update:doc', next)
+  emitDoc(next)
 }
 
 function applyPastedCommand(name: string): void {
@@ -151,7 +187,7 @@ function readEnvironment(name: string): Record<string, string> {
 function writeEnvironment(name: string, map: Record<string, string>): void {
   let next = setAt(props.doc, ['mcp', name, 'env'], undefined)
   next = setAt(next, ['mcp', name, 'environment'], Object.keys(map).length > 0 ? map : undefined)
-  emit('update:doc', next)
+  emitDoc(next)
 }
 
 function writeHeaders(name: string, map: Record<string, string>): void {
@@ -222,21 +258,23 @@ function writeHeaders(name: string, map: Record<string, string>): void {
       </div>
 
       <div v-if="openServers.has(name)" class="card-body">
-        <FormRow :label="t('config.editor.rename')">
+        <FormRow :label="t('config.editor.rename')" :error="renames.errorOf(name)">
           <div class="rename-row">
             <input
-              :value="renameDrafts[name] ?? name"
+              :value="renames.read(name)"
               type="text"
               class="text-input mono"
               spellcheck="false"
-              @input="renameDrafts[name] = ($event.target as HTMLInputElement).value"
-              @keydown.enter.prevent="!$event.isComposing && applyRename(name)"
+              @input="renames.set(name, ($event.target as HTMLInputElement).value)"
+              @blur="renames.blur(name)"
+              @keydown.enter.prevent="!$event.isComposing && renames.commit(name)"
             />
             <DialogButton
-              v-if="(renameDrafts[name] ?? name).trim() !== name"
               small
               :label="t('config.editor.rename')"
-              @click="applyRename(name)"
+              :disabled="!renames.canCommit(name)"
+              @mousedown.prevent
+              @click="renames.commit(name)"
             />
           </div>
         </FormRow>
@@ -297,7 +335,8 @@ function writeHeaders(name: string, map: Record<string, string>): void {
               class="text-input mono"
               spellcheck="false"
               placeholder="/path/to/dir"
-              @input="patchServerString(name, ['cwd'], ($event.target as HTMLInputElement).value)"
+              @input="patchServerProse(name, ['cwd'], ($event.target as HTMLInputElement).value)"
+              @blur="patchServerString(name, ['cwd'], ($event.target as HTMLInputElement).value)"
             />
           </FormRow>
 

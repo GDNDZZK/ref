@@ -60,10 +60,10 @@ watch(
   { immediate: true },
 )
 
-// "src/app/main.ts" -> ["src/app/", "main.ts"]; a directory keeps its trailing slash in the name part.
+// "src/app/main.ts" or "src\app\main.ts" -> ["src/app/", "main.ts"]; directories keep their trailing slash.
 function splitPath(path: string): [string, string] {
-  const body = path.endsWith('/') ? path.slice(0, -1) : path
-  const cut = body.lastIndexOf('/') + 1
+  const body = path.endsWith('/') || path.endsWith('\\') ? path.slice(0, -1) : path
+  const cut = Math.max(body.lastIndexOf('/'), body.lastIndexOf('\\')) + 1
   return [path.slice(0, cut), path.slice(cut)]
 }
 </script>
@@ -79,7 +79,7 @@ function splitPath(path: string): [string, string] {
         />
         <div
           v-for="(item, index) in completion.items"
-          :key="item.value"
+          :key="`${index}:${item.value}`"
           class="row"
           role="option"
           :aria-selected="index === completion.selected"
@@ -87,7 +87,10 @@ function splitPath(path: string): [string, string] {
           @mousedown.prevent="emit('pick', index)"
         >
           <template v-if="completion.kind === 'file' || completion.kind === 'path'">
-            <Icon :icon="item.label.endsWith('/') ? 'folder-16' : 'file-16'" class="muted" />
+            <Icon
+              :icon="item.label.endsWith('/') || item.label.endsWith('\\') ? 'folder-16' : 'file-16'"
+              class="muted"
+            />
             <span class="path">
               <span v-if="splitPath(item.label)[0]" class="path-dir muted"
                 ><bdi>{{ splitPath(item.label)[0] }}</bdi></span
