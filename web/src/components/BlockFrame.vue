@@ -10,9 +10,9 @@
 import { onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { arrived, chase } from '../motion/chase.ts'
 import { cssEasing } from '../motion/cssEasing.ts'
+import { prefersReducedMotion } from '../motion/reducedMotion.ts'
 import { useFrame } from '../motion/useFrame.ts'
 import { motion } from '../theme/generated/motion.ts'
-
 const props = defineProps<{ streaming: boolean; fresh: boolean; stale: boolean; tight: boolean }>()
 
 const frame = useTemplateRef<HTMLElement>('frame')
@@ -33,7 +33,7 @@ useFrame(easing, (frameSeconds) => {
 watch(
   () => props.streaming,
   (isStreaming) => {
-    if (!isStreaming || easing.value || !frame.value) return
+    if (!isStreaming || easing.value || !frame.value || prefersReducedMotion()) return
     easedHeight = frame.value.offsetHeight
     easing.value = true
   },
@@ -49,13 +49,14 @@ const sizeObserver = new ResizeObserver((entries) => {
 
 onMounted(() => {
   if (!frame.value || !column.value) return
-  easing.value = props.streaming
+  easing.value = props.streaming && !prefersReducedMotion()
   sizeObserver.observe(column.value)
   if (props.fresh) enter(frame.value)
 })
 onBeforeUnmount(() => sizeObserver.disconnect())
 
 function enter(element: HTMLElement): void {
+  if (prefersReducedMotion()) return
   element.animate(
     [
       { opacity: 0, transform: `translateY(${-motion.enterDrop}px)` },

@@ -97,6 +97,8 @@ export async function withMockPage(body) {
       page.on('pageerror', (error) => problems.push(`page error: ${error.message}`))
       // The key goes in the fragment, as in the address ref-web prints.
       await page.goto(`http://127.0.0.1:${PORT}/#key=${token}`)
+      await page.locator('.empty-workspace').waitFor({ timeout: WAIT_MS })
+      await page.keyboard.press('Alt+KeyN')
       await page.waitForSelector(INPUT, { timeout: WAIT_MS })
       await body(page, problems, { restartServer })
     } finally {

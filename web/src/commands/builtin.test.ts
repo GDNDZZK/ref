@@ -2,6 +2,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppI18n } from '../i18n/index.ts'
 import { useCommandsStore } from '../stores/commands.ts'
+import { useWorkspaceStore } from '../stores/workspace.ts'
 import { registerBuiltinCommands } from './builtin.ts'
 import { formatShortcut } from './shortcuts.ts'
 
@@ -23,7 +24,7 @@ describe('built-in commands', () => {
       expect(slashes).toContain(name)
     for (const name of ['peers-name', 'peers-inbox', 'peers-outbox', 'watch', 'sidebar', 'mcp', 'help'])
       expect(slashes).toContain(name)
-    expect(slashes).not.toContain('editor')
+    expect(slashes).toContain('detach')
     expect(slashes).not.toContain('exit')
   })
 
@@ -47,5 +48,22 @@ describe('built-in commands', () => {
   it('has no shortcut for starting a session in another folder', () => {
     registerBuiltinCommands()
     expect(useCommandsStore().find('new-in')?.shortcut).toBeUndefined()
+  })
+
+  it('registers detach with background/leave aliases and enables it only when currentId or zoomedId is set', async () => {
+    registerBuiltinCommands()
+    const commands = useCommandsStore()
+    const workspace = useWorkspaceStore()
+    const detachSpy = vi.spyOn(workspace, 'detachCurrent').mockResolvedValue(undefined)
+    const detach = commands.find('detach')!
+    expect(detach.aliases).toEqual(['background', 'leave'])
+    expect(detach.enabled?.('')).toBe(false)
+    workspace.currentId = 'ses_1'
+    expect(detach.enabled?.('')).toBe(true)
+    await commands.runSlash('/background')
+    expect(detachSpy).toHaveBeenCalledTimes(1)
+    workspace.currentId = undefined
+    workspace.zoomedId = 'ses_2'
+    expect(detach.enabled?.('')).toBe(true)
   })
 })

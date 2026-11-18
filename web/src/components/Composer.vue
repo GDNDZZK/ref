@@ -12,6 +12,7 @@ import type { SessionComposer } from '../composer/sessionComposer.ts'
 import type { ChatSession } from '../model/chatSession.ts'
 import { useCommandsStore } from '../stores/commands.ts'
 import { useConnectionStore } from '../stores/connection.ts'
+import { useDialogsStore } from '../stores/dialogs.ts'
 import { useNoticesStore } from '../stores/notices.ts'
 import { useWorkspaceStore } from '../stores/workspace.ts'
 import { components } from '../theme/generated/components.ts'
@@ -43,6 +44,7 @@ const { t } = useI18n()
 const connection = useConnectionStore()
 const commands = useCommandsStore()
 const workspace = useWorkspaceStore()
+const dialogs = useDialogsStore()
 const notices = useNoticesStore()
 
 const draft = computed(() => props.composer.draft)
@@ -382,7 +384,7 @@ defineExpose({ focus: () => input.value?.focus() })
               :shell="draft.shell"
               @agent-clicked="openDialog('agents')"
               @model-clicked="openDialog('models')"
-              @variant-clicked="workspace.setVariant(session.id, '').catch(notices.pushError)"
+              @variant-clicked="dialogs.open({ kind: 'variants', sessionId: session.id })"
             />
             <span class="hint" :class="{ shown: interruptHint }">{{ t('composer.interruptHint') }}</span>
             <SendButton :busy="session.busy" :can-send="canSend" @click="onSendButton" />

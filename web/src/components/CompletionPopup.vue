@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // The list above the input box while typing `/command` or `@file`.
-import { computed, nextTick, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import type { Completion } from '../composer/completion.ts'
+import { createPointerGuard } from '../composables/pointerGuard.ts'
 import { components } from '../theme/generated/components.ts'
 import Icon from './Icon.vue'
 
@@ -20,17 +21,43 @@ const height = computed(() => {
 })
 
 const list = useTemplateRef<HTMLElement>('list')
+const pointerMoved = createPointerGuard()
+const highlightReady = ref(false)
+let wasOpen = false
+
+function onRowHover(index: number, event: MouseEvent): void {
+  if (pointerMoved(event)) emit('hover', index)
+}
+
 watch(
-  () => props.completion?.selected,
-  async (selected) => {
-    if (selected === undefined || !list.value) return
+  [() => props.completion?.selected, () => props.completion !== undefined],
+  async ([selected, open]) => {
+    if (!open || selected === undefined) {
+      wasOpen = false
+      highlightReady.value = false
+      return
+    }
+    const isInitial = !wasOpen
+    wasOpen = true
     await nextTick()
-    const top = selected * POPUP_ROW_HEIGHT
     const view = list.value
-    if (top < view.scrollTop) view.scrollTop = top
+    if (!view) return
+    const top = selected * POPUP_ROW_HEIGHT
     const bottom = top + POPUP_ROW_HEIGHT
-    if (bottom > view.scrollTop + view.clientHeight) view.scrollTop = bottom - view.clientHeight
+    if (isInitial) {
+      if (view.clientHeight > 0 && (top < view.scrollTop || bottom > view.scrollTop + view.clientHeight)) {
+        view.scrollTop = Math.max(0, Math.round(top - (view.clientHeight - POPUP_ROW_HEIGHT) / 2))
+      }
+      requestAnimationFrame(() => {
+        highlightReady.value = true
+      })
+      return
+    }
+    highlightReady.value = true
+    if (top < view.scrollTop) view.scrollTop = top
+    else if (bottom > view.scrollTop + view.clientHeight) view.scrollTop = bottom - view.clientHeight
   },
+  { immediate: true },
 )
 
 // "src/app/main.ts" -> ["src/app/", "main.ts"]; a directory keeps its trailing slash in the name part.
@@ -45,14 +72,18 @@ function splitPath(path: string): [string, string] {
   <Transition name="popup">
     <div v-if="completion" class="popup" role="listbox" :style="{ height: `${height}px` }">
       <div ref="list" class="list">
-        <div class="highlight" :style="{ translate: `0 ${completion.selected * POPUP_ROW_HEIGHT}px` }" />
+        <div
+          class="highlight"
+          :class="{ ready: highlightReady }"
+          :style="{ translate: `0 ${completion.selected * POPUP_ROW_HEIGHT}px` }"
+        />
         <div
           v-for="(item, index) in completion.items"
           :key="item.value"
           class="row"
           role="option"
           :aria-selected="index === completion.selected"
-          @mousemove="emit('hover', index)"
+          @mousemove="onRowHover(index, $event)"
           @mousedown.prevent="emit('pick', index)"
         >
           <template v-if="completion.kind === 'slash'">
@@ -63,8 +94,9 @@ function splitPath(path: string): [string, string] {
           <template v-else>
             <Icon :icon="item.label.endsWith('/') ? 'folder-16' : 'file-16'" class="muted" />
             <span class="path">
-              <span class="muted">{{ splitPath(item.label)[0] }}</span
-              >{{ splitPath(item.label)[1] }}
+              <span v-if="splitPath(item.label)[0]" class="path-dir muted"
+                ><bdi>{{ splitPath(item.label)[0] }}</bdi></span
+              ><span class="path-name">{{ splitPath(item.label)[1] }}</span>
             </span>
           </template>
         </div>
@@ -102,6 +134,9 @@ function splitPath(path: string): [string, string] {
   height: var(--completion-popup-popup-row-height);
   border-radius: var(--radius-small);
   background: var(--surface-hover);
+}
+
+.highlight.ready {
   transition: translate var(--motion-quick) var(--motion-ease);
 }
 
@@ -134,10 +169,27 @@ function splitPath(path: string): [string, string] {
 }
 
 .path {
+  display: flex;
+  align-items: baseline;
   min-width: 0;
-  overflow: hidden;
   font-family: var(--font-mono);
   font-size: var(--code-font-size);
+}
+
+.path-dir {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  direction: rtl;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.path-name {
+  flex: 0 0 auto;
+  max-width: 100%;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

@@ -50,9 +50,8 @@ let lookup: ReturnType<typeof setTimeout> | undefined
 let lookedUp = 0
 
 function isDirNotFound(err: unknown): boolean {
-  if (err instanceof RefError && err.code === 'dir_not_found') return true
+  if (err instanceof RefError && (err.code === 'not_found' || err.code === 'dir_not_found')) return true
   if (!(err instanceof Error)) return false
-  // remove with protocol 5
   return err.message.startsWith('Directory does not exist:') || err.message.startsWith('Not a directory:')
 }
 

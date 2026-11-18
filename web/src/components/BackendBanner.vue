@@ -122,6 +122,7 @@ async function restart(): Promise<void> {
   min-width: 0;
 }
 
+.banner-enter-from,
 .banner-leave-to {
   grid-template-rows: 0fr;
   opacity: 0;

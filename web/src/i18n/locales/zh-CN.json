@@ -117,7 +117,7 @@
       "title": "新建会话"
     },
     "new-in": {
-      "title": "在其他文件夹新建会话…"
+      "title": "选择文件夹新建会话…"
     },
     "sessions": {
       "title": "切换会话（运行中 + 历史）"
@@ -142,6 +142,9 @@
     },
     "cd": {
       "title": "更改此会话的工作目录"
+    },
+    "detach": {
+      "title": "将会话挂到后台"
     },
     "close": {
       "title": "关闭此会话"
@@ -202,7 +205,7 @@
   },
   "sidebar": {
     "newSession": "新建会话",
-    "newSessionIn": "在其他文件夹新建会话…",
+    "newSessionIn": "选择文件夹新建会话…",
     "todo": "待办",
     "running": "运行中",
     "history": "历史",
@@ -214,6 +217,7 @@
     "compacting": "正在压缩",
     "retrying": "正在重试",
     "rename": "重命名",
+    "moveToBackground": "挂到后台",
     "close": "关闭",
     "delete": "删除",
     "hide": "隐藏侧边栏",
@@ -222,6 +226,9 @@
     "settings": "设置",
     "sessions": "会话",
     "needsAnswer": "等待你的回答"
+  },
+  "workspace": {
+    "empty": "未打开会话"
   },
   "split": {
     "empty": "没有后台会话",
@@ -239,24 +246,32 @@
   "dialog": {
     "cancel": "取消",
     "close": "关闭",
+    "noMatch": "没有匹配项",
+    "openConfig": "打开配置…",
     "models": {
       "title": "切换模型",
       "search": "搜索模型",
+      "empty": "未配置模型",
+      "noMatch": "没有匹配的模型",
       "context": "{size} 上下文",
       "reasoning": "推理",
       "images": "图片"
     },
     "agents": {
       "title": "切换 agent",
-      "search": "搜索 agent"
+      "search": "搜索 agent",
+      "empty": "未配置 agent",
+      "noMatch": "没有匹配的 agent"
     },
     "variants": {
       "title": "模型变体",
-      "default": "默认"
+      "default": "默认",
+      "noMatch": "没有匹配的变体"
     },
     "sessions": {
       "title": "会话",
       "search": "搜索会话",
+      "empty": "暂无会话",
       "filterLabel": "按创建者筛选",
       "filterAll": "全部",
       "filterUser": "用户创建",
@@ -404,5 +419,52 @@
   "todo": {
     "title": "待办 {done}/{total}",
     "show": "显示待办清单"
+  },
+  "config": {
+    "reset": "重置",
+    "clear": "清除",
+    "moveUp": "上移",
+    "moveDown": "下移",
+    "remove": "移除",
+    "secret": {
+      "show": "显示",
+      "hide": "隐藏",
+      "envSet": "{name} 已设置",
+      "envUnset": "{name} 未设置"
+    },
+    "list": {
+      "add": "添加",
+      "placeholder": "添加项…"
+    },
+    "kv": {
+      "add": "添加条目",
+      "keyPlaceholder": "键",
+      "valuePlaceholder": "值"
+    },
+    "permission": {
+      "modeLabel": "权限模式",
+      "modeUnset": "默认",
+      "modeGlobal": "全局",
+      "modeRules": "规则列表",
+      "globalAction": "全局动作",
+      "allow": "允许",
+      "ask": "询问",
+      "deny": "拒绝",
+      "toolPlaceholder": "工具（如 bash、mcp_*）",
+      "patternPlaceholder": "模式（如 *、git *）",
+      "addRule": "添加规则",
+      "emptyRules": "暂无规则"
+    },
+    "color": {
+      "default": "自动",
+      "hexPlaceholder": "#rrggbb",
+      "orange": "橙色",
+      "blue": "蓝色",
+      "purple": "紫色",
+      "red": "红色",
+      "yellow": "黄色",
+      "green": "绿色",
+      "cyan": "青色"
+    }
   }
 }

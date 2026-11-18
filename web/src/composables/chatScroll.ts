@@ -11,8 +11,6 @@ export interface ChatScroll {
   // it is. Release once the fold is done.
   holdHeader(block: HTMLElement, headerHeight: number): void
   releaseHeader(): void
-  // Temporarily lets the end drop without growing held footer space while a block folds or exits.
-  restHold(): void
 }
 
 export const chatScrollKey: InjectionKey<ChatScroll> = Symbol('chatScroll')

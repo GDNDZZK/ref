@@ -2,7 +2,7 @@
 // thinking, details), which act on the session's ChatSession.
 
 import { translate } from '../i18n/index.ts'
-import { rowState } from '../shell/sessionRow.ts'
+import { isWorkingSession } from '../shell/sessionRow.ts'
 import { useCommandsStore } from '../stores/commands.ts'
 import { useLayoutStore } from '../stores/layout.ts'
 import { useDialogsStore } from '../stores/dialogs.ts'
@@ -53,10 +53,6 @@ export function registerBuiltinCommands(): void {
   const layout = useLayoutStore()
 
   const canZoomTile = () => !layout.narrow && workspace.mode === 'split' && workspace.focusedId !== undefined
-  const isWorking = (sessionId: string) => {
-    const info = workspace.live.find((session) => session.id === sessionId)
-    return info !== undefined && rowState(info) !== 'idle' && rowState(info) !== 'error'
-  }
 
   const builtin: Command[] = [
     define({
@@ -151,11 +147,17 @@ export function registerBuiltinCommands(): void {
       },
     }),
     define({
+      id: 'detach',
+      aliases: ['background', 'leave'],
+      enabled: () => workspace.currentId !== undefined || workspace.zoomedId !== undefined,
+      run: () => workspace.detachCurrent(),
+    }),
+    define({
       id: 'close',
       shortcut: altKey('K'),
       enabled: hasSession,
       run: (sessionId) =>
-        isWorking(sessionId)
+        isWorkingSession(workspace.infoOf(sessionId))
           ? dialogs.open({ kind: 'closeSession', sessionId })
           : workspace.closeSession(sessionId),
     }),

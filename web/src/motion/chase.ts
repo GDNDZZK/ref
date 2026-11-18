@@ -5,7 +5,7 @@
 
 import { motion } from '../theme/generated/motion.ts'
 import { MS_PER_SECOND } from '../time.ts'
-
+import { prefersReducedMotion } from './reducedMotion.ts'
 const SCROLL_SNAP_PX = 1 // scrolling moves in whole pixels
 
 export function arrived(current: number, target: number): boolean {
@@ -14,7 +14,7 @@ export function arrived(current: number, target: number): boolean {
 
 // One frame of a chase; `frameSeconds` is the time since the previous frame.
 export function chase(current: number, target: number, frameSeconds: number): number {
-  if (arrived(current, target)) return target
+  if (prefersReducedMotion() || arrived(current, target)) return target
   const covered = 1 - Math.exp((-frameSeconds * MS_PER_SECOND) / motion.followLag)
   return current + (target - current) * covered
 }
@@ -23,6 +23,7 @@ export function chase(current: number, target: number, frameSeconds: number): nu
 // (ChatView.scrollStep). The browser rounds scroll offsets to device pixels, so a sub-pixel
 // step that is rounded away would stall the chase a few pixels short of the target.
 export function scrollStep(position: number, target: number, frameSeconds: number): number {
+  if (prefersReducedMotion()) return target
   const from = Math.round(position)
   const next = Math.round(chase(position, target, frameSeconds))
   const step = next !== from ? next : from + Math.sign(target - from)

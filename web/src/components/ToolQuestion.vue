@@ -4,10 +4,10 @@
 // and a confirm step. The keys act on the same form (usePermissionKeys); this is the mouse side.
 import { computed, nextTick, shallowRef, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { createPointerGuard } from '../composables/pointerGuard.ts'
 import type { FormOutcome, QuestionForm } from '../model/questionForm.ts'
 import type { AnsweredQuestion } from '../model/toolContent.ts'
 import Icon from './Icon.vue'
-
 const props = defineProps<{
   form: QuestionForm | undefined
   sending: boolean
@@ -18,6 +18,11 @@ const emit = defineEmits<{ answer: [answers: string[][] | null] }>()
 const { t } = useI18n()
 const field = useTemplateRef<HTMLInputElement[]>('field')
 
+const pointerMoved = createPointerGuard()
+
+function onOptionHover(row: number, event: MouseEvent): void {
+  if (pointerMoved(event)) current.value?.highlight(current.value.tab, row)
+}
 // Kept while the section folds away after the answer.
 const shown = shallowRef(props.form)
 watch(
@@ -133,7 +138,7 @@ watch(
               :class="{ cursor: choice?.cursor === item.row }"
               :role="question.multiple ? 'checkbox' : 'radio'"
               :aria-checked="current.isChosen(current.tab, item.row)"
-              @mouseenter="current.highlight(current.tab, item.row)"
+              @mousemove="onOptionHover(item.row, $event)"
               @click="pick(item.row)"
             >
               <span class="number">{{ item.row + 1 }}</span>

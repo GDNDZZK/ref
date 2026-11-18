@@ -1,12 +1,20 @@
 <script setup lang="ts">
 // Round surface button; the glyph is the slot (CircleButton.qml). Only the face shrinks on press.
 // `--face` is a registered color (base.css), so glyphs painted with it follow the hover fade.
-defineProps<{ label: string }>()
+defineProps<{ label: string; active?: boolean }>()
 defineEmits<{ click: [] }>()
 </script>
 
 <template>
-  <button type="button" class="circle" :aria-label="label" :title="label" @click="$emit('click')">
+  <button
+    type="button"
+    class="circle"
+    :class="{ active }"
+    :aria-label="label"
+    :aria-pressed="active"
+    :title="label"
+    @click="$emit('click')"
+  >
     <span class="face"><slot /></span>
   </button>
 </template>
@@ -17,6 +25,10 @@ defineEmits<{ click: [] }>()
   width: 34px;
   height: 34px;
   transition: --face var(--motion-quick) var(--motion-ease);
+}
+
+.circle.active {
+  color: var(--accent-text);
 }
 
 .circle:hover {

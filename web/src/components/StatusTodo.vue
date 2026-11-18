@@ -116,17 +116,23 @@ onBeforeUnmount(unlisten)
       </template>
     </button>
     <Teleport to="body">
-      <div
-        v-if="open"
-        ref="popover"
-        class="todo-popover"
-        role="region"
-        :aria-label="t('todo.title', { done: progress.done, total: progress.total })"
-        :style="{ left: `${position.left}px`, width: `${position.width}px`, bottom: `${position.bottom}px` }"
-      >
-        <div class="head">{{ t('todo.title', { done: progress.done, total: progress.total }) }}</div>
-        <TodoList :todos="list" />
-      </div>
+      <Transition name="todo-pop">
+        <div
+          v-if="open"
+          ref="popover"
+          class="todo-popover"
+          role="region"
+          :aria-label="t('todo.title', { done: progress.done, total: progress.total })"
+          :style="{
+            left: `${position.left}px`,
+            width: `${position.width}px`,
+            bottom: `${position.bottom}px`,
+          }"
+        >
+          <div class="head">{{ t('todo.title', { done: progress.done, total: progress.total }) }}</div>
+          <TodoList :todos="list" />
+        </div>
+      </Transition>
     </Teleport>
   </div>
 </template>
@@ -193,5 +199,25 @@ onBeforeUnmount(unlisten)
 
 .todo-popover :deep(.todos) {
   border-top: 0;
+}
+
+.todo-pop-enter-active {
+  transition:
+    opacity var(--motion-quick) var(--motion-ease),
+    translate var(--motion-quick) var(--motion-ease),
+    scale var(--motion-quick) var(--motion-ease);
+}
+
+.todo-pop-leave-active {
+  transition:
+    opacity var(--motion-quick) var(--motion-exit-ease),
+    scale var(--motion-quick) var(--motion-exit-ease);
+}
+
+.todo-pop-enter-from,
+.todo-pop-leave-to {
+  opacity: 0;
+  translate: 0 4px;
+  scale: var(--motion-pop-scale);
 }
 </style>

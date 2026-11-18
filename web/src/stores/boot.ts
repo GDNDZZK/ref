@@ -1,4 +1,4 @@
-// Starts the app: connects, then opens the requested session or a new one.
+// Starts the app: connects, then opens the requested session if given.
 
 import { translate } from '../i18n/index.ts'
 import { keys, sentKeyInClear, takeKeyFromAddress } from '../net/keystore.ts'

@@ -6,6 +6,7 @@ import {
   currentTodo,
   dirName,
   historyLabel,
+  isWorkingSession,
   liveLabel,
   matchesQuery,
   relativeTime,
@@ -32,6 +33,15 @@ describe('rowState', () => {
     expect(rowState(info({ last_error: 'boom' }))).toBe('error')
     expect(rowState(info({ last_error: 'boom', status: { state: 'busy' } }))).toBe('busy')
     expect(rowState(info())).toBe('idle')
+  })
+
+  it('identifies working sessions vs idle or failed ones', () => {
+    expect(isWorkingSession(undefined)).toBe(false)
+    expect(isWorkingSession(info())).toBe(false)
+    expect(isWorkingSession(info({ last_error: 'boom' }))).toBe(false)
+    expect(isWorkingSession(info({ status: { state: 'busy' } }))).toBe(true)
+    expect(isWorkingSession(info({ status: { state: 'waiting_permission' } }))).toBe(true)
+    expect(isWorkingSession(info({ status: { state: 'waiting_question' } }))).toBe(true)
   })
 })
 
