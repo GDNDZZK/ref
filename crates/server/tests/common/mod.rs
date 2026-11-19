@@ -112,6 +112,16 @@ async fn write_or_stop(sock: &mut TcpStream, data: &[u8]) -> bool {
     sock.write_all(data).await.is_ok()
 }
 
+fn is_transient_accept(err: &std::io::Error) -> bool {
+    matches!(
+        err.kind(),
+        std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::Interrupted
+            | std::io::ErrorKind::WouldBlock
+    )
+}
+
 pub async fn mock(handler: Handler) -> Mock {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
@@ -119,8 +129,13 @@ pub async fn mock(handler: Handler) -> Mock {
     let b2 = bodies.clone();
     tokio::spawn(async move {
         loop {
-            let Ok((mut sock, _)) = listener.accept().await else {
-                return;
+            let (mut sock, _) = match listener.accept().await {
+                Ok(conn) => conn,
+                Err(e) if is_transient_accept(&e) => {
+                    tokio::task::yield_now().await;
+                    continue;
+                }
+                Err(_) => return,
             };
             let handler = handler.clone();
             let bodies = b2.clone();
@@ -380,11 +395,20 @@ pub async fn wait_tool_state(s: &Arc<Session>, state: ToolState) {
 }
 
 pub async fn wait_idle(s: &Arc<Session>) {
-    let s2 = s.clone();
-    wait_until("session idle", IDLE_TIMEOUT, move || {
-        s2.lock().run.is_none()
-    })
-    .await;
+    let start = Instant::now();
+    while s.lock().run.is_some() {
+        if start.elapsed() > IDLE_TIMEOUT {
+            let st = s.lock();
+            panic!(
+                "timed out waiting for: session idle (status={:?}, last_error={:?}, msgs={}, queue={})",
+                st.info.status,
+                st.info.last_error,
+                st.messages.len(),
+                st.queue.len(),
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 }
 
 /// A connection that finished Hello.
