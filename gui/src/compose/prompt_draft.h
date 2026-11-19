@@ -4,9 +4,11 @@
 
 #include <QList>
 #include <QString>
+#include <QStringView>
 
 #include <optional>
 #include <utility>
+
 namespace refgui::compose
 {
 
@@ -55,8 +57,11 @@ public:
 	// images without a token get one at the end. The cursor ends up at the end.
 	void restore(const QString& text, const QList<proto::NamedImage>& images);
 
-	// The prompt as it is sent, and the draft emptied.
+	// The prompt as it is sent, and the draft emptied (and undo/redo history cleared).
 	Submission take();
+	// Undo/redo across text, cursor, attachments, and image numbering.
+	bool undo();
+	bool redo();
 	// Atomic `[Image N]` token helpers for attached images.
 	qsizetype snapCursor(qsizetype cursor, qsizetype previousCursor) const;
 	std::pair<qsizetype, qsizetype> expandSelection(qsizetype start, qsizetype end) const;
@@ -64,18 +69,36 @@ public:
 	// Empties the draft.
 	void clear();
 private:
+	static constexpr qsizetype MaxUndoSnapshots = 200;
+
+	struct Snapshot
+	{
+		QString text;
+		qsizetype cursor = 0;
+		QList<Attachment> attachments;
+		int lastImageNumber = 0;
+	};
 	struct TokenSpan
 	{
 		qsizetype start = 0;
 		qsizetype end = 0;
 	};
+	Snapshot currentSnapshot() const;
+	void applySnapshot(Snapshot snapshot);
+	void pushUndoSnapshot(Snapshot snapshot);
+	void resetState();
+	void attachImpl(proto::NamedImage image);
 	QList<TokenSpan> tokenSpans() const;
-	QString nextToken();
+	QString nextToken(QStringView extraText = {});
 	void dropOrphans();
 	QString m_text;
 	qsizetype m_cursor = 0;
 	QList<Attachment> m_attachments;
 	int m_lastImageNumber = 0; // resets to 0 whenever the draft has no attachments
+	QList<Snapshot> m_undo;
+	QList<Snapshot> m_redo;
+	bool m_coalescing = false;
+	qsizetype m_coalesceCursor = 0;
 };
 
 } // namespace refgui::compose

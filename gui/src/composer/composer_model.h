@@ -114,6 +114,8 @@ public:
 	Q_INVOKABLE int snapCursor(int cursor, int previousCursor) const;
 	Q_INVOKABLE QVariantMap expandSelection(int start, int end) const;
 	Q_INVOKABLE bool deletePlaceholderAt(int cursor, bool backward);
+	Q_INVOKABLE bool undo();
+	Q_INVOKABLE bool redo();
 	// Sends the prompt (or runs the shell line in shell mode). False when there is nothing to
 	// send, an unknown `/foo` command was blocked, or the session is not ready.
 	Q_INVOKABLE bool submit();

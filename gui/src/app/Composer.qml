@@ -243,7 +243,8 @@ Item {
 						preSnapCursor = -1
 					}
 					lastCursor = cursorPosition
-					composer.model.moveCursor(cursorPosition)
+					if (text === composer.model.text)
+						composer.model.moveCursor(cursorPosition)
 				}
 				onSelectionStartChanged: syncSelectionBounds()
 				onSelectionEndChanged: syncSelectionBounds()
@@ -342,8 +343,18 @@ Item {
 					return true
 				}
 
-				// Backspace leaves shell mode, Copy without a selection clears the draft, Paste may take an image.
+				// Undo/Redo use the model's stack so attachments stay in sync; Backspace leaves shell mode; Copy without a selection clears the draft; Paste may take an image.
 				function handleEditing(event) {
+					if (event.matches(StandardKey.Undo)) {
+						event.accepted = true
+						composer.model.undo()
+						return true
+					}
+					if (event.matches(StandardKey.Redo)) {
+						event.accepted = true
+						composer.model.redo()
+						return true
+					}
 					if (event.key === Qt.Key_Backspace && composer.model.shellMode && input.length === 0) {
 						event.accepted = true
 						composer.model.leaveShell()
