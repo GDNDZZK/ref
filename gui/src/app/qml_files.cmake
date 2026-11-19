@@ -113,6 +113,7 @@ set(REFGUI_APP_QML_NAMES
 	Block.qml
 	UserBlock.qml
 	MarkdownBlock.qml
+	TableBlock.qml
 	CodeBlock.qml
 	ReasoningBlock.qml
 	ToolBlock.qml

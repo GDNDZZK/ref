@@ -14,7 +14,7 @@ namespace
 {
 
 // Files that render Markdown on purpose. Their text has been through markdownForDisplay().
-const QStringList MarkdownFiles = {u"MarkdownBlock.qml"_s, u"ReasoningBlock.qml"_s, u"UserBlock.qml"_s};
+const QStringList MarkdownFiles = {u"MarkdownBlock.qml"_s, u"ReasoningBlock.qml"_s, u"TableBlock.qml"_s, u"UserBlock.qml"_s};
 
 // The only file that may declare a ToolTip item.
 const QString PlainToolTipFile = u"PlainToolTip.qml"_s;

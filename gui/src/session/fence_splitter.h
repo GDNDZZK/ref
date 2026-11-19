@@ -24,6 +24,10 @@ namespace refgui::session
 class FenceSplitter
 {
 public:
+	explicit FenceSplitter(bool lazyProseLineBreaks = true)
+		: m_lazyProseLineBreaks(lazyProseLineBreaks)
+	{
+	}
 	struct CodeOpened
 	{
 		QString language; // empty when the fence has no info string
@@ -55,7 +59,7 @@ private:
 	static bool closes(const Fence& fence, QStringView line);
 
 	void appendToLine(QStringView text, QList<Event>& events);
-	void endLine(QList<Event>& events);
+	void endLine(QList<Event>& events, bool endOfInput = false);
 	bool mayBecomeFence(QStringView partialLine) const;
 	QStringView stripCodeIndent(QStringView line) const;
 	void emitText(QStringView text, QList<Event>& events);
@@ -65,6 +69,7 @@ private:
 	bool m_lineReleased = false; // the current line is plain content and already emitted in part
 	qsizetype m_pendingLineBreaks = 0;
 	bool m_atBlockStart = true; // nothing emitted since the last fence or the start
+	bool m_lazyProseLineBreaks = true;
 };
 
 } // namespace refgui::session

@@ -52,8 +52,8 @@ ListView {
 	// Where the content ends. The footer sits right after the last row.
 	readonly property real naturalEnd: footerItem ? footerItem.y + Theme.pagePadding : 0
 	property bool compact: false // narrower cache in a split-view tile
-	readonly property int fullRetainedDistance: 20000 // px above and below the view whose rows stay instantiated, about 200 rows
-	readonly property int compactRetainedDistance: 1600 // smaller cache in split-view tiles so opening many tiles stays fast
+	readonly property int fullRetainedDistance: 2400 // px above and below the view whose rows stay instantiated
+	readonly property int compactRetainedDistance: 800 // smaller cache in split-view tiles so opening many tiles stays fast
 	readonly property int retainedDistance: compact ? compactRetainedDistance : fullRetainedDistance
 	readonly property int olderTriggerDistance: 400 // px from the top at which the next page loads by itself
 	readonly property real minContentY: originY - topMargin
@@ -456,6 +456,7 @@ ListView {
 		DelegateChoice { roleValue: "image"; ImageBlock {} }
 		DelegateChoice { roleValue: "reasoning"; ReasoningBlock {} }
 		DelegateChoice { roleValue: "markdown"; MarkdownBlock {} }
+		DelegateChoice { roleValue: "table"; TableBlock {} }
 		DelegateChoice { roleValue: "code"; CodeBlock {} }
 		DelegateChoice { roleValue: "tool"; ToolBlock {} }
 		DelegateChoice { roleValue: "error"; ErrorBlock {} }

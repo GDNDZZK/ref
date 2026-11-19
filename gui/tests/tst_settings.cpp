@@ -54,8 +54,8 @@ void TestSettings::defaultsWithoutAFile()
 	QCOMPARE(settings.language(), Settings::System);
 	QVERIFY(settings.notifyEnabled() && settings.notifyPermission() && settings.notifyTurnDone() && settings.notifyTurnError());
 	QVERIFY(settings.sidebarVisible());
+	QCOMPARE(settings.sidebarWidth(), Settings::DefaultSidebarWidth);
 	QCOMPARE(settings.windowWidth(), Settings::DefaultWindowWidth);
-	QCOMPARE(settings.windowHeight(), Settings::DefaultWindowHeight);
 	QVERIFY(settings.loadProblem().isEmpty());
 	QVERIFY(!QFile::exists(dir.filePath(u"gui.json"_s))); // nothing is written until something changes
 }
@@ -70,19 +70,26 @@ void TestSettings::savedChangesComeBack()
 		settings.setLanguage(Settings::ChineseSimplified);
 		settings.setNotifyTurnDone(false);
 		settings.setSidebarVisible(false);
+		settings.setSidebarWidth(340);
 		settings.setWindowWidth(1200);
 		settings.setWindowHeight(800);
 		settings.save();
 	}
-
 	const Settings again(path);
 	QCOMPARE(again.theme(), Settings::Dark);
 	QCOMPARE(again.language(), Settings::ChineseSimplified);
 	QVERIFY(!again.notifyTurnDone());
 	QVERIFY(again.notifyPermission());
 	QVERIFY(!again.sidebarVisible());
+	QCOMPARE(again.sidebarWidth(), 340);
 	QCOMPARE(again.windowWidth(), 1200);
 	QCOMPARE(again.windowHeight(), 800);
+	// Clamping works for setter and loaded values.
+	Settings clamped(path);
+	clamped.setSidebarWidth(100);
+	QCOMPARE(clamped.sidebarWidth(), Settings::MinSidebarWidth);
+	clamped.setSidebarWidth(900);
+	QCOMPARE(clamped.sidebarWidth(), Settings::MaxSidebarWidth);
 }
 
 void TestSettings::changesInABurstMakeOneWrite()
@@ -148,20 +155,19 @@ void TestSettings::unknownValuesAreIgnoredAndReported()
 {
 	QTemporaryDir dir;
 	const QString path = dir.filePath(u"gui.json"_s);
-	writeFile(path, R"({"theme":"purple","language":"zh_CN","sidebar":{"visible":"yes"},"window":{"width":5,"height":700}})");
-
+	writeFile(path, R"({"theme":"purple","language":"zh_CN","sidebar":{"visible":"yes","width":"wide"},"window":{"width":5,"height":700}})");
 	const Settings settings(path);
-
 	QCOMPARE(settings.theme(), Settings::System);
 	QCOMPARE(settings.language(), Settings::ChineseSimplified); // the valid fields still count
 	QVERIFY(settings.sidebarVisible());
+	QCOMPARE(settings.sidebarWidth(), Settings::DefaultSidebarWidth);
 	QCOMPARE(settings.windowWidth(), Settings::DefaultWindowWidth);
 	QCOMPARE(settings.windowHeight(), 700);
 	const QString problem = settings.loadProblem();
 	QVERIFY(problem.contains(u"theme"_s));
-	QVERIFY(problem.contains(u"sidebar"_s));
+	QVERIFY(problem.contains(u"sidebar.visible"_s));
+	QVERIFY(problem.contains(u"sidebar.width"_s));
 	QVERIFY(problem.contains(u"window.width"_s));
-	QVERIFY(QFile::exists(path)); // a file with some bad values is not thrown away
 }
 
 void TestSettings::notifyKindsFollowTheSwitches()

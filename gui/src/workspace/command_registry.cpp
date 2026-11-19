@@ -299,6 +299,8 @@ QVariant CommandRegistry::valueOf(const Entry& entry, int role) const
 		return entry.icon;
 	case EnabledRole:
 		return entry.enabled;
+	case RequiresArgsRole:
+		return entry.hint[0] != '\0' && entry.hint[0] != '[';
 	case SourceRole:
 		return entry.source;
 	default:
@@ -318,6 +320,7 @@ QVariantMap CommandRegistry::toMap(const Entry& entry) const
 	        {u"category"_s, valueOf(entry, CategoryRole)},
 	        {u"icon"_s, valueOf(entry, IconRole)},
 	        {u"enabled"_s, valueOf(entry, EnabledRole)},
+	        {u"requiresArgs"_s, valueOf(entry, RequiresArgsRole)},
 	        {u"source"_s, valueOf(entry, SourceRole)}};
 }
 
@@ -514,6 +517,7 @@ QHash<int, QByteArray> CommandRegistry::roleNames() const
 	        {CategoryRole, "category"},
 	        {IconRole, "icon"},
 	        {EnabledRole, "enabled"},
+	        {RequiresArgsRole, "requiresArgs"},
 	        {SourceRole, "source"}};
 }
 

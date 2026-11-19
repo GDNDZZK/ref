@@ -28,6 +28,7 @@ class Settings : public QObject
 	Q_PROPERTY(bool notifyTurnError READ notifyTurnError WRITE setNotifyTurnError NOTIFY notifyKindsChanged)
 	Q_PROPERTY(QStringList notifyKinds READ notifyKinds NOTIFY notifyKindsChanged)
 	Q_PROPERTY(bool sidebarVisible READ sidebarVisible WRITE setSidebarVisible NOTIFY sidebarVisibleChanged)
+	Q_PROPERTY(int sidebarWidth READ sidebarWidth WRITE setSidebarWidth NOTIFY sidebarWidthChanged)
 	Q_PROPERTY(int windowWidth READ windowWidth WRITE setWindowWidth NOTIFY windowSizeChanged)
 	Q_PROPERTY(int windowHeight READ windowHeight WRITE setWindowHeight NOTIFY windowSizeChanged)
 	Q_PROPERTY(QString loadProblem READ loadProblem CONSTANT)
@@ -40,9 +41,11 @@ public:
 	static const QString English;
 	static const QString ChineseSimplified;
 
+	static constexpr int DefaultSidebarWidth = 264;
+	static constexpr int MinSidebarWidth = 210;
+	static constexpr int MaxSidebarWidth = 480;
 	static constexpr int DefaultWindowWidth = 980;
 	static constexpr int DefaultWindowHeight = 760;
-
 	// Reads `path`. A file that cannot be read keeps the defaults; see loadProblem().
 	explicit Settings(QString path, QObject* parent = nullptr);
 	~Settings() override;
@@ -57,6 +60,7 @@ public:
 	// turn_done, turn_error. Empty when notifications are off.
 	QStringList notifyKinds() const;
 	bool sidebarVisible() const { return m_sidebarVisible; }
+	int sidebarWidth() const { return m_sidebarWidth; }
 	int windowWidth() const { return m_windowWidth; }
 	int windowHeight() const { return m_windowHeight; }
 
@@ -68,6 +72,7 @@ public:
 	void setNotifyTurnDone(bool enabled);
 	void setNotifyTurnError(bool enabled);
 	void setSidebarVisible(bool visible);
+	void setSidebarWidth(int width);
 	void setWindowWidth(int width);
 	void setWindowHeight(int height);
 
@@ -82,6 +87,7 @@ signals:
 	void languageChanged();
 	void notifyKindsChanged();
 	void sidebarVisibleChanged();
+	void sidebarWidthChanged();
 	void windowSizeChanged();
 	void saveFailed(const QString& reason);
 
@@ -103,6 +109,7 @@ private:
 	bool m_notifyTurnDone = true;
 	bool m_notifyTurnError = true;
 	bool m_sidebarVisible = true;
+	int m_sidebarWidth = DefaultSidebarWidth;
 	int m_windowWidth = DefaultWindowWidth;
 	int m_windowHeight = DefaultWindowHeight;
 	QString m_loadProblem;
