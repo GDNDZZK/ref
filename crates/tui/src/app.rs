@@ -164,6 +164,8 @@ pub struct Watch {
     pub page: usize,
     pub pages: usize,
     pub inputs: HashMap<String, Editor>,
+    pub shell_modes: HashSet<String>,
+    pub drag_tile: Option<String>,
     /// Tiles at last draw.
     pub tiles: Vec<(String, Rect)>,
     /// WatchAll state last sent to the server.
@@ -176,7 +178,7 @@ pub struct Cmd {
     aliases: &'static [&'static str],
     pub desc: &'static str,
     pub key: &'static str,
-    pub args: bool,
+    pub requires_args: bool,
 }
 
 pub const COMMANDS: &[Cmd] = &[
@@ -185,182 +187,182 @@ pub const COMMANDS: &[Cmd] = &[
         aliases: &["clear"],
         desc: "New session",
         key: "ctrl+x n",
-        args: false,
+        requires_args: false,
     },
     Cmd {
         name: cmd::SESSIONS,
         aliases: &["resume", "continue"],
         desc: "Switch session (live + history)",
         key: "ctrl+x l",
-        args: true,
+        requires_args: false,
     },
     Cmd {
         name: cmd::MODELS,
         aliases: &["model"],
         desc: "Switch model (this session only)",
         key: "ctrl+x m",
-        args: true,
+        requires_args: false,
     },
     Cmd {
         name: cmd::AGENTS,
         aliases: &["agent"],
         desc: "Switch agent",
         key: "ctrl+x a",
-        args: true,
+        requires_args: false,
     },
     Cmd {
         name: cmd::VARIANT,
         aliases: &["variants", "effort"],
         desc: "Set or cycle model variant",
         key: "ctrl+t",
-        args: true,
+        requires_args: false,
     },
     Cmd {
         name: cmd::COMPACT,
         aliases: &["summarize"],
         desc: "Compact the conversation",
         key: "ctrl+x c",
-        args: false,
+        requires_args: false,
     },
     Cmd {
         name: cmd::UNDO,
         aliases: &[],
         desc: "Undo last prompt",
         key: "ctrl+x u",
-        args: false,
+        requires_args: false,
     },
     Cmd {
         name: cmd::RENAME,
         aliases: &[],
         desc: "Rename the session",
         key: "",
-        args: true,
+        requires_args: true,
     },
     Cmd {
         name: cmd::CD,
         aliases: &["cwd"],
         desc: "Change this session's working directory",
         key: "",
-        args: true,
+        requires_args: false,
     },
     Cmd {
         name: cmd::CLOSE,
         aliases: &[],
         desc: "Close this session (go to the next live one, or exit)",
         key: "ctrl+x k",
-        args: false,
+        requires_args: false,
     },
     Cmd {
         name: cmd::CLOSE_SESSION,
         aliases: &["kill"],
         desc: "Close live sessions (picker, or by name / id)",
         key: "",
-        args: true,
+        requires_args: false,
     },
     Cmd {
         name: cmd::PEERS,
         aliases: &["list-agents"],
         desc: "List other live sessions you can message",
         key: "",
-        args: false,
+        requires_args: false,
     },
     Cmd {
         name: cmd::PEERS_NAME,
         aliases: &[],
         desc: "Show or set this session's peer name",
         key: "",
-        args: true,
+        requires_args: false,
     },
     Cmd {
         name: cmd::PEERS_INBOX,
         aliases: &[],
         desc: "Messages received from other sessions",
         key: "",
-        args: false,
+        requires_args: false,
     },
     Cmd {
         name: cmd::PEERS_OUTBOX,
         aliases: &[],
         desc: "Messages sent to other sessions and their status",
         key: "",
-        args: false,
+        requires_args: false,
     },
     Cmd {
         name: cmd::EXPORT,
         aliases: &[],
         desc: "Export transcript as markdown",
         key: "ctrl+x x",
-        args: true,
+        requires_args: false,
     },
     Cmd {
         name: cmd::COPY,
         aliases: &[],
         desc: "Copy last assistant message (raw)",
         key: "ctrl+x y",
-        args: false,
+        requires_args: false,
     },
     Cmd {
         name: cmd::THINKING,
         aliases: &[],
         desc: "Toggle expanded thinking",
         key: "ctrl+x t",
-        args: false,
+        requires_args: false,
     },
     Cmd {
         name: cmd::DETAILS,
         aliases: &[],
         desc: "Toggle expanded tool details",
         key: "ctrl+x d",
-        args: false,
+        requires_args: false,
     },
     Cmd {
         name: cmd::WATCH,
         aliases: &["split"],
         desc: "Split view of background sessions",
         key: "ctrl+x w",
-        args: false,
+        requires_args: false,
     },
     Cmd {
         name: cmd::SIDEBAR,
         aliases: &[],
         desc: "Toggle sidebar",
         key: "ctrl+x b",
-        args: false,
+        requires_args: false,
     },
     Cmd {
         name: cmd::MCP,
         aliases: &["mcps"],
         desc: "MCP servers: status, errors and tools",
         key: "",
-        args: true,
+        requires_args: false,
     },
     Cmd {
         name: cmd::RELOAD,
         aliases: &["reload-config"],
         desc: "Reload configuration",
         key: "",
-        args: false,
+        requires_args: false,
     },
     Cmd {
         name: cmd::EDITOR,
         aliases: &[],
         desc: "Compose prompt in $EDITOR",
         key: "ctrl+x e",
-        args: false,
+        requires_args: false,
     },
     Cmd {
         name: cmd::HELP,
         aliases: &[],
         desc: "Keybindings and commands",
         key: "ctrl+x h",
-        args: false,
+        requires_args: false,
     },
     Cmd {
         name: cmd::EXIT,
         aliases: &["quit", "q"],
         desc: "Exit",
         key: "ctrl+x q",
-        args: false,
+        requires_args: false,
     },
 ];
 
@@ -455,6 +457,7 @@ pub struct App {
     deferred: Option<(Option<String>, String, String, Instant)>,
     /// Autocomplete dismissed with esc until the next edit.
     pub suppress_ac: bool,
+    shell_tab_requested: bool,
     /// MCP servers (sorted by name).
     pub mcp: Vec<crate::ui::mcp::McpEntry>,
     /// An MCP status answer (or fallback) has arrived since connecting.
@@ -615,6 +618,7 @@ impl App {
             sidebar_max_scroll: 0,
             force_clear: false,
             suppress_ac: false,
+            shell_tab_requested: false,
             deferred: None,
             mcp: Vec::new(),
             mcp_loaded: false,
@@ -695,6 +699,58 @@ impl App {
         match self.mode {
             Mode::Watch => self.watch.focus.clone().or_else(|| self.current.clone()),
             Mode::Chat => self.current.clone(),
+        }
+    }
+
+    pub fn clear_autocomplete(&mut self) {
+        self.ac = None;
+        self.suppress_ac = false;
+        self.shell_tab_requested = false;
+        self.files_due = None;
+    }
+
+    pub fn dismiss_autocomplete(&mut self) {
+        self.ac = None;
+        self.suppress_ac = true;
+        self.shell_tab_requested = false;
+    }
+
+    pub fn set_watch_focus(&mut self, focus: Option<String>) {
+        if self.watch.focus != focus {
+            self.watch.focus = focus;
+            self.clear_autocomplete();
+        }
+    }
+    pub fn active_shell_mode(&self) -> bool {
+        match self.mode {
+            Mode::Chat => self.shell_mode,
+            Mode::Watch => self
+                .watch
+                .focus
+                .as_ref()
+                .is_some_and(|f| self.watch.shell_modes.contains(f)),
+        }
+    }
+
+    pub fn active_editor(&self) -> Option<&Editor> {
+        match self.mode {
+            Mode::Chat => Some(&self.editor),
+            Mode::Watch => self
+                .watch
+                .focus
+                .as_ref()
+                .and_then(|f| self.watch.inputs.get(f)),
+        }
+    }
+
+    fn active_editor_mut(&mut self) -> Option<&mut Editor> {
+        match self.mode {
+            Mode::Chat => Some(&mut self.editor),
+            Mode::Watch => self
+                .watch
+                .focus
+                .clone()
+                .map(|f| self.watch.inputs.entry(f).or_default()),
         }
     }
 
@@ -1431,7 +1487,7 @@ impl App {
                 return;
             }
         };
-        if let Some((start, q)) = self.editor.mention()
+        if let Some((start, q)) = self.active_editor().and_then(Editor::mention)
             && q == query
         {
             let items: Vec<(String, String, String)> = files
@@ -1671,13 +1727,17 @@ impl App {
         for sid in drop {
             self.views.remove(&sid);
             self.watch.inputs.remove(&sid);
+            self.watch.shell_modes.remove(&sid);
+            if self.watch.drag_tile.as_deref() == Some(sid.as_str()) {
+                self.watch.drag_tile = None;
+            }
             self.client.notify(Request::Detach { session_id: sid });
         }
         // No automatic focus: only drop it when the focused session left the split view.
         if let Some(f) = &self.watch.focus
             && !tiles.contains(f)
         {
-            self.watch.focus = None;
+            self.set_watch_focus(None);
         }
     }
 
@@ -1723,6 +1783,8 @@ impl App {
         self.perm = None;
         self.question = None;
         self.shell_mode = false;
+        self.clear_selection();
+        self.clear_autocomplete();
     }
 
     pub fn create_session(&mut self, prompt: Option<(String, Vec<ImageData>)>) {
@@ -2042,13 +2104,17 @@ impl App {
             self.copy_text(&t, "selection");
             if let Some(v) = owner.and_then(|o| self.views.get_mut(&o)) {
                 v.chat.sel = None;
+                v.chat.drag_edge = 0;
             }
             self.sel_owner = None;
+            self.watch.drag_tile = None;
             return true;
         }
-        if let Some(t) = self.editor.selected_text() {
+        if let Some(t) = self.active_editor().and_then(|e| e.selected_text()) {
             self.copy_text(&t, "selection");
-            self.editor.select_mode(false);
+            if let Some(ed) = self.active_editor_mut() {
+                ed.select_mode(false);
+            }
             return true;
         }
         false
@@ -2062,11 +2128,17 @@ impl App {
     }
 
     pub fn clear_selection(&mut self) {
+        if let Some(sid) = self.watch.drag_tile.take()
+            && let Some(v) = self.views.get_mut(&sid)
+        {
+            v.chat.sel = None;
+            v.chat.drag_edge = 0;
+        }
         if let Some(v) = self.sel_owner.take().and_then(|o| self.views.get_mut(&o)) {
             v.chat.sel = None;
+            v.chat.drag_edge = 0;
         }
     }
-
     fn toggle_details(&mut self) {
         self.details = !self.details;
         self.reset_toggles();
@@ -2853,12 +2925,20 @@ impl App {
             } else {
                 self.views.remove(sid);
                 self.watch.inputs.remove(sid);
+                self.watch.shell_modes.remove(sid);
+                if self.watch.drag_tile.as_deref() == Some(sid) {
+                    self.watch.drag_tile = None;
+                }
                 self.attaching.remove(sid);
                 self.current = None;
             }
         } else if self.views.get(sid).is_some_and(|v| !v.foreground) {
             self.views.remove(sid);
             self.watch.inputs.remove(sid);
+            self.watch.shell_modes.remove(sid);
+            if self.watch.drag_tile.as_deref() == Some(sid) {
+                self.watch.drag_tile = None;
+            }
             self.attaching.remove(sid);
         }
         self.sync_watch();
@@ -3628,7 +3708,9 @@ impl App {
         match self.mode {
             Mode::Chat => {
                 self.mode = Mode::Watch;
-                self.watch.focus = None;
+                self.set_watch_focus(None);
+                self.watch.drag_tile = None;
+                self.clear_autocomplete();
                 self.clear_selection();
                 // Subscribes to all sessions first, so detaching the current one loses no events.
                 self.sync_watch();
@@ -3671,6 +3753,8 @@ impl App {
             return;
         };
         self.mode = Mode::Chat;
+        self.clear_selection();
+        self.clear_autocomplete();
         match self.views.get_mut(&sid) {
             None => self.attach_fg(&sid),
             Some(v) if !v.foreground => {
@@ -3689,6 +3773,8 @@ impl App {
     /// Zoom a tile: attach it as foreground.
     pub fn zoom(&mut self, sid: &str) {
         let sid = sid.to_string();
+        self.clear_selection();
+        self.clear_autocomplete();
         if let Some(v) = self.views.get_mut(&sid) {
             v.foreground = true;
         }
@@ -3703,7 +3789,7 @@ impl App {
         if trimmed.is_empty() && self.editor.images.is_empty() {
             return;
         }
-        self.ac = None;
+        self.clear_autocomplete();
         if self.shell_mode {
             let cmd = trimmed.to_string();
             self.push_history(&format!("!{cmd}"));
@@ -3769,16 +3855,26 @@ impl App {
             };
             (ed.text.clone(), !ed.images.is_empty())
         };
+        let in_shell = self.watch.shell_modes.contains(tile);
         let trimmed = raw.trim();
-        if let Some(shell_cmd) = trimmed.strip_prefix('!').map(str::trim)
-            && !shell_cmd.is_empty()
+        let shell_cmd = if in_shell {
+            Some(trimmed)
+        } else {
+            trimmed.strip_prefix('!').map(str::trim)
+        };
+        if let Some(cmd_str) = shell_cmd
             && !has_images
         {
-            let cmd_str = shell_cmd.to_string();
+            if cmd_str.is_empty() {
+                return in_shell;
+            }
+            let cmd_str = cmd_str.to_string();
             self.push_history(&format!("!{cmd_str}"));
             if let Some(ed) = self.watch.inputs.get_mut(tile) {
                 ed.clear();
             }
+            self.watch.shell_modes.remove(tile);
+            self.clear_autocomplete();
             self.req(
                 Request::Shell {
                     session_id: tile.to_string(),
@@ -3793,6 +3889,7 @@ impl App {
         };
         let (name, args) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
         if let Some(c) = find_cmd(name) {
+            self.clear_autocomplete();
             self.push_history(trimmed);
             if let Some(ed) = self.watch.inputs.get_mut(tile) {
                 ed.clear();
@@ -3803,6 +3900,7 @@ impl App {
         }
         if let Some(custom) = find_custom_cmd(self.config.as_ref(), name) {
             let cname = custom.name.clone();
+            self.clear_autocomplete();
             self.push_history(trimmed);
             let args = self
                 .watch
@@ -3900,6 +3998,7 @@ impl App {
 
     /// Recomputes autocomplete after a user text edit, clearing any prior manual popup selection.
     pub fn update_autocomplete_on_edit(&mut self) {
+        self.shell_tab_requested = false;
         if let Some(ac) = self.ac.as_mut() {
             ac.explicitly_selected = false;
             ac.sel = 0;
@@ -3910,6 +4009,9 @@ impl App {
     /// Explicit `Tab` press when `self.ac` is currently `None` (e.g. empty `!` shell prompt).
     pub fn trigger_tab_completion(&mut self) -> bool {
         self.suppress_ac = false;
+        if self.active_shell_mode() {
+            self.shell_tab_requested = true;
+        }
         self.update_autocomplete_inner(true);
         self.ac.is_some()
     }
@@ -3917,20 +4019,33 @@ impl App {
     fn update_autocomplete_inner(&mut self, explicit_tab: bool) {
         if self.suppress_ac {
             self.ac = None;
+            self.shell_tab_requested = false;
             return;
         }
-        if self.shell_mode {
+        if self.mode == Mode::Watch && self.watch.focus.is_none() {
+            self.files_due = None;
+            self.ac = None;
+            return;
+        }
+        if self.active_shell_mode() {
             self.files_due = None;
             self.update_shell_autocomplete(explicit_tab);
             return;
         }
-        let cursor = self.editor.cursor.min(self.editor.text.len());
-        let before = self.editor.text[..cursor].to_string();
+        let Some(ed) = self.active_editor() else {
+            self.files_due = None;
+            self.ac = None;
+            return;
+        };
+        let cursor = ed.cursor.min(ed.text.len());
+        let text_len = ed.text.len();
+        let before = ed.text[..cursor].to_string();
+        let mention = ed.mention();
         if let Some(rest) = before.strip_prefix('/')
             && !before.contains('\n')
         {
             if !rest.contains(char::is_whitespace) {
-                if cursor == self.editor.text.len() {
+                if cursor == text_len {
                     let items = self.slash_completions(rest);
                     let prev = self.ac.take();
                     self.ac = Autocomplete::new(
@@ -3953,7 +4068,7 @@ impl App {
                 return;
             }
         }
-        if let Some((_, q)) = self.editor.mention() {
+        if let Some((_, q)) = mention {
             if self.ac.as_ref().is_some_and(|a| a.kind != AcKind::File) {
                 self.ac = None;
             }
@@ -3998,7 +4113,7 @@ impl App {
             }
             cmd::EXPORT => {
                 let default_file = self
-                    .current
+                    .active_target_session()
                     .as_ref()
                     .map(|sid| format!("ref-session-{sid}.md"));
                 let items = self.path_completion_items(
@@ -4109,15 +4224,27 @@ impl App {
     }
 
     fn update_shell_autocomplete(&mut self, explicit_tab: bool) {
-        let cursor = self.editor.cursor.min(self.editor.text.len());
-        let before = &self.editor.text[..cursor];
-        match shell_token_context(before) {
+        let show_empty = explicit_tab || self.shell_tab_requested;
+        let Some(ed) = self.active_editor() else {
+            if show_empty {
+                let items = self.shell_cmd_completions("", true);
+                let prev = self.ac.take();
+                self.ac =
+                    Autocomplete::new(AcKind::ShellCmd, " shell ", items, 0, true, prev.as_ref());
+            } else {
+                self.ac = None;
+            }
+            return;
+        };
+        let cursor = ed.cursor.min(ed.text.len());
+        let before = ed.text[..cursor].to_string();
+        match shell_token_context(&before) {
             ShellTokenPos::Command {
                 start,
                 raw,
                 at_line_start,
             } => {
-                if raw.is_empty() && !explicit_tab {
+                if raw.is_empty() && !show_empty {
                     self.ac = None;
                     return;
                 }
@@ -4155,7 +4282,7 @@ impl App {
                     self.ac = None;
                     return;
                 }
-                if raw.is_empty() && !explicit_tab {
+                if raw.is_empty() && !show_empty {
                     self.ac = None;
                     return;
                 }
@@ -4262,7 +4389,10 @@ impl App {
 
     fn variant_arg_completions(&self, q: &str) -> Vec<(String, String, String)> {
         let q = q.trim();
-        let cur_model = self.cur().map(|v| v.info.model.clone());
+        let cur_model = self
+            .active_target_session()
+            .and_then(|id| self.views.get(&id))
+            .map(|v| v.info.model.clone());
         let variants = cur_model
             .as_ref()
             .and_then(|m| find_model(self.models(), m))
@@ -4519,9 +4649,14 @@ impl App {
         let mut items: Vec<(i64, (String, String, String))> = Vec::new();
         for c in COMMANDS {
             if let Some((score, label)) = best_command_match(c, q) {
+                let value = if c.requires_args {
+                    format!("/{} ", c.name)
+                } else {
+                    format!("/{}", c.name)
+                };
                 items.push((
                     score + CANONICAL_NAME_SCORE_BONUS,
-                    (format!("/{} ", c.name), label, c.desc.to_string()),
+                    (value, label, c.desc.to_string()),
                 ));
             }
         }
@@ -4531,7 +4666,7 @@ impl App {
                     items.push((
                         s,
                         (
-                            format!("/{} ", c.name),
+                            format!("/{}", c.name),
                             format!("/{}", c.name),
                             c.description.clone(),
                         ),
@@ -4563,50 +4698,69 @@ impl App {
         );
     }
 
+    fn submit_active_slash(&mut self) {
+        match self.mode {
+            Mode::Chat => self.submit(),
+            Mode::Watch => {
+                if let Some(tile) = self.watch.focus.clone() {
+                    self.submit_tile_command(&tile);
+                }
+            }
+        }
+    }
+
     /// Accepts the selected completion (`run`: pressed Enter or clicked, `false`: pressed Tab).
     /// Returns true if the command was executed directly.
     pub fn accept_completion(&mut self, run: bool) -> bool {
         let Some(ac) = self.ac.take() else {
             return false;
         };
+        self.shell_tab_requested = false;
         let Some((value, _, _)) = ac.items.get(ac.sel).cloned() else {
             return false;
         };
         match ac.kind {
             AcKind::Slash => {
                 let name = value.trim().trim_start_matches('/').to_string();
-                let takes_args = find_cmd(&name).map(|c| c.args).unwrap_or(true);
-                // Enter on a fully typed command runs it (args are optional for most).
-                let typed = self.editor.text.trim().trim_start_matches('/');
-                let typed_canon = find_cmd(typed)
+                let requires_args = find_cmd(&name).is_some_and(|c| c.requires_args);
+                let typed = self
+                    .active_editor()
+                    .map(|e| e.text.trim().trim_start_matches('/').to_string())
+                    .unwrap_or_default();
+                let typed_canon = find_cmd(&typed)
                     .map(|c| c.name.to_string())
                     .or_else(|| {
-                        find_custom_cmd(self.config.as_ref(), typed).map(|c| c.name.clone())
+                        find_custom_cmd(self.config.as_ref(), &typed).map(|c| c.name.clone())
                     })
-                    .unwrap_or_else(|| typed.to_string());
+                    .unwrap_or(typed);
                 let exact = typed_canon.eq_ignore_ascii_case(&name);
-                if run && takes_args && exact {
-                    self.editor.set_text(&format!("/{name}"));
-                    self.submit();
+                if run && (!requires_args || exact) {
+                    if let Some(ed) = self.active_editor_mut() {
+                        ed.set_text(&format!("/{name}"));
+                    }
+                    self.submit_active_slash();
                     return true;
                 }
-                if run && !takes_args {
-                    self.editor.clear();
-                    self.push_history(&format!("/{name}"));
-                    self.run_command(&name, "");
-                    return true;
+                if let Some(ed) = self.active_editor_mut() {
+                    ed.set_text(&value);
                 }
-                self.editor.set_text(&value);
             }
             AcKind::SlashArg => {
-                self.editor.replace_before_cursor(ac.start, &value);
-                if run && self.editor.cursor == self.editor.text.len() {
-                    self.submit();
+                let at_end = if let Some(ed) = self.active_editor_mut() {
+                    ed.replace_before_cursor(ac.start, &value);
+                    ed.cursor == ed.text.len()
+                } else {
+                    false
+                };
+                if run && at_end {
+                    self.submit_active_slash();
                     return true;
                 }
             }
             AcKind::File | AcKind::ShellCmd | AcKind::ShellPath => {
-                self.editor.replace_before_cursor(ac.start, &value);
+                if let Some(ed) = self.active_editor_mut() {
+                    ed.replace_before_cursor(ac.start, &value);
+                }
             }
         }
         false

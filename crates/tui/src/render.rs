@@ -874,6 +874,8 @@ fn draw_watch_mode(
         .zip(rects.iter().copied())
         .collect();
     let mut cursor = None;
+    let mut ac_anchor: Option<Rect> = None;
+    let mut focused_shell = false;
     if page_ids.is_empty() {
         let lines = vec![
             Line::from(Span::styled("No background sessions", theme::muted())),
@@ -945,17 +947,37 @@ fn draw_watch_mode(
             v.chat.area = Rect::default();
         }
         if focused && r.height >= 5 {
-            let ir = split::draw_input_sep(buf, r);
+            let shell_mode = app.watch.shell_modes.contains(&sid);
+            focused_shell = shell_mode;
+            let ir = split::draw_input_sep(buf, r, shell_mode);
             let ed = app.watch.inputs.entry(sid.clone()).or_default();
-            let ph = if v.is_busy() {
+            let ph = if shell_mode {
+                "Run a shell command…"
+            } else if v.is_busy() {
                 "message (queued) · esc esc abort"
             } else {
                 "message · enter on empty = zoom"
             };
             let tile_focused = app.perm.is_none() && app.question.is_none() && app.dialog.is_none();
             cursor = ed.draw_single_line(buf, ir, None, ph, tile_focused);
+            if ir.width > 0 {
+                ac_anchor = Some(Rect::new(
+                    r.x + 1,
+                    ir.y.saturating_sub(1),
+                    r.width.saturating_sub(2),
+                    1,
+                ));
+            }
         }
         app.views.insert(sid, v);
+    }
+    if let Some(ac) = app.ac.as_mut() {
+        if let Some(anchor) = ac_anchor {
+            let avail_h = anchor.y.saturating_sub(body.y);
+            crate::ui::autocomplete::draw(buf, anchor, avail_h, ac);
+        } else {
+            ac.rect = Rect::default();
+        }
     }
     let hint = app.hint.as_ref().map(|h| (h.0.clone(), h.1));
     let sc = StatusCtx {
@@ -964,7 +986,7 @@ fn draw_watch_mode(
         tick,
         hint,
         leader: app.leader.is_some(),
-        shell_mode: false,
+        shell_mode: focused_shell,
         connected: app.connected || (!app.ever_connected && app.refused.is_none()),
         refused: app.refused.is_some(),
         watch_mode: true,

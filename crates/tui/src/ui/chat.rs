@@ -1015,10 +1015,14 @@ pub fn draw_tile(buf: &mut Buffer, area: Rect, bar_x: u16, view: &mut SessionVie
     chat.pill = None;
     let top = chat.top();
     for dy in 0..area.height {
-        let Some(row) = chat.row(top + dy as usize) else {
+        let gi = top + dy as usize;
+        let Some(row) = chat.row(gi) else {
             break;
         };
         buf.set_line(area.x, area.y + dy, &row.line, area.width);
+        if let Some(sel) = chat.sel.as_ref().filter(|s| s.active) {
+            paint_selection(buf, chat, sel, row, gi, area.y + dy, cw);
+        }
     }
     if chat.follow || chat.total <= area.height as usize {
         return;
