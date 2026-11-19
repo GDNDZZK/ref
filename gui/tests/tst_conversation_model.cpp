@@ -67,6 +67,7 @@ private slots:
 	void showsMarkdownWithoutImagesOrTags();
 	void exposesEditWarningsFromFixture();
 	void attachesAndClearsPermissionPreview();
+	void splitsMarkdownTablesAndStreamsRows();
 };
 
 void TestConversationModel::splitsAssistantTextIntoBlocks()
@@ -678,6 +679,43 @@ void TestConversationModel::attachesAndClearsPermissionPreview()
 
 	model.resolvePermission(u"c1"_s);
 	QVERIFY(roleOf(model, 0, ConversationModel::PermissionPreviewRole).toMap().isEmpty());
+}
+
+void TestConversationModel::splitsMarkdownTablesAndStreamsRows()
+{
+	ConversationModel model;
+	QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
+
+	model.setMessage(assistant(u"a1"_s, {text(u"Intro:\n\n| Name | Role | Score |\n| :--- | :---: | ---: |\n| Alice | **Dev** | 10 |\n| Bob | ![x](http://example.com/a.png) | `a | b` |\n\nOutro"_s)}));
+	QCOMPARE(render(model).size(), 3);
+	QCOMPARE(roleOf(model, 0, ConversationModel::KindRole).toString(), u"markdown"_s);
+	QCOMPARE(roleOf(model, 0, ConversationModel::ContentRole).toString(), u"Intro:"_s);
+	QCOMPARE(roleOf(model, 1, ConversationModel::KindRole).toString(), u"table"_s);
+	QCOMPARE(roleOf(model, 1, ConversationModel::TableHeadersRole).toStringList(), (QStringList{u"Name"_s, u"Role"_s, u"Score"_s}));
+	QCOMPARE(roleOf(model, 1, ConversationModel::TableAlignmentsRole).toStringList(), (QStringList{u"left"_s, u"center"_s, u"right"_s}));
+	const QVariantList rows = roleOf(model, 1, ConversationModel::TableRowsRole).toList();
+	QCOMPARE(rows.size(), 2);
+	QCOMPARE(rows.at(0).toStringList(), (QStringList{u"Alice"_s, u"**Dev**"_s, u"10"_s}));
+	QCOMPARE(rows.at(1).toStringList(), (QStringList{u"Bob"_s, u"[x](http://example.com/a.png)"_s, u"`a | b`"_s}));
+	QCOMPARE(roleOf(model, 2, ConversationModel::KindRole).toString(), u"markdown"_s);
+	QCOMPARE(roleOf(model, 2, ConversationModel::ContentRole).toString(), u"Outro"_s);
+
+	// Streaming a table row by row without leading pipe header.
+	model.setMessage(assistant(u"a2"_s, {}, false));
+	model.appendDelta(u"a2"_s, 0, {Delta::Kind::Text, u"Before\n\nCol1 | Col2\n"_s});
+	model.appendDelta(u"a2"_s, 0, {Delta::Kind::Text, u"--- | ---:\n"_s});
+	const int baseRow = contentRowCount(model) - 1;
+	QCOMPARE(roleOf(model, baseRow - 1, ConversationModel::KindRole).toString(), u"markdown"_s);
+	QCOMPARE(roleOf(model, baseRow - 1, ConversationModel::ContentRole).toString(), u"Before"_s);
+	QCOMPARE(roleOf(model, baseRow, ConversationModel::KindRole).toString(), u"table"_s);
+	QCOMPARE(roleOf(model, baseRow, ConversationModel::TableHeadersRole).toStringList(), (QStringList{u"Col1"_s, u"Col2"_s}));
+	QCOMPARE(roleOf(model, baseRow, ConversationModel::TableAlignmentsRole).toStringList(), (QStringList{u"left"_s, u"right"_s}));
+	QVERIFY(roleOf(model, baseRow, ConversationModel::StreamingRole).toBool());
+	model.appendDelta(u"a2"_s, 0, {Delta::Kind::Text, u"v1 | v2\n"_s});
+	QCOMPARE(roleOf(model, baseRow, ConversationModel::TableRowsRole).toList().size(), 1);
+	model.appendDelta(u"a2"_s, 0, {Delta::Kind::Text, u"```cpp\nint x = 0;\n```"_s});
+	QVERIFY(!roleOf(model, baseRow, ConversationModel::StreamingRole).toBool());
+	QCOMPARE(roleOf(model, baseRow + 1, ConversationModel::KindRole).toString(), u"code"_s);
 }
 
 QTEST_GUILESS_MAIN(TestConversationModel)

@@ -220,8 +220,9 @@ FocusScope {
 			height: view.currentItem ? view.currentItem.height : 0
 			radius: 8
 			color: Theme.surfaceHover
+			border.color: Theme.border
+			border.width: 1
 			visible: view.currentItem !== null
-
 			Behavior on y {
 				enabled: pick.animateHighlight
 				NumberAnimation { duration: Motion.quick; easing.type: Motion.ease }
@@ -241,7 +242,8 @@ FocusScope {
 			onPointChanged: {
 				if (!hovered || !hoverGuard.movedTo(point.scenePosition))
 					return
-				const index = view.indexAt(point.position.x + view.contentX, point.position.y + view.contentY)
+				const local = view.mapFromItem(null, point.scenePosition.x, point.scenePosition.y)
+				const index = view.indexAt(local.x + view.contentX, local.y + view.contentY)
 				if (index >= 0 && pick.isRowEnabled(index)) {
 					pick.animateHighlight = true
 					view.currentIndex = index

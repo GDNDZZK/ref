@@ -415,32 +415,32 @@
 <context>
     <name>Composer</name>
     <message>
-        <location filename="../src/app/Composer.qml" line="172"/>
+        <location filename="../src/app/Composer.qml" line="176"/>
         <source>Run a shell command…</source>
         <translation>运行 shell 命令…</translation>
     </message>
     <message>
-        <location filename="../src/app/Composer.qml" line="173"/>
+        <location filename="../src/app/Composer.qml" line="177"/>
         <source>Type to queue a message…</source>
         <translation>输入后加入队列…</translation>
     </message>
     <message>
-        <location filename="../src/app/Composer.qml" line="174"/>
+        <location filename="../src/app/Composer.qml" line="178"/>
         <source>Message ref</source>
         <translation>给 ref 发消息</translation>
     </message>
     <message>
-        <location filename="../src/app/Composer.qml" line="276"/>
+        <location filename="../src/app/Composer.qml" line="338"/>
         <source>Cancelled the delayed tool call</source>
         <translation>已取消延迟中的工具调用</translation>
     </message>
     <message>
-        <location filename="../src/app/Composer.qml" line="364"/>
+        <location filename="../src/app/Composer.qml" line="433"/>
         <source>Drop files here</source>
         <translation>拖放文件到此处</translation>
     </message>
     <message>
-        <location filename="../src/app/Composer.qml" line="171"/>
+        <location filename="../src/app/Composer.qml" line="175"/>
         <source>Waiting for the ref backend…</source>
         <translation>正在等待 ref 后端…</translation>
     </message>
@@ -2203,31 +2203,36 @@ $ARGUMENTS</translation>
     </message>
     <message>
         <location filename="../src/app/HelpDialog.qml" line="16"/>
+        <source>Cycle model variant</source>
+        <translation>循环切换模型变体</translation>
+    </message>
+    <message>
+        <location filename="../src/app/HelpDialog.qml" line="17"/>
         <source>Earlier prompts</source>
         <translation>历史提示</translation>
     </message>
     <message>
-        <location filename="../src/app/HelpDialog.qml" line="17"/>
+        <location filename="../src/app/HelpDialog.qml" line="18"/>
         <source>Move between tiles (split view)</source>
         <translation>在分块间移动（分屏视图）</translation>
     </message>
     <message>
-        <location filename="../src/app/HelpDialog.qml" line="27"/>
+        <location filename="../src/app/HelpDialog.qml" line="28"/>
         <source>Keybindings and commands</source>
         <translation>快捷键与命令</translation>
     </message>
     <message>
-        <location filename="../src/app/HelpDialog.qml" line="34"/>
+        <location filename="../src/app/HelpDialog.qml" line="35"/>
         <source>Keyboard</source>
         <translation>键盘</translation>
     </message>
     <message>
-        <location filename="../src/app/HelpDialog.qml" line="49"/>
+        <location filename="../src/app/HelpDialog.qml" line="50"/>
         <source>Writing</source>
         <translation>输入</translation>
     </message>
     <message>
-        <location filename="../src/app/HelpDialog.qml" line="64"/>
+        <location filename="../src/app/HelpDialog.qml" line="65"/>
         <source>Commands</source>
         <translation>命令</translation>
     </message>
@@ -2347,38 +2352,38 @@ $ARGUMENTS</translation>
 <context>
     <name>Main</name>
     <message>
-        <location filename="../src/app/Main.qml" line="152"/>
+        <location filename="../src/app/Main.qml" line="133"/>
         <source>New session in…</source>
         <translation>在其他目录新建会话…</translation>
     </message>
     <message>
-        <location filename="../src/app/Main.qml" line="383"/>
+        <location filename="../src/app/Main.qml" line="369"/>
         <source>Show sidebar</source>
         <translation>显示侧边栏</translation>
     </message>
     <message>
-        <location filename="../src/app/Main.qml" line="288"/>
-        <location filename="../src/app/Main.qml" line="401"/>
+        <location filename="../src/app/Main.qml" line="278"/>
+        <location filename="../src/app/Main.qml" line="387"/>
         <source>New session</source>
         <translation>新建会话</translation>
     </message>
     <message>
-        <location filename="../src/app/Main.qml" line="273"/>
+        <location filename="../src/app/Main.qml" line="263"/>
         <source>No session open</source>
         <translation>未打开会话</translation>
     </message>
     <message>
-        <location filename="../src/app/Main.qml" line="283"/>
+        <location filename="../src/app/Main.qml" line="273"/>
         <source>New session in folder…</source>
         <translation>选择文件夹新建会话…</translation>
     </message>
     <message>
-        <location filename="../src/app/Main.qml" line="443"/>
+        <location filename="../src/app/Main.qml" line="429"/>
         <source>Split view</source>
         <translation>分屏视图</translation>
     </message>
     <message>
-        <location filename="../src/app/Main.qml" line="459"/>
+        <location filename="../src/app/Main.qml" line="445"/>
         <source>Leave zoom</source>
         <translation>退出放大</translation>
     </message>
@@ -2956,12 +2961,12 @@ $ARGUMENTS</translation>
 <context>
     <name>SessionPane</name>
     <message>
-        <location filename="../src/app/SessionPane.qml" line="106"/>
+        <location filename="../src/app/SessionPane.qml" line="114"/>
         <source>What are we building?</source>
         <translation>我们要做点什么？</translation>
     </message>
     <message>
-        <location filename="../src/app/SessionPane.qml" line="132"/>
+        <location filename="../src/app/SessionPane.qml" line="140"/>
         <source>Jump to latest</source>
         <translation>跳到最新</translation>
     </message>
@@ -3131,76 +3136,76 @@ $ARGUMENTS</translation>
 <context>
     <name>Sidebar</name>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="103"/>
+        <location filename="../src/app/Sidebar.qml" line="137"/>
         <source>Hide sidebar</source>
         <translation>隐藏侧边栏</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="144"/>
+        <location filename="../src/app/Sidebar.qml" line="178"/>
         <source>New session</source>
         <translation>新建会话</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="164"/>
+        <location filename="../src/app/Sidebar.qml" line="198"/>
         <source>New session in another folder…</source>
         <translation>在其他文件夹新建会话…</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="185"/>
+        <location filename="../src/app/Sidebar.qml" line="219"/>
         <source>Todo %1/%2</source>
         <translation>待办 %1/%2</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="212"/>
+        <location filename="../src/app/Sidebar.qml" line="246"/>
         <source>Running</source>
         <translation>运行中</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="253"/>
+        <location filename="../src/app/Sidebar.qml" line="287"/>
         <source>History</source>
         <translation>历史</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="284"/>
-        <location filename="../src/app/Sidebar.qml" line="290"/>
+        <location filename="../src/app/Sidebar.qml" line="318"/>
+        <location filename="../src/app/Sidebar.qml" line="324"/>
         <source>Search history</source>
         <translation>搜索历史</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="302"/>
+        <location filename="../src/app/Sidebar.qml" line="336"/>
         <source>Clear search</source>
         <translation>清除搜索</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="35"/>
+        <location filename="../src/app/Sidebar.qml" line="38"/>
         <source>Loading…</source>
         <translation>加载中…</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="36"/>
+        <location filename="../src/app/Sidebar.qml" line="39"/>
         <source>No matching sessions</source>
         <translation>没有匹配的会话</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="36"/>
+        <location filename="../src/app/Sidebar.qml" line="39"/>
         <source>No earlier sessions</source>
         <translation>没有更早的会话</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="356"/>
-        <location filename="../src/app/Sidebar.qml" line="357"/>
+        <location filename="../src/app/Sidebar.qml" line="390"/>
+        <location filename="../src/app/Sidebar.qml" line="391"/>
         <source>Reload configuration</source>
         <translation>重新加载配置</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="365"/>
-        <location filename="../src/app/Sidebar.qml" line="366"/>
+        <location filename="../src/app/Sidebar.qml" line="399"/>
+        <location filename="../src/app/Sidebar.qml" line="400"/>
         <source>Configuration (ref.json)…</source>
         <translation>配置 (ref.json)…</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="372"/>
-        <location filename="../src/app/Sidebar.qml" line="373"/>
+        <location filename="../src/app/Sidebar.qml" line="406"/>
+        <location filename="../src/app/Sidebar.qml" line="407"/>
         <source>Settings</source>
         <translation>设置</translation>
     </message>
@@ -3295,7 +3300,7 @@ $ARGUMENTS</translation>
 <context>
     <name>Tile</name>
     <message>
-        <location filename="../src/app/Tile.qml" line="238"/>
+        <location filename="../src/app/Tile.qml" line="274"/>
         <source>Zoom in</source>
         <translation>放大</translation>
     </message>
@@ -3573,70 +3578,70 @@ $ARGUMENTS</translation>
 <context>
     <name>refgui::composer::ComposerModel</name>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="491"/>
-        <location filename="../src/composer/composer_model.cpp" line="724"/>
+        <location filename="../src/composer/composer_model.cpp" line="498"/>
+        <location filename="../src/composer/composer_model.cpp" line="731"/>
         <source>default</source>
         <translation>默认</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="496"/>
-        <location filename="../src/composer/composer_model.cpp" line="504"/>
-        <location filename="../src/composer/composer_model.cpp" line="549"/>
-        <location filename="../src/composer/composer_model.cpp" line="585"/>
-        <location filename="../src/composer/composer_model.cpp" line="585"/>
+        <location filename="../src/composer/composer_model.cpp" line="503"/>
+        <location filename="../src/composer/composer_model.cpp" line="511"/>
+        <location filename="../src/composer/composer_model.cpp" line="556"/>
+        <location filename="../src/composer/composer_model.cpp" line="592"/>
+        <location filename="../src/composer/composer_model.cpp" line="592"/>
         <source>active</source>
         <translation>当前</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="656"/>
+        <location filename="../src/composer/composer_model.cpp" line="663"/>
         <source>live</source>
         <translation>运行中</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="656"/>
-        <location filename="../src/composer/composer_model.cpp" line="839"/>
+        <location filename="../src/composer/composer_model.cpp" line="663"/>
+        <location filename="../src/composer/composer_model.cpp" line="846"/>
         <source>history</source>
         <translation>历史</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="981"/>
+        <location filename="../src/composer/composer_model.cpp" line="988"/>
         <source>Unknown command /%1</source>
         <translation>未知命令 /%1</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="982"/>
+        <location filename="../src/composer/composer_model.cpp" line="989"/>
         <location filename="../tests/tst_app_translator.cpp" line="74"/>
         <source>Unknown command /%1 — did you mean /%2?</source>
         <translation>未知命令 /%1 — 你是指 /%2 吗？</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="988"/>
-        <location filename="../src/composer/composer_model.cpp" line="1031"/>
+        <location filename="../src/composer/composer_model.cpp" line="995"/>
+        <location filename="../src/composer/composer_model.cpp" line="1038"/>
         <source>Not connected to the ref backend.</source>
         <translation>未连接到 ref 后端。</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="1100"/>
+        <location filename="../src/composer/composer_model.cpp" line="1107"/>
         <source>The command expanded to nothing</source>
         <translation>命令展开后为空</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="1175"/>
+        <location filename="../src/composer/composer_model.cpp" line="1182"/>
         <source>Already sent; the prompt can no longer be removed</source>
         <translation>已经发送，无法再撤回该提示</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="1358"/>
+        <location filename="../src/composer/composer_model.cpp" line="1387"/>
         <source>The image is larger than %1 MiB.</source>
         <translation>图片超过 %1 MiB。</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="1400"/>
+        <location filename="../src/composer/composer_model.cpp" line="1429"/>
         <source>File not found: %1</source>
         <translation>找不到文件：%1</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="1406"/>
+        <location filename="../src/composer/composer_model.cpp" line="1435"/>
         <source>%1 is not a local file</source>
         <translation>%1 不是本地文件</translation>
     </message>
@@ -3806,38 +3811,38 @@ $ARGUMENTS</translation>
 <context>
     <name>refgui::workspace::Settings</name>
     <message>
-        <location filename="../src/workspace/settings.cpp" line="233"/>
+        <location filename="../src/workspace/settings.cpp" line="256"/>
         <source>Could not read %1: %2</source>
         <translation>无法读取 %1：%2</translation>
     </message>
     <message>
-        <location filename="../src/workspace/settings.cpp" line="246"/>
+        <location filename="../src/workspace/settings.cpp" line="269"/>
         <source>not a JSON object</source>
         <translation>不是 JSON 对象</translation>
     </message>
     <message>
-        <location filename="../src/workspace/settings.cpp" line="247"/>
+        <location filename="../src/workspace/settings.cpp" line="270"/>
         <source>Could not read %1 (%2). It was kept as %3 and the defaults are used.</source>
         <translation>无法读取 %1（%2）。已另存为 %3，现使用默认设置。</translation>
     </message>
     <message>
-        <location filename="../src/workspace/settings.cpp" line="248"/>
+        <location filename="../src/workspace/settings.cpp" line="271"/>
         <source>Could not read %1 (%2). The defaults are used.</source>
         <translation>无法读取 %1（%2）。使用默认设置。</translation>
     </message>
     <message>
-        <location filename="../src/workspace/settings.cpp" line="273"/>
+        <location filename="../src/workspace/settings.cpp" line="296"/>
         <source>Some settings in %1 were ignored: %2</source>
         <translation>%1 中的部分设置已被忽略：%2</translation>
     </message>
     <message>
-        <location filename="../src/workspace/settings.cpp" line="313"/>
+        <location filename="../src/workspace/settings.cpp" line="337"/>
         <source>Could not create %1.</source>
         <translation>无法创建 %1。</translation>
     </message>
     <message>
-        <location filename="../src/workspace/settings.cpp" line="319"/>
-        <location filename="../src/workspace/settings.cpp" line="325"/>
+        <location filename="../src/workspace/settings.cpp" line="343"/>
+        <location filename="../src/workspace/settings.cpp" line="349"/>
         <source>Could not save %1: %2</source>
         <translation>无法保存 %1：%2</translation>
     </message>

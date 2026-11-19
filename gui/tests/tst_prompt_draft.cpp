@@ -41,6 +41,7 @@ private slots:
 	void restoreAppendsAfterABlankLineAndRebinds();
 	void restoreGivesLeftoverImagesATokenAtTheEnd();
 	void restoreIgnoresNothing();
+	void atomicPlaceholderSnappingSelectionAndDeletion();
 };
 
 void TestPromptDraft::attachInsertsTokenAtCursor()
@@ -150,6 +151,27 @@ void TestPromptDraft::restoreIgnoresNothing()
 	draft.restore(u"  "_s, {});
 	QCOMPARE(draft.text(), u"keep"_s);
 }
-
+void TestPromptDraft::atomicPlaceholderSnappingSelectionAndDeletion()
+{
+	PromptDraft draft;
+	draft.setText(u"see "_s, 4);
+	draft.attach(image(u"a"_s));
+	draft.setText(draft.text() + u"now"_s, draft.text().size() + 3);
+	// "see [Image 1] now" -> token is [4, 13)
+	QCOMPARE(draft.text(), u"see [Image 1] now"_s);
+	QCOMPARE(draft.snapCursor(5, 4), 13);   // moving right from start snaps past token
+	QCOMPARE(draft.snapCursor(12, 13), 4);  // moving left from end snaps before token
+	QCOMPARE(draft.snapCursor(6, 6), 4);    // click near left edge snaps left
+	QCOMPARE(draft.snapCursor(11, 11), 13); // click near right edge snaps right
+	QCOMPARE(draft.expandSelection(2, 6), (std::pair<qsizetype, qsizetype>{2, 13}));
+	QCOMPARE(draft.expandSelection(10, 15), (std::pair<qsizetype, qsizetype>{4, 15}));
+	// Non-attached literal "[Image 9]" is NOT treated as an atomic attachment placeholder.
+	draft.setText(u"see [Image 1] and [Image 9]"_s, 27);
+	QCOMPARE(draft.snapCursor(21, 20), 21);
+	QVERIFY(!draft.deletePlaceholderAt(13, false)); // after [Image 1], Delete hits " and"
+	QVERIFY(draft.deletePlaceholderAt(13, true));   // Backspace at token end removes token + trailing space
+	QCOMPARE(draft.text(), u"see and [Image 9]"_s);
+	QVERIFY(draft.attachments().isEmpty());
+}
 QTEST_GUILESS_MAIN(TestPromptDraft)
 #include "tst_prompt_draft.moc"

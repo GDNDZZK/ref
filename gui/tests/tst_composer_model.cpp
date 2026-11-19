@@ -265,6 +265,8 @@ private slots:
 	void slashArgumentCompletionsCoverPathsModelsAgentsVariantsAndSessions();
 	void shellModeCompletionsAndHistoryFilterWork();
 	void shellEscapeClipboardPipelinesDuplicateSessionsAndBackslashPathsWork();
+	void atomicImagePlaceholderHelpersSyncDraftAndAttachments();
+	void midTextSlashReplacementAndShellWrapperCompletionWork();
 };
 
 void TestComposerModel::labelsFollowTheSessionAndTheConfiguration()
@@ -958,6 +960,57 @@ void TestComposerModel::shellEscapeClipboardPipelinesDuplicateSessionsAndBacksla
 	QCOMPARE(f.composer.completions()->rowCount(), 1);
 	QCOMPARE(f.composer.completions()->index(0, 0).data(composer::CompletionItemModel::ValueRole).toString(), u"src\\bin\\"_s);
 }
-
+void TestComposerModel::atomicImagePlaceholderHelpersSyncDraftAndAttachments()
+{
+	Fixture f;
+	QImage img(2, 2, QImage::Format_RGB32);
+	img.fill(Qt::green);
+	QGuiApplication::clipboard()->setImage(img);
+	f.type(u"look "_s);
+	QVERIFY(f.composer.pasteFromClipboard());
+	f.type(f.composer.text() + u"here"_s);
+	QCOMPARE(f.composer.text(), u"look [Image 1] here"_s);
+	QCOMPARE(f.composer.attachments()->rowCount(), 1);
+	QCOMPARE(f.composer.snapCursor(6, 5), 14);
+	const QVariantMap expanded = f.composer.expandSelection(2, 8);
+	QVERIFY(expanded.value(u"changed"_s).toBool());
+	QCOMPARE(expanded.value(u"start"_s).toInt(), 2);
+	QCOMPARE(expanded.value(u"end"_s).toInt(), 14);
+	QVERIFY(f.composer.deletePlaceholderAt(5, false)); // Delete at token start
+	QCOMPARE(f.composer.text(), u"look here"_s);
+	QCOMPARE(f.composer.cursor(), 5);
+	QCOMPARE(f.composer.attachments()->rowCount(), 0);
+}
+void TestComposerModel::midTextSlashReplacementAndShellWrapperCompletionWork()
+{
+	Fixture f;
+	f.type(u"please check /comp later"_s);
+	f.composer.edit(u"please check /comp later"_s, 18);
+	QCOMPARE(f.composer.completionKind(), u"command"_s);
+	QCOMPARE(f.composer.completionQuery(), u"comp"_s);
+	QVERIFY(!f.composer.isStandaloneCommandTarget());
+	f.composer.completeCommand(u"compact"_s, false);
+	QCOMPARE(f.composer.text(), u"please check /compact later"_s);
+	QCOMPARE(f.composer.cursor(), 21);
+	QCOMPARE(f.composer.completionKind(), u"none"_s);
+	f.type(u"please /ren Work"_s);
+	f.composer.edit(u"please /ren Work"_s, 11);
+	QCOMPARE(f.composer.completionKind(), u"command"_s);
+	f.composer.completeCommand(u"rename"_s, true);
+	QCOMPARE(f.composer.text(), u"please /rename Work"_s);
+	QCOMPARE(f.composer.cursor(), 15);
+	f.composer.clearDraft();
+	f.type(u"/mod"_s);
+	QVERIFY(f.composer.isStandaloneCommandTarget());
+	f.composer.completeCommand(u"models"_s, false);
+	QCOMPARE(f.composer.text(), u"/models"_s);
+	f.composer.clearDraft();
+	f.binaries = {u"docker"_s};
+	f.type(u"!"_s);
+	f.type(u"sudo -u root doc"_s);
+	QCOMPARE(f.composer.completionKind(), u"shellCommand"_s);
+	QTRY_COMPARE(f.composer.completions()->rowCount(), 1);
+	QCOMPARE(f.composer.completions()->index(0, 0).data(composer::CompletionItemModel::ValueRole).toString(), u"docker"_s);
+}
 QTEST_MAIN(TestComposerModel)
 #include "tst_composer_model.moc"

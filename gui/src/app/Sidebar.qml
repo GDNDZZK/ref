@@ -9,7 +9,10 @@ import RefGui
 Rectangle {
 	id: sidebar
 
-	readonly property int contentWidth: Theme.sidebarWidth
+	property int preferredWidth: Theme.sidebarWidth
+	property real maxAllowed: Theme.sidebarMaxWidth
+	readonly property int contentWidth: Math.max(Theme.sidebarMinWidth, Math.min(maxAllowed, preferredWidth))
+	readonly property alias resizing: resizeDrag.active
 	readonly property int newRowHeight: 44
 	readonly property int searchHeight: 32
 	readonly property int historyGap: 8 // between the search field and the history rows
@@ -57,9 +60,40 @@ Rectangle {
 	Rectangle {
 		anchors { top: parent.top; bottom: parent.bottom; right: parent.right }
 		width: 1
-		color: Theme.border
+		color: resizeHover.hovered || resizeDrag.active ? Theme.accentText : Theme.border
+		Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 	}
-
+	Item {
+		id: resizeHandle
+		objectName: "sidebarResizeHandle"
+		anchors { top: parent.top; bottom: parent.bottom; right: parent.right }
+		width: 6
+		z: 10
+		visible: Workspace.settings.sidebarVisible && sidebar.width >= Theme.sidebarMinWidth
+		property real startWidth: sidebar.contentWidth
+		HoverHandler {
+			id: resizeHover
+			cursorShape: Qt.SplitHCursor
+		}
+		DragHandler {
+			id: resizeDrag
+			enabled: sidebar.dragEnabled && Workspace.settings.sidebarVisible
+			target: null
+			yAxis.enabled: false
+			dragThreshold: 2
+			onActiveChanged: {
+				if (active)
+					resizeHandle.startWidth = sidebar.contentWidth
+			}
+			onTranslationChanged: {
+				if (active)
+					Workspace.settings.sidebarWidth = Math.round(Math.max(Theme.sidebarMinWidth, Math.min(sidebar.maxAllowed, resizeHandle.startWidth + translation.x)))
+			}
+		}
+		TapHandler {
+			onDoubleTapped: Workspace.settings.sidebarWidth = Theme.sidebarWidth
+		}
+	}
 	Item {
 		id: column
 		anchors { top: parent.top; bottom: parent.bottom; right: parent.right }

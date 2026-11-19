@@ -9,7 +9,8 @@ ScrollBar {
 	policy: ScrollBar.AsNeeded
 
 	contentItem: ScrollHandle {
-		implicitWidth: thickness
+		implicitWidth: bar.orientation === Qt.Vertical ? thickness : 0
+		implicitHeight: bar.orientation === Qt.Horizontal ? thickness : 0
 		pressed: bar.pressed
 		opacity: (bar.active || bar.hovered) && bar.size < 1 ? 1 : 0
 

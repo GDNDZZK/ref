@@ -70,6 +70,7 @@ private slots:
 	void keyCapsSplitTheShortcut();
 	void singularAliasesAndCaseInsensitiveSlashesWork();
 	void typoSuggestionsAndSingleSlashTokenDetection();
+	void requiresArgsReflectsOptionalVsRequiredHints();
 };
 
 void TestCommandRegistry::idsShortcutsAndSlashNamesAreUnique()
@@ -267,6 +268,32 @@ void TestCommandRegistry::typoSuggestionsAndSingleSlashTokenDetection()
 	QCOMPARE(CommandRegistry::suggestSlashFrom(u"reveiw"_s, {{.name = u"review"_s, .description = u"Review"_s, .source = u"config"_s}}), u"review"_s);
 	QCOMPARE(CommandRegistry::suggestSlashFrom(u"zzzzzz"_s), QString());
 }
-
+void TestCommandRegistry::requiresArgsReflectsOptionalVsRequiredHints()
+{
+	Fixture f;
+	f.registry.setCustomCommands({{.name = u"review"_s, .description = u"Review"_s, .source = u"config"_s}});
+	const auto flagFor = [&](const QString& id) {
+		const QVariantList matches = f.registry.matching(id, false);
+		for(const QVariant& item : matches)
+		{
+			const QVariantMap map = item.toMap();
+			if(map.value(u"id"_s).toString() == id)
+			{
+				return map.value(u"requiresArgs"_s).toBool();
+			}
+		}
+		return false;
+	};
+	QVERIFY(flagFor(u"rename"_s));
+	QVERIFY(!flagFor(u"models"_s));
+	QVERIFY(!flagFor(u"sessions"_s));
+	QVERIFY(!flagFor(u"agents"_s));
+	QVERIFY(!flagFor(u"variant"_s));
+	QVERIFY(!flagFor(u"cd"_s));
+	QVERIFY(!flagFor(u"export"_s));
+	QVERIFY(!flagFor(u"close-session"_s));
+	QVERIFY(!flagFor(u"new"_s));
+	QVERIFY(!flagFor(u"custom:review"_s));
+}
 QTEST_GUILESS_MAIN(TestCommandRegistry)
 #include "tst_command_registry.moc"

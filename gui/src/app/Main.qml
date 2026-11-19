@@ -29,35 +29,16 @@ Window {
 	}
 
 	function showSession(session) {
-		if (session === shown)
-			return
-		if (session === null) {
-			if (Workspace.splitView || !content.visible) {
-				sessionFade.cancel()
-				shown = null
-			} else {
-				sessionFade.run(content, () => shown = null)
-			}
-			return
-		}
-		if (shown === null || Workspace.splitView || !content.visible) {
-			sessionFade.cancel()
+		if (session !== shown)
 			shown = session
-			return
-		}
-		sessionFade.run(content, () => shown = session)
 	}
 
-	// A session that is shown is deleted when it is closed, and the crossfade to the next one takes a
-	// frame or more to get going. What is shown moves on at once, so the pane never meets a deleted session.
 	Connections {
 		target: Workspace
 
 		function onSessionDropped(session) {
-			if (window.shown === session) {
-				sessionFade.cancel()
+			if (window.shown === session)
 				window.shown = Workspace.current
-			}
 		}
 	}
 
@@ -171,7 +152,12 @@ Window {
 			}
 		}
 	}
-
+	Shortcut {
+		sequence: "Ctrl+T"
+		enabled: Workspace.dialog === "" && Workspace.frontSession !== null && Workspace.frontSession.composer.variantAvailable
+		autoRepeat: false
+		onActivated: Workspace.setVariant(Workspace.frontSession.sessionId, "")
+	}
 	Instantiator {
 		model: [
 			{ key: "Alt+Left", dx: -1, dy: 0 },
@@ -192,6 +178,7 @@ Window {
 		id: page
 		anchors.fill: parent
 		enabled: !dialogs.open
+		readonly property int minAreaWidth: 320
 
 		// The window color is not part of a grab.
 		Rectangle {
@@ -202,14 +189,18 @@ Window {
 		Sidebar {
 			id: sidebar
 			height: parent.height
-			width: Workspace.settings.sidebarVisible ? Theme.sidebarWidth : 0
+			preferredWidth: Workspace.settings.sidebarWidth
+			maxAllowed: Math.max(Theme.sidebarMinWidth, Math.min(Theme.sidebarMaxWidth, (page.width > 0 ? page.width : Workspace.settings.windowWidth) - page.minAreaWidth))
+			width: Workspace.settings.sidebarVisible ? contentWidth : 0
 			headerLeftInset: window.isMac ? window.macTrafficLightInset : 0
 			dragEnabled: !dialogs.visible
 			onCollapseRequested: Commands.run(CommandId.sidebar)
 			onMoveRequested: window.startSystemMove()
 			onToggleMaximizeRequested: window.toggleMaximized()
-
-			Behavior on width { NumberAnimation { id: sidebarWidthAnim; duration: Motion.standard; easing.type: Motion.ease } }
+			Behavior on width {
+				enabled: window.restored && !(sidebar.resizing && Workspace.settings.sidebarVisible)
+				NumberAnimation { id: sidebarWidthAnim; duration: Motion.standard; easing.type: Motion.ease }
+			}
 		}
 
 		Item {
@@ -249,7 +240,7 @@ Window {
 
 						sourceComponent: SessionPane {
 							session: window.shown
-							layoutWidth: sidebarWidthAnim.running ? Math.max(0, page.width - Theme.sidebarWidth) : width
+							layoutWidth: sidebarWidthAnim.running ? Math.max(0, page.width - sidebar.contentWidth) : width
 						}
 					}
 
@@ -317,7 +308,7 @@ Window {
 						anchors.fill: parent
 						topInset: 0
 						sidebarAnimating: sidebarWidthAnim.running
-						minAreaWidth: Math.max(0, page.width - Theme.sidebarWidth)
+						minAreaWidth: Math.max(0, page.width - sidebar.contentWidth)
 						visible: (Workspace.splitView || occupied) && opacity > 0
 						enabled: Workspace.splitView
 					}
@@ -325,10 +316,6 @@ Window {
 					// Connection trouble, or why no session could be opened, until it is gone.
 					StatusPill {
 						text: window.noticeText()
-					}
-
-					Crossfade {
-						id: sessionFade
 					}
 				}
 			}

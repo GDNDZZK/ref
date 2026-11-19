@@ -2,7 +2,7 @@
 
 #include "proto/types.h"
 #include "session/fence_splitter.h"
-
+#include "session/table_splitter.h"
 #include <QJsonObject>
 #include <QList>
 #include <QString>
@@ -21,13 +21,13 @@ struct Block
 		User,
 		Reasoning,
 		Markdown,
+		Table,
 		Code,
 		Tool,
 		Error,
 		Image,
 		Meta, // the line under a message: time, agent, tokens, actions
 	};
-
 	// An image the server holds: its bytes come from GetImage with `id`.
 	struct ImageRef
 	{
@@ -42,6 +42,9 @@ struct Block
 	Kind kind = Kind::Markdown;
 	QString content{};
 	QString language{};
+	QStringList tableHeaders{};
+	QStringList tableAlignments{};
+	QList<QStringList> tableRows{};
 	QString output{};
 	bool streaming = false;
 	bool failed = false;
@@ -91,6 +94,17 @@ struct Block
 	};
 	MarkdownCache markdownCache{};
 
+	struct TableCache
+	{
+		mutable QStringList sourceHeaders{};
+		mutable QList<QStringList> sourceRows{};
+		mutable QStringList renderedHeaders{};
+		mutable QVariantList renderedRows{};
+
+		bool operator==(const TableCache&) const { return true; }
+	};
+	TableCache tableCache{};
+
 	bool operator==(const Block&) const = default;
 };
 
@@ -109,14 +123,21 @@ bool isEnded(const MessageHeader& header);
 // Whether the part is still receiving content. Of the text and reasoning parts, only the last one streams.
 bool isPartStreaming(const MessageHeader& header, const proto::Part& part, bool isLast);
 
+// Splits streamed Markdown text into Markdown prose, Table blocks, and fenced Code blocks.
+struct TextSplitter
+{
+	FenceSplitter fence{false};
+	TableSplitter table{};
+	bool inCode = false;
+};
+
 // All blocks of an assistant part. `splitter` is fresh and left in the state that
 // follows the part's text, so that more text can be fed with `feedText`.
-QList<Block> assistantPartBlocks(const MessageHeader& header, qsizetype index, const proto::Part& part, bool streaming, FenceSplitter& splitter);
+QList<Block> assistantPartBlocks(const MessageHeader& header, qsizetype index, const proto::Part& part, bool streaming, TextSplitter& splitter);
 
 // Adds streamed text to the blocks of a part that is still streaming, as built by
 // `assistantPartBlocks`.
-void feedText(QList<Block>& blocks, FenceSplitter& splitter, const MessageHeader& header, qsizetype index, QStringView delta);
-
+void feedText(QList<Block>& blocks, TextSplitter& splitter, const MessageHeader& header, qsizetype index, QStringView delta);
 // A user message is one block of its text, plus one per image.
 QList<Block> userBlocks(const MessageHeader& header, const QList<proto::Part>& parts);
 
