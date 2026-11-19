@@ -15,6 +15,7 @@ Item {
 	readonly property real compactMargin: 10 // below the input box
 	readonly property real compactColumnPadding: 16 // beside the conversation
 	readonly property real questionMaxHeightRatio: 0.8 // of the pane, for the question card
+	readonly property real sendButtonFallbackInset: 24 // Composer.padding(8) + SendButton.width(32) / 2
 	readonly property real margin: compact ? compactMargin : Theme.pagePadding
 	readonly property real columnPadding: layoutCompact ? compactColumnPadding : Theme.pagePadding
 	property bool keysEnabled: true
@@ -23,7 +24,14 @@ Item {
 	property bool composerShown: true
 
 	function focusInput() {
-		composer.focusInput()
+		if (composerLoader.item)
+			(composerLoader.item as Composer).focusInput()
+	}
+	function isJumpButtonAt(scenePos) {
+		if (!jumpToEnd.visible)
+			return false
+		const p = jumpToEnd.mapFromItem(null, scenePos.x, scenePos.y)
+		return p.x >= 0 && p.y >= 0 && p.x <= jumpToEnd.width && p.y <= jumpToEnd.height
 	}
 
 	// The keyboard goes to the answer keys while they may answer, and back to the input box after.
@@ -67,7 +75,14 @@ Item {
 		loadingOlder: pane.session.loadingOlder
 		olderError: pane.session.olderError
 		onLoadOlderRequested: pane.session.loadOlder()
-		onImageClicked: image => lightbox.open(pane.session.sessionId, image)
+		onImageClicked: image => {
+			lightboxLoader.pendingSessionId = pane.session.sessionId
+			lightboxLoader.pendingImage = image
+			if (lightboxLoader.item)
+				(lightboxLoader.item as Lightbox).open(pane.session.sessionId, image)
+			else
+				lightboxLoader.active = true
+		}
 		onCancelRequested: pane.session.cancelDelayedTool()
 		onUndoRequested: messageId => pane.session.undo(messageId)
 		onCopyRequested: messageId => pane.session.copyMessage(messageId)
@@ -121,7 +136,7 @@ Item {
 		property bool alerting: false
 
 		// Stacked above the send button, on its center line.
-		x: composer.x + composer.sendButtonCenterX - width / 2
+		x: composerLoader.x + composerLoader.sendButtonCenterX - width / 2
 		anchors { bottom: questionCard.top; bottomMargin: 4 }
 		opacity: shown ? 1 : 0
 		visible: opacity > 0
@@ -197,29 +212,53 @@ Item {
 	StatusLine {
 		id: statusLine
 		session: pane.session
-		anchors { horizontalCenter: parent.horizontalCenter; bottom: composer.top }
+		anchors { horizontalCenter: parent.horizontalCenter; bottom: composerLoader.top }
 		width: chat.columnWidth
 		onTodoDismissed: pane.focusInput()
 	}
 
-	Composer {
-		id: composer
+	Loader {
+		id: composerLoader
 		anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: pane.margin }
 		width: chat.columnWidth
-		session: pane.session
-		boxShown: pane.composerShown
-		onSubmitted: chat.following = true
-		// With a request pending, its keys come before the input box, wherever the caret is.
-		onKeyOffered: event => event.accepted = pane.keysEnabled && pane.session.answerKey(event.key, event.text, event.modifiers, event.isAutoRepeat)
+		active: pane.composerShown || pane.session.composer.queueCount > 0
+		readonly property real sendButtonCenterX: item ? (item as Composer).sendButtonCenterX : width - pane.sendButtonFallbackInset
+
+		sourceComponent: Composer {
+			width: composerLoader.width
+			session: pane.session
+			boxShown: pane.composerShown
+			onSubmitted: chat.following = true
+			// With a request pending, its keys come before the input box, wherever the caret is.
+			onKeyOffered: event => event.accepted = pane.keysEnabled && pane.session.answerKey(event.key, event.text, event.modifiers, event.isAutoRepeat)
+		}
 	}
 
-	Lightbox {
-		id: lightbox
-		onClosed: pane.focusInput()
+	Loader {
+		id: lightboxLoader
+		anchors.fill: parent
+		active: false
+		property string pendingSessionId: ""
+		property var pendingImage: null
+
+		sourceComponent: Lightbox {}
+		onLoaded: {
+			if (pendingImage)
+				(item as Lightbox).open(pendingSessionId, pendingImage)
+		}
+		Connections {
+			target: lightboxLoader.item
+			function onClosed() { pane.focusInput() }
+			function onVisibleChanged() {
+				if (lightboxLoader.item && !lightboxLoader.item.visible && !lightboxLoader.item.shown)
+					lightboxLoader.active = false
+			}
+		}
 	}
 
 	Component.onCompleted: {
 		armKeys()
-		focusInput()
+		if (composerShown)
+			focusInput()
 	}
 }

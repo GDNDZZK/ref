@@ -167,4 +167,95 @@ void PromptDraft::dropOrphans()
 	m_attachments.removeIf([this](const Attachment& attachment) { return !m_text.contains(attachment.token); });
 }
 
+QList<PromptDraft::TokenSpan> PromptDraft::tokenSpans() const
+{
+	QList<TokenSpan> spans;
+	spans.reserve(m_attachments.size());
+	for(qsizetype i = 0; i < m_attachments.size(); ++i)
+	{
+		const QString& tok = m_attachments.at(i).token;
+		qsizetype from = 0;
+		while(from < m_text.size())
+		{
+			const qsizetype at = m_text.indexOf(tok, from);
+			if(at < 0)
+			{
+				break;
+			}
+			spans.append({.start = at, .end = at + tok.size()});
+			from = at + tok.size();
+		}
+	}
+	std::ranges::sort(spans, {}, &TokenSpan::start);
+	return spans;
+}
+
+qsizetype PromptDraft::snapCursor(qsizetype cursor, qsizetype previousCursor) const
+{
+	for(const TokenSpan& span : tokenSpans())
+	{
+		if(cursor > span.start && cursor < span.end)
+		{
+			if(previousCursor <= span.start)
+			{
+				return span.end;
+			}
+			if(previousCursor >= span.end)
+			{
+				return span.start;
+			}
+			return (cursor - span.start) < (span.end - cursor) ? span.start : span.end;
+		}
+	}
+	return cursor;
+}
+
+std::pair<qsizetype, qsizetype> PromptDraft::expandSelection(qsizetype start, qsizetype end) const
+{
+	qsizetype lo = std::clamp<qsizetype>(std::min(start, end), 0, m_text.size());
+	qsizetype hi = std::clamp<qsizetype>(std::max(start, end), 0, m_text.size());
+	if(lo == hi)
+	{
+		return {lo, hi};
+	}
+	for(const TokenSpan& span : tokenSpans())
+	{
+		if(lo < span.end && hi > span.start)
+		{
+			lo = std::min(lo, span.start);
+			hi = std::max(hi, span.end);
+		}
+	}
+	return {lo, hi};
+}
+
+bool PromptDraft::deletePlaceholderAt(qsizetype cursor, bool backward)
+{
+	const qsizetype clamped = std::clamp<qsizetype>(cursor, 0, m_text.size());
+	for(const TokenSpan& span : tokenSpans())
+	{
+		const bool hitBackward = backward && (clamped == span.end || (clamped > span.start && clamped < span.end));
+		const bool hitForward = !backward && (clamped == span.start || (clamped > span.start && clamped < span.end));
+		if(!hitBackward && !hitForward)
+		{
+			continue;
+		}
+		qsizetype delStart = span.start;
+		qsizetype delEnd = span.end;
+		if(delEnd < m_text.size() && m_text[delEnd] == u' ')
+		{
+			++delEnd;
+		}
+		else if(delStart > 0 && m_text[delStart - 1] == u' ')
+		{
+			--delStart;
+		}
+		m_text.remove(delStart, delEnd - delStart);
+		m_cursor = delStart;
+		dropOrphans();
+		return true;
+	}
+	return false;
+}
+
 } // namespace refgui::compose

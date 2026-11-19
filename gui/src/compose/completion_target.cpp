@@ -93,8 +93,155 @@ qsizetype advanceShellWordEnd(QStringView text, qsizetype pos)
 	return pos;
 }
 
-bool allWordsAreEnvAssignments(QStringView prefix)
+struct WrapperSpec
 {
+	QLatin1StringView name;
+	const QLatin1StringView* valueFlags = nullptr;
+	qsizetype flagCount = 0;
+	int positionalArgs = 0;
+	const QLatin1StringView* noPositionalFlags = nullptr;
+	qsizetype noPositionalCount = 0;
+};
+
+constexpr QLatin1StringView SudoFlags[] = {"-C"_L1, "-c"_L1, "-D"_L1, "-g"_L1, "-h"_L1, "-p"_L1, "-R"_L1, "-r"_L1, "-t"_L1, "-T"_L1, "-U"_L1, "-u"_L1, "--close-from"_L1, "--login-class"_L1, "--chdir"_L1, "--group"_L1, "--host"_L1, "--prompt"_L1, "--chroot"_L1, "--role"_L1, "--type"_L1, "--command-timeout"_L1, "--other-user"_L1, "--user"_L1};
+constexpr QLatin1StringView DoasFlags[] = {"-a"_L1, "-C"_L1, "-u"_L1};
+constexpr QLatin1StringView EnvFlags[] = {"-a"_L1, "-C"_L1, "-S"_L1, "-u"_L1, "--argv0"_L1, "--chdir"_L1, "--split-string"_L1, "--unset"_L1};
+constexpr QLatin1StringView TimeFlags[] = {"-f"_L1, "-o"_L1, "--format"_L1, "--output"_L1};
+constexpr QLatin1StringView NiceFlags[] = {"-n"_L1, "--adjustment"_L1};
+constexpr QLatin1StringView IoniceFlags[] = {"-c"_L1, "-n"_L1, "--class"_L1, "--classdata"_L1};
+constexpr QLatin1StringView TimeoutFlags[] = {"-k"_L1, "-s"_L1, "--kill-after"_L1, "--signal"_L1};
+constexpr QLatin1StringView StraceFlags[] = {"-a"_L1, "-b"_L1, "-e"_L1, "-E"_L1, "-I"_L1, "-o"_L1, "-O"_L1, "-p"_L1, "-P"_L1, "-s"_L1, "-S"_L1, "-u"_L1, "-U"_L1};
+constexpr QLatin1StringView LtraceFlags[] = {"-A"_L1, "-a"_L1, "-D"_L1, "-e"_L1, "-F"_L1, "-l"_L1, "-n"_L1, "-o"_L1, "-p"_L1, "-s"_L1, "-S"_L1, "-u"_L1, "-x"_L1};
+constexpr QLatin1StringView TasksetFlags[] = {"-c"_L1, "--cpu-list"_L1};
+constexpr QLatin1StringView TasksetNoPositionalFlags[] = {"-c"_L1, "--cpu-list"_L1, "-p"_L1, "--pid"_L1};
+constexpr QLatin1StringView StdbufFlags[] = {"-i"_L1, "-o"_L1, "-e"_L1, "--input"_L1, "--output"_L1, "--error"_L1};
+constexpr QLatin1StringView WatchFlags[] = {"-n"_L1, "--interval"_L1};
+constexpr QLatin1StringView ExecFlags[] = {"-a"_L1};
+constexpr QLatin1StringView XargsFlags[] = {"-a"_L1, "-d"_L1, "-E"_L1, "-e"_L1, "-I"_L1, "-i"_L1, "-L"_L1, "-l"_L1, "-n"_L1, "-P"_L1, "-s"_L1, "--arg-file"_L1, "--delimiter"_L1, "--eof"_L1, "--replace"_L1, "--max-lines"_L1, "--max-args"_L1, "--max-procs"_L1, "--max-chars"_L1, "--process-slot-var"_L1};
+constexpr QLatin1StringView CaffeinateFlags[] = {"-t"_L1, "-w"_L1};
+constexpr QLatin1StringView PkexecFlags[] = {"-u"_L1, "--user"_L1};
+
+constexpr WrapperSpec ShellWrappers[] = {
+	{"sudo"_L1, SudoFlags, std::size(SudoFlags), 0, nullptr, 0},
+	{"doas"_L1, DoasFlags, std::size(DoasFlags), 0, nullptr, 0},
+	{"env"_L1, EnvFlags, std::size(EnvFlags), 0, nullptr, 0},
+	{"nohup"_L1, nullptr, 0, 0, nullptr, 0},
+	{"time"_L1, TimeFlags, std::size(TimeFlags), 0, nullptr, 0},
+	{"nice"_L1, NiceFlags, std::size(NiceFlags), 0, nullptr, 0},
+	{"ionice"_L1, IoniceFlags, std::size(IoniceFlags), 0, nullptr, 0},
+	{"timeout"_L1, TimeoutFlags, std::size(TimeoutFlags), 1, nullptr, 0},
+	{"setsid"_L1, nullptr, 0, 0, nullptr, 0},
+	{"strace"_L1, StraceFlags, std::size(StraceFlags), 0, nullptr, 0},
+	{"ltrace"_L1, LtraceFlags, std::size(LtraceFlags), 0, nullptr, 0},
+	{"chrt"_L1, nullptr, 0, 1, nullptr, 0},
+	{"taskset"_L1, TasksetFlags, std::size(TasksetFlags), 1, TasksetNoPositionalFlags, std::size(TasksetNoPositionalFlags)},
+	{"stdbuf"_L1, StdbufFlags, std::size(StdbufFlags), 0, nullptr, 0},
+	{"watch"_L1, WatchFlags, std::size(WatchFlags), 0, nullptr, 0},
+	{"command"_L1, nullptr, 0, 0, nullptr, 0},
+	{"exec"_L1, ExecFlags, std::size(ExecFlags), 0, nullptr, 0},
+	{"builtin"_L1, nullptr, 0, 0, nullptr, 0},
+	{"xargs"_L1, XargsFlags, std::size(XargsFlags), 0, nullptr, 0},
+	{"caffeinate"_L1, CaffeinateFlags, std::size(CaffeinateFlags), 0, nullptr, 0},
+	{"pkexec"_L1, PkexecFlags, std::size(PkexecFlags), 0, nullptr, 0},
+};
+
+bool hasShortFlag(const QLatin1StringView* flags, qsizetype count, QChar ch)
+{
+	for(qsizetype i = 0; i < count; ++i)
+	{
+		if(flags[i].size() == 2 && flags[i][0] == u'-' && flags[i][1] == ch)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool hasLongFlag(const QLatin1StringView* flags, qsizetype count, QStringView flag)
+{
+	for(qsizetype i = 0; i < count; ++i)
+	{
+		if(flag == flags[i])
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+const WrapperSpec* findWrapperSpec(QStringView word)
+{
+	const qsizetype slash = std::max(word.lastIndexOf(u'/'), word.lastIndexOf(u'\\'));
+	const QStringView name = slash >= 0 ? word.mid(slash + 1) : word;
+	for(const WrapperSpec& spec : ShellWrappers)
+	{
+		if(name == spec.name)
+		{
+			return &spec;
+		}
+	}
+	return nullptr;
+}
+
+bool takesSeparateFlagArg(const WrapperSpec& spec, QStringView flag)
+{
+	if(!flag.startsWith(u'-') || flag.size() <= 1 || flag.contains(u'='))
+	{
+		return false;
+	}
+	if(flag.startsWith("--"_L1))
+	{
+		return hasLongFlag(spec.valueFlags, spec.flagCount, flag);
+	}
+	for(qsizetype i = 1; i < flag.size(); ++i)
+	{
+		if(hasShortFlag(spec.valueFlags, spec.flagCount, flag[i]))
+		{
+			return i == flag.size() - 1;
+		}
+	}
+	return false;
+}
+
+bool cancelsPositional(const WrapperSpec& spec, QStringView flag)
+{
+	if(spec.noPositionalCount == 0 || !flag.startsWith(u'-') || flag.size() <= 1)
+	{
+		return false;
+	}
+	const qsizetype eq = flag.indexOf(u'=');
+	const QStringView head = eq >= 0 ? flag.left(eq) : flag;
+	if(head.startsWith("--"_L1))
+	{
+		return hasLongFlag(spec.noPositionalFlags, spec.noPositionalCount, head);
+	}
+	for(qsizetype i = 1; i < flag.size(); ++i)
+	{
+		if(hasShortFlag(spec.noPositionalFlags, spec.noPositionalCount, flag[i]))
+		{
+			return true;
+		}
+		if(hasShortFlag(spec.valueFlags, spec.flagCount, flag[i]))
+		{
+			return false;
+		}
+	}
+	return false;
+}
+
+enum class ShellPosition
+{
+	Command,
+	WrapperArg,
+	Arg,
+};
+
+ShellPosition classifyShellPosition(QStringView prefix)
+{
+	const WrapperSpec* activeWrapper = nullptr;
+	bool wrapperFlagsDone = false;
+	bool expectingFlagArg = false;
+	int positionalRemaining = 0;
 	qsizetype i = 0;
 	while(i < prefix.size())
 	{
@@ -107,13 +254,50 @@ bool allWordsAreEnvAssignments(QStringView prefix)
 			break;
 		}
 		const qsizetype wordEnd = advanceShellWordEnd(prefix, i);
-		if(!isEnvAssignment(prefix.mid(i, wordEnd - i)))
-		{
-			return false;
-		}
+		const QStringView word = prefix.mid(i, wordEnd - i);
 		i = wordEnd;
+		if(expectingFlagArg)
+		{
+			expectingFlagArg = false;
+			continue;
+		}
+		if(activeWrapper != nullptr && !wrapperFlagsDone)
+		{
+			if(word == "--"_L1)
+			{
+				wrapperFlagsDone = true;
+				continue;
+			}
+			if(word.startsWith(u'-') && word.size() > 1)
+			{
+				if(cancelsPositional(*activeWrapper, word))
+				{
+					positionalRemaining = 0;
+				}
+				expectingFlagArg = takesSeparateFlagArg(*activeWrapper, word);
+				continue;
+			}
+		}
+		if(positionalRemaining == 0 && isEnvAssignment(word))
+		{
+			continue;
+		}
+		if(positionalRemaining > 0)
+		{
+			--positionalRemaining;
+			continue;
+		}
+		if(const WrapperSpec* nextWrapper = findWrapperSpec(word))
+		{
+			activeWrapper = nextWrapper;
+			wrapperFlagsDone = false;
+			expectingFlagArg = false;
+			positionalRemaining = nextWrapper->positionalArgs;
+			continue;
+		}
+		return ShellPosition::Arg;
 	}
-	return true;
+	return (expectingFlagArg || positionalRemaining > 0) ? ShellPosition::WrapperArg : ShellPosition::Command;
 }
 
 qsizetype operatorLengthAt(QStringView text, qsizetype pos)
@@ -213,18 +397,20 @@ CompletionTarget shellCompletionTarget(const QString& text, qsizetype cursor, bo
 	}
 
 	const QString query = text.mid(tokenStart, cursor - tokenStart);
-	const QStringView beforeToken = QStringView(text).mid(seg.start, tokenStart - seg.start);
-	const bool atCommandPos = allWordsAreEnvAssignments(beforeToken);
-
-	if(!atCommandPos)
+	if(query.startsWith(u'-'))
 	{
-		if(query.startsWith(u'-'))
-		{
-			return {};
-		}
+		return {};
+	}
+	const QStringView beforeToken = QStringView(text).mid(seg.start, tokenStart - seg.start);
+	const ShellPosition position = classifyShellPosition(beforeToken);
+	if(position == ShellPosition::WrapperArg)
+	{
+		return {};
+	}
+	if(position == ShellPosition::Arg)
+	{
 		return {.kind = CompletionTarget::Kind::ShellPath, .query = query, .start = tokenStart, .end = tokenEnd};
 	}
-
 	if(query.isEmpty())
 	{
 		if(!forceShellEmpty)
@@ -369,6 +555,33 @@ CompletionTarget fileCompletionTarget(const QString& text, qsizetype cursor)
 	return {.kind = CompletionTarget::Kind::File, .query = query.toString(), .start = at, .end = cursor};
 }
 
+CompletionTarget slashCommandCompletionTarget(const QString& text, qsizetype cursor)
+{
+	qsizetype tokenStart = cursor;
+	while(tokenStart > 0 && !text[tokenStart - 1].isSpace())
+	{
+		--tokenStart;
+	}
+	qsizetype tokenEnd = cursor;
+	while(tokenEnd < text.size() && !text[tokenEnd].isSpace())
+	{
+		++tokenEnd;
+	}
+	if(cursor <= tokenStart || tokenStart >= tokenEnd || text[tokenStart] != u'/')
+	{
+		return {};
+	}
+	const QStringView afterSlash = QStringView(text).mid(tokenStart + 1, tokenEnd - (tokenStart + 1));
+	if(afterSlash.contains(u'/') || afterSlash.contains(u'\\'))
+	{
+		return {};
+	}
+	return {.kind = CompletionTarget::Kind::Command,
+	        .query = text.mid(tokenStart + 1, cursor - (tokenStart + 1)),
+	        .start = tokenStart,
+	        .end = tokenEnd};
+}
+
 } // namespace
 
 CompletionTarget completionTarget(const QString& text, qsizetype cursor, bool shellMode, bool forceShellEmpty)
@@ -378,20 +591,16 @@ CompletionTarget completionTarget(const QString& text, qsizetype cursor, bool sh
 	{
 		return shellCompletionTarget(text, clampedCursor, forceShellEmpty);
 	}
-
-	const QStringView afterSlash = QStringView(text).mid(1);
-	const bool typingCommand = text.startsWith(u'/') && !hasWhitespace(afterSlash) && clampedCursor == text.size();
-	if(typingCommand)
-	{
-		return {.kind = CompletionTarget::Kind::Command, .query = afterSlash.toString(), .start = 0, .end = clampedCursor};
-	}
-
 	const CompletionTarget argTarget = slashArgCompletionTarget(text, clampedCursor);
 	if(argTarget.kind != CompletionTarget::Kind::None)
 	{
 		return argTarget;
 	}
-
+	const CompletionTarget cmdTarget = slashCommandCompletionTarget(text, clampedCursor);
+	if(cmdTarget.kind != CompletionTarget::Kind::None)
+	{
+		return cmdTarget;
+	}
 	return fileCompletionTarget(text, clampedCursor);
 }
 

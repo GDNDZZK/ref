@@ -73,12 +73,13 @@ Item {
 			const entry = popup.commandAt(popup.currentIndex)
 			if (!entry)
 				return
-			const takesArgs = entry.hint !== ""
-			const typedWord = model.text.trim().slice(1).toLowerCase()
+			const requiresArgs = Boolean(entry.requiresArgs)
+			const typedWord = model.completionQuery.toLowerCase()
 			const names = [entry.slash, ...(entry.aliases ?? [])].map(name => name.toLowerCase())
 			const typedInFull = names.includes(typedWord)
-			model.completeCommand(entry.slash)
-			if (viaEnter && (!takesArgs || typedInFull))
+			const standalone = model.isStandaloneCommandTarget()
+			model.completeCommand(entry.slash, requiresArgs)
+			if (viaEnter && standalone && (!requiresArgs || typedInFull))
 				submit()
 			return
 		}
@@ -92,9 +93,10 @@ Item {
 			input.text = model.text
 		if (input.cursorPosition !== model.cursor)
 			input.cursorPosition = model.cursor
+		input.lastCursor = input.cursorPosition
+		input.preSnapCursor = -1
 		input.syncing = false
 	}
-
 	readonly property real queueBlock: queueStrip.height > 0
 		? queueStrip.height + queueGap * Math.min(1, queueStrip.height / queueStrip.queueRowHeight) : 0
 
@@ -165,9 +167,11 @@ Item {
 
 			TextArea {
 				id: input
-
 				property bool syncing: false
-
+				property int lastCursor: 0
+				property int preSnapCursor: -1
+				property int preSnapPrev: 0
+				property int snappedTarget: -1
 				placeholderText: !composer.session.ready ? qsTr("Waiting for the ref backend…")
 					: composer.model.shellMode ? qsTr("Run a shell command…")
 					: composer.session.busy ? qsTr("Type to queue a message…")
@@ -182,9 +186,67 @@ Item {
 				font.pixelSize: Theme.fontSize
 				background: null
 
-				onTextChanged: if (!syncing) composer.model.edit(text, cursorPosition)
-				onCursorPositionChanged: if (!syncing) composer.model.moveCursor(cursorPosition)
-
+				function syncSelectionBounds() {
+					if (syncing || inputMethodComposing || selectionStart === selectionEnd)
+						return
+					const backward = cursorPosition === selectionStart
+					const expanded = composer.model.expandSelection(selectionStart, selectionEnd)
+					if (!expanded.changed)
+						return
+					syncing = true
+					if (backward)
+						select(expanded.end, expanded.start)
+					else
+						select(expanded.start, expanded.end)
+					syncing = false
+					lastCursor = cursorPosition
+					composer.model.moveCursor(cursorPosition)
+				}
+				onTextChanged: {
+					if (syncing)
+						return
+					if (preSnapCursor >= 0 && cursorPosition === snappedTarget) {
+						syncing = true
+						cursorPosition = preSnapCursor
+						syncing = false
+						lastCursor = preSnapPrev
+					}
+					preSnapCursor = -1
+					composer.model.edit(text, cursorPosition)
+					if (selectionStart === selectionEnd) {
+						const snapped = composer.model.snapCursor(cursorPosition, lastCursor)
+						if (snapped !== cursorPosition) {
+							syncing = true
+							cursorPosition = snapped
+							syncing = false
+							composer.model.moveCursor(cursorPosition)
+						}
+					}
+					lastCursor = cursorPosition
+				}
+				onCursorPositionChanged: {
+					if (syncing || inputMethodComposing)
+						return
+					if (selectionStart === selectionEnd) {
+						const snapped = composer.model.snapCursor(cursorPosition, lastCursor)
+						if (snapped !== cursorPosition) {
+							preSnapCursor = cursorPosition
+							preSnapPrev = lastCursor
+							snappedTarget = snapped
+							syncing = true
+							cursorPosition = snapped
+							syncing = false
+						} else {
+							preSnapCursor = -1
+						}
+					} else {
+						preSnapCursor = -1
+					}
+					lastCursor = cursorPosition
+					composer.model.moveCursor(cursorPosition)
+				}
+				onSelectionStartChanged: syncSelectionBounds()
+				onSelectionEndChanged: syncSelectionBounds()
 				// The handlers below return true when the key is theirs, so that the first one that owns the key ends
 				// the search (whether or not it accepts the event).
 
@@ -287,6 +349,12 @@ Item {
 						composer.model.leaveShell()
 						return true
 					}
+					if ((event.key === Qt.Key_Backspace || event.key === Qt.Key_Delete) && input.selectionStart === input.selectionEnd) {
+						if (composer.model.deletePlaceholderAt(input.cursorPosition, event.key === Qt.Key_Backspace)) {
+							event.accepted = true
+							return true
+						}
+					}
 					if (event.matches(StandardKey.Copy) && input.selectedText === "") {
 						event.accepted = true
 						composer.model.clearDraft()
@@ -302,6 +370,7 @@ Item {
 				Keys.onPressed: event => {
 					if (input.inputMethodComposing)
 						return
+					input.preSnapCursor = -1
 					composer.keyOffered(event)
 					if (event.accepted)
 						return

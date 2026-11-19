@@ -11,7 +11,7 @@ struct CompletionTarget
 	enum class Kind
 	{
 		None,
-		Command,      // "/res": the whole text is a command name being typed
+		Command,      // "/res" or "text /res": a slash command token being typed
 		CommandArg,   // "/models claude", "/cd src/", "/close-session a b": built-in command argument
 		File,         // "@src/ma": a file mention (in a prompt or custom command arguments)
 		ShellCommand, // first token in `!` shell mode (history + PATH binaries)
@@ -30,8 +30,8 @@ struct CompletionTarget
 // In shell mode, the first token offers ShellCommand (or ShellPath when it contains `/` or starts
 // with `.` or `~`), and subsequent tokens offer ShellPath; an empty shell draft offers
 // ShellCommand only when `forceShellEmpty` is set (e.g. Tab).
-// Outside shell mode, a single `/word` at the end offers Command, built-in commands with
-// completable arguments offer CommandArg, and `@` after start/whitespace offers File.
+// Outside shell mode, `/word` at start or after whitespace offers Command, built-in commands
+// with completable arguments offer CommandArg, and `@` after start/whitespace offers File.
 CompletionTarget completionTarget(const QString& text, qsizetype cursor, bool shellMode, bool forceShellEmpty = false);
 
 } // namespace refgui::compose

@@ -94,6 +94,7 @@ QString sessionTokenValue(const proto::SessionInfo& info, bool uniqueName)
 	const bool canUseName = uniqueName && !info.name.isEmpty() && !std::ranges::any_of(info.name, [](QChar c) { return c.isSpace(); });
 	return canUseName ? info.name : info.id;
 }
+
 QString sessionDetail(const proto::SessionInfo& info)
 {
 	if(!info.title.isEmpty())
@@ -132,7 +133,14 @@ ComposerModel::ComposerModel(const workspace::BackendConfig& config,
 	m_interruptTimer.setInterval(DefaultInterruptWindow);
 	connect(&m_interruptTimer, &QTimer::timeout, this, &ComposerModel::interruptArmedChanged);
 
-	connect(&m_controller, &session::SessionController::queueChanged, this, [this] { m_queue.setMessages(m_controller.queued()); });
+	connect(&m_controller, &session::SessionController::queueChanged, this, [this] {
+		const int before = m_queue.rowCount();
+		m_queue.setMessages(m_controller.queued());
+		if(m_queue.rowCount() != before)
+		{
+			emit queueCountChanged();
+		}
+	});
 	connect(&m_controller, &session::SessionController::infoChanged, this, [this] {
 		emit labelsChanged();
 		if(m_target.kind != compose::CompletionTarget::Kind::None)
@@ -1267,11 +1275,35 @@ void ComposerModel::acceptFile(int row)
 	changeDraft();
 }
 
-void ComposerModel::completeCommand(const QString& name)
+bool ComposerModel::isStandaloneCommandTarget() const
 {
-	const QString text = u"/"_s + name + u" "_s;
-	m_draft.setText(text, text.size());
-	m_completionDismissed = false;
+	if(m_target.kind != compose::CompletionTarget::Kind::Command)
+	{
+		return false;
+	}
+	const QString& text = m_draft.text();
+	return QStringView(text).left(m_target.start).trimmed().isEmpty()
+	       && QStringView(text).mid(m_target.end).trimmed().isEmpty();
+}
+
+void ComposerModel::completeCommand(const QString& name, bool appendSpace)
+{
+	const QString replacement = u"/"_s + name + (appendSpace ? u" "_s : QString());
+	if(m_target.kind == compose::CompletionTarget::Kind::Command)
+	{
+		const QString& current = m_draft.text();
+		qsizetype restStart = m_target.end;
+		if(replacement.endsWith(u' ') && current.mid(restStart).startsWith(u' '))
+		{
+			++restStart;
+		}
+		m_draft.setText(current.left(m_target.start) + replacement + current.mid(restStart), m_target.start + replacement.size());
+	}
+	else
+	{
+		m_draft.setText(replacement, replacement.size());
+	}
+	m_completionDismissed = true;
 	changeDraft();
 }
 
@@ -1427,6 +1459,35 @@ void ComposerModel::removeAttachment(int row)
 	}
 	m_draft.removeAttachment(row);
 	changeDraft();
+}
+
+int ComposerModel::snapCursor(int cursor, int previousCursor) const
+{
+	return static_cast<int>(m_draft.snapCursor(cursor, previousCursor));
+}
+
+QVariantMap ComposerModel::expandSelection(int start, int end) const
+{
+	const qsizetype lo = std::min(start, end);
+	const qsizetype hi = std::max(start, end);
+	const auto [expandedStart, expandedEnd] = m_draft.expandSelection(lo, hi);
+	return {{u"start"_s, static_cast<int>(expandedStart)},
+	        {u"end"_s, static_cast<int>(expandedEnd)},
+	        {u"changed"_s, expandedStart != lo || expandedEnd != hi}};
+}
+
+bool ComposerModel::deletePlaceholderAt(int cursor, bool backward)
+{
+	if(!m_draft.deletePlaceholderAt(cursor, backward))
+	{
+		return false;
+	}
+	m_forceShellEmpty = false;
+	m_completionDismissed = false;
+	m_browser.reset();
+	changeDraft();
+	emit userEdited();
+	return true;
 }
 
 } // namespace refgui::composer

@@ -70,6 +70,9 @@ public:
 	int setAgentCalls() const { return m_setAgentCalls; }
 	QStringList shellCommands() const { return m_shellCommands; }
 	QList<QJsonObject> listDirsRequests() const { return m_listDirsRequests; }
+	void setModels(const QJsonArray& models) { m_models = models; }
+	QList<QJsonObject> setVariantRequests() const { return m_setVariantRequests; }
+	void setFiles(const QStringList& files) { m_files = files; }
 private:
 	QJsonArray list() const
 	{
@@ -108,20 +111,36 @@ private:
 		{
 			m_fake.respond(request, {{u"sessions"_s, list()}});
 		}
-		else if(op == u"get_config"_s)
+		else if(op == u"get_config"_s || op == u"reload_config"_s)
 		{
 			m_fake.respond(request,
 			               {{u"config"_s,
 			                 QJsonObject{{u"default_agent"_s, u"build"_s},
 			                             {u"agents"_s, QJsonArray{QJsonObject{{u"name"_s, u"build"_s}, {u"description"_s, u"Build"_s}},
 			                                                      QJsonObject{{u"name"_s, u"plan"_s}, {u"description"_s, u"Plan"_s}}}},
-			                             {u"models"_s, QJsonArray()},
-			                             {u"commands"_s, QJsonArray{QJsonObject{{u"name"_s, u"review"_s}, {u"description"_s, u"Review diff"_s}, {u"source"_s, u"config"_s}}}}}}});
+			                             {u"models"_s, m_models},
+			                             {u"commands"_s, QJsonArray{QJsonObject{{u"name"_s, u"review"_s}, {u"description"_s, u"Review diff"_s}, {u"source"_s, u"config"_s}}}}}},
+			                {u"warnings"_s, QJsonArray()}});
 		}
 		else if(op == u"set_agent"_s)
 		{
 			++m_setAgentCalls;
 			m_sessions[id][u"agent"_s] = request.value(u"agent"_s);
+			m_fake.respond(request, {{u"session"_s, m_sessions.value(id)}});
+		}
+		else if(op == u"set_variant"_s)
+		{
+			m_setVariantRequests.append(request);
+			QJsonObject modelObj = m_sessions[id].value(u"model"_s).toObject();
+			if(request.contains(u"variant"_s) && !request.value(u"variant"_s).toString().isEmpty())
+			{
+				modelObj.insert(u"variant"_s, request.value(u"variant"_s).toString());
+			}
+			else
+			{
+				modelObj.insert(u"variant"_s, u"high"_s);
+			}
+			m_sessions[id].insert(u"model"_s, modelObj);
 			m_fake.respond(request, {{u"session"_s, m_sessions.value(id)}});
 		}
 		else if(op == u"shell"_s)
@@ -134,6 +153,10 @@ private:
 			m_listDirsRequests.append(request);
 			const bool wantFiles = request.value(u"include_files"_s).toBool();
 			m_fake.respond(request, {{u"path"_s, u"/work"_s}, {u"dirs"_s, QJsonArray{u"docs"_s, u"src"_s}}, {u"files"_s, wantFiles ? QJsonArray{u"README.md"_s} : QJsonArray()}});
+		}
+		else if(op == u"list_files"_s)
+		{
+			m_fake.respond(request, {{u"files"_s, QJsonArray::fromStringList(m_files)}});
 		}
 		else if(op == u"list_binaries"_s)
 		{
@@ -205,6 +228,9 @@ private:
 	int m_setAgentCalls = 0;
 	QStringList m_shellCommands;
 	QList<QJsonObject> m_listDirsRequests;
+	QJsonArray m_models;
+	QList<QJsonObject> m_setVariantRequests;
+	QStringList m_files;
 };
 
 QJsonArray manyMessagesJson()
@@ -357,6 +383,9 @@ private slots:
 	void paletteAndComposerCompletionsAndShellModeOperateWithoutWarnings();
 	void configControlsValidateStrictInputsAndPreserveJsonStrings();
 	void configDialogSupportsOpencodeAliasesInlineRenameTopBarLockAndQuitGuard();
+	void tableBlockRendersAndSelectionLeavesAboveRowsUntouched();
+	void shimmerTextModelsHoverCtrlTAtomicImageAndCompletionsWork();
+	void splitJumpToEndResizeBlurFadeAndSidebarDragWork();
 };
 
 void TestMainWindow::initTestCase()
@@ -444,11 +473,13 @@ void TestMainWindow::mainWindowInstantiatesFramelessAndBlocksModalWheel()
 	QTRY_VERIFY(paletteList->property("contentY").toReal() > 0.0);
 	// 3) Opening Lightbox blocks wheel events over its scrim as well.
 	f.workspace->closeDialog();
-	QQuickItem* lightbox = findByTypePrefix(window->contentItem(), "Lightbox");
-	QVERIFY(lightbox);
 	QVariantMap img{{u"id"_s, u"img_1"_s}, {u"name"_s, u"shot.png"_s}, {u"size"_s, 1024}};
-	QMetaObject::invokeMethod(lightbox, "open", Q_ARG(QVariant, u"ses_a"_s), Q_ARG(QVariant, img));
-	QTRY_VERIFY(lightbox->property("shown").toBool());
+	QMetaObject::invokeMethod(chatView, "imageClicked", Q_ARG(QVariant, img));
+	QQuickItem* lightbox = nullptr;
+	QTRY_VERIFY([&] {
+		lightbox = findByTypePrefix(window->contentItem(), "Lightbox");
+		return lightbox != nullptr && lightbox->property("shown").toBool();
+	}());
 	QWheelEvent lightboxWheel(scrimPoint, window->mapToGlobal(scrimPoint), QPoint(), QPoint(0, 120),
 	                          Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
 	QCoreApplication::sendEvent(window, &lightboxWheel);
@@ -1582,6 +1613,277 @@ void TestMainWindow::configDialogSupportsOpencodeAliasesInlineRenameTopBarLockAn
 	QTRY_VERIFY(!window->isVisible());
 	QVERIFY2(warningSpy.isEmpty(), "ConfigDialog aliases, inline rename, and quit guard emitted QML warnings");
 }
-
+void TestMainWindow::tableBlockRendersAndSelectionLeavesAboveRowsUntouched()
+{
+	MainFixture f;
+	f.stub.setMessages(u"ses_b"_s, QJsonArray{
+		QJsonObject{{u"id"_s, u"u1"_s}, {u"role"_s, u"user"_s}, {u"time"_s, 1}, {u"parts"_s, QJsonArray{QJsonObject{{u"type"_s, u"text"_s}, {u"text"_s, u"Show table"_s}, {u"time"_s, 1}}}}},
+		QJsonObject{{u"id"_s, u"a1"_s}, {u"role"_s, u"assistant"_s}, {u"time"_s, 2}, {u"time_end"_s, 3}, {u"parts"_s, QJsonArray{QJsonObject{{u"type"_s, u"text"_s}, {u"text"_s, u"| Col A | Col B |\n| :--- | ---: |\n| Alpha | 100 |\n| Bravo | 200 |\n| Charlie | 300 |"_s}, {u"time"_s, 2}}}}},
+	});
+	f.workspace->openSession(u"ses_b"_s);
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+	QQuickItem* tableBlock = nullptr;
+	QTRY_VERIFY([&] {
+		tableBlock = findByTypePrefix(window->contentItem(), "TableBlock_QMLTYPE");
+		return tableBlock != nullptr && tableBlock->height() > 60;
+	}());
+	QList<QQuickItem*> cells;
+	findItem(tableBlock, [&](QQuickItem* item) {
+		if(QByteArray(item->metaObject()->className()).startsWith("ProseText_QMLTYPE"))
+		{
+			cells.append(item);
+		}
+		return false;
+	});
+	QCOMPARE(cells.size(), 8); // 2 header cells + 3x2 body cells
+	QQuickItem* row0Cell = cells.at(2);
+	QQuickItem* row1Cell = cells.at(4);
+	QQuickItem* row2Cell = cells.at(6);
+	QCOMPARE(row2Cell->property("text").toString().trimmed(), u"Charlie"_s);
+	const auto sceneRectOf = [](QQuickItem* item) {
+		const QPointF tl = item->mapToScene(QPointF(0, 0));
+		return QRect(qRound(tl.x()), qRound(tl.y()), qRound(item->width()), qRound(item->height()));
+	};
+	const QRect row0Rect = sceneRectOf(row0Cell);
+	const QRect row1Rect = sceneRectOf(row1Cell);
+	const QImage before = window->grabWindow();
+	const QPoint start = row2Cell->mapToScene(QPointF(2, row2Cell->height() / 2.0)).toPoint();
+	const QPoint end = row2Cell->mapToScene(QPointF(row2Cell->width() - 2, row2Cell->height() / 2.0)).toPoint();
+	QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, start);
+	QTest::mouseMove(window, end);
+	QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, end);
+	QTRY_VERIFY(!row2Cell->property("selectedText").toString().isEmpty());
+	const QImage after = window->grabWindow();
+	QCOMPARE(after.copy(row0Rect), before.copy(row0Rect));
+	QCOMPARE(after.copy(row1Rect), before.copy(row1Rect));
+	QVERIFY2(warningSpy.isEmpty(), "TableBlock emitted QML warnings");
+}
+void TestMainWindow::shimmerTextModelsHoverCtrlTAtomicImageAndCompletionsWork()
+{
+	MainFixture f;
+	f.stub.setModels(QJsonArray{
+		QJsonObject{{u"provider"_s, u"p"_s}, {u"provider_name"_s, u"Provider"_s}, {u"id"_s, u"m1"_s}, {u"name"_s, u"Model One"_s}, {u"variants"_s, QJsonArray{u"low"_s, u"high"_s}}},
+		QJsonObject{{u"provider"_s, u"p"_s}, {u"provider_name"_s, u"Provider"_s}, {u"id"_s, u"m2"_s}, {u"name"_s, u"Model Two"_s}, {u"variants"_s, QJsonArray{u"low"_s, u"high"_s}}},
+	});
+	// Update ses_a to have a configured model with variants.
+	QJsonObject sesA = sessionInfoJson(u"ses_a"_s, {.title = u"Session ses_a"_s, .model = QJsonObject{{u"provider"_s, u"p"_s}, {u"model"_s, u"m1"_s}, {u"variant"_s, u"low"_s}}, .createdAt = 1});
+	f.fake.send({{u"kind"_s, u"sessions"_s}, {u"sessions"_s, QJsonArray{sesA, sessionInfoJson(u"ses_b"_s, {.title = u"Session ses_b"_s, .createdAt = 2})}}});
+	f.fake.send({{u"kind"_s, u"event"_s}, {u"session_id"_s, u"ses_a"_s}, {u"event"_s, QJsonObject{{u"type"_s, u"info"_s}, {u"info"_s, sesA}}}});
+	f.workspace->reloadConfig();
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	// 1) ShimmerText Canvas paints bright highlight sweep pixels without warnings.
+	{
+		QQmlComponent shimmerComp(&engine, QUrl(u"qrc:/qt/qml/RefGui/ShimmerText.qml"_s));
+		QVERIFY2(shimmerComp.isReady(), qPrintable(shimmerComp.errorString()));
+		QQuickWindow shimmerWin;
+		shimmerWin.resize(160, 48);
+		shimmerWin.setColor(QColor(u"#16171a"_s));
+		shimmerWin.show();
+		QVERIFY(QTest::qWaitForWindowExposed(&shimmerWin));
+		std::unique_ptr<QObject> shimmerObj(shimmerComp.createWithInitialProperties({
+			{u"parent"_s, QVariant::fromValue(shimmerWin.contentItem())},
+			{u"x"_s, 10},
+			{u"y"_s, 10},
+			{u"label"_s, u"Working"_s},
+			{u"color"_s, QColor(u"#505050"_s)},
+			{u"highlight"_s, QColor(u"#ffffff"_s)},
+			{u"running"_s, true},
+			{u"phase"_s, 0.5},
+		}));
+		QVERIFY2(shimmerObj, qPrintable(shimmerComp.errorString()));
+		auto* shimmerItem = qobject_cast<QQuickItem*>(shimmerObj.get());
+		QVERIFY(shimmerItem && shimmerItem->width() > 0);
+		QCoreApplication::processEvents();
+		QTest::qWait(50);
+		const QImage shot = shimmerWin.grabWindow();
+		int brightPixels = 0;
+		for(int y = 0; y < shot.height(); ++y)
+		{
+			for(int x = 0; x < shot.width(); ++x)
+			{
+				const QColor c = shot.pixelColor(x, y);
+				if(c.red() > 170 && c.green() > 170 && c.blue() > 170)
+				{
+					++brightPixels;
+				}
+			}
+		}
+		QVERIFY2(brightPixels > 0, "Expected ShimmerText Canvas to paint bright highlight pixels");
+	}
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+	window->requestActivate();
+	QTRY_VERIFY(f.workspace->current()->composer()->variantAvailable());
+	// 2) Ctrl+T cycles thinking variant via Workspace.setVariant(sessionId, "").
+	QTest::keyClick(window, Qt::Key_T, Qt::ControlModifier);
+	QTRY_COMPARE(f.stub.setVariantRequests().size(), 1);
+	QVERIFY(!f.stub.setVariantRequests().first().contains(u"variant"_s) || f.stub.setVariantRequests().first().value(u"variant"_s).toString().isEmpty());
+	// 3) ModelsDialog hover updates PickList currentIndex.
+	f.workspace->commands()->run(u"models"_s);
+	QQuickItem* pickList = nullptr;
+	QTRY_VERIFY([&] {
+		pickList = findByTypePrefix(window->contentItem(), "PickList_QMLTYPE");
+		return pickList != nullptr && pickList->property("count").toInt() == 2;
+	}());
+	QList<QQuickItem*> pickRows;
+	findItem(pickList, [&](QQuickItem* item) {
+		if(QByteArray(item->metaObject()->className()).startsWith("PickRow_QMLTYPE"))
+		{
+			pickRows.append(item);
+		}
+		return false;
+	});
+	QCOMPARE(pickRows.size(), 2);
+	const QPoint r0 = pickRows.at(0)->mapToScene(QPointF(pickRows.at(0)->width() / 2.0, pickRows.at(0)->height() / 2.0)).toPoint();
+	const QPoint r1 = pickRows.at(1)->mapToScene(QPointF(pickRows.at(1)->width() / 2.0, pickRows.at(1)->height() / 2.0)).toPoint();
+	QTest::mouseMove(window, r0);
+	QTest::mouseMove(window, r1);
+	QTRY_COMPARE(pickList->property("currentIndex").toInt(), 1);
+	QTest::keyClick(window, Qt::Key_Escape);
+	QTRY_VERIFY(f.workspace->dialog().isEmpty());
+	// 4) Atomic [Image N] snapping + deletion and slash completion in Composer.qml.
+	auto* composerItem = findByTypePrefix(window->contentItem(), "Composer");
+	QVERIFY(composerItem);
+	QMetaObject::invokeMethod(composerItem, "focusInput");
+	auto* textArea = qobject_cast<QQuickItem*>(window->activeFocusItem());
+	QVERIFY(textArea);
+	QImage img(4, 4, QImage::Format_RGB32);
+	img.fill(Qt::red);
+	QGuiApplication::clipboard()->setImage(img);
+	QVERIFY(f.workspace->current()->composer()->pasteFromClipboard());
+	QCOMPARE(f.workspace->current()->composer()->text(), u"[Image 1] "_s);
+	QCOMPARE(textArea->property("cursorPosition").toInt(), 10);
+	QTest::keyClick(window, Qt::Key_Left); // moves from 10 to 9 (end of "[Image 1]")
+	QCOMPARE(textArea->property("cursorPosition").toInt(), 9);
+	QTest::keyClick(window, Qt::Key_Left); // snaps across "[Image 1]" to 0!
+	QCOMPARE(textArea->property("cursorPosition").toInt(), 0);
+	QTest::keyClick(window, Qt::Key_Delete); // deletes "[Image 1] " atomically
+	QCOMPARE(f.workspace->current()->composer()->text(), QString());
+	QCOMPARE(f.workspace->current()->composer()->attachments()->rowCount(), 0);
+	const auto typeText = [&](const QString& text) {
+		for(const QChar ch : text)
+		{
+			const Qt::Key k = ch.isLetter() ? static_cast<Qt::Key>(ch.toUpper().unicode()) : static_cast<Qt::Key>(ch.unicode());
+			QTest::keyClick(window, k);
+		}
+	};
+	// Standalone `/mod` Tab completes without trailing space.
+	typeText(u"/mod"_s);
+	QTest::keyClick(window, Qt::Key_Tab);
+	QCOMPARE(f.workspace->current()->composer()->text(), u"/models"_s);
+	f.workspace->current()->composer()->clearDraft();
+	// Mid-text `/comp` Enter completes without submitting the prompt.
+	typeText(u"check /comp"_s);
+	QTest::keyClick(window, Qt::Key_Return);
+	QCOMPARE(f.workspace->current()->composer()->text(), u"check /compact"_s);
+	f.workspace->current()->composer()->clearDraft();
+	// `@` file completion populates CompletionPopup via ComposerModel.files Q_PROPERTY.
+	f.stub.setFiles({u"src/main.rs"_s, u"README.md"_s});
+	typeText(u"@ma"_s);
+	auto* popup = findByTypePrefix(composerItem, "CompletionPopup");
+	QVERIFY(popup);
+	QTRY_VERIFY(popup->property("open").toBool() && popup->property("kind").toString() == u"file"_s && popup->property("count").toInt() == 2);
+	QTest::keyClick(window, Qt::Key_Tab);
+	QCOMPARE(f.workspace->current()->composer()->text(), u"@src/main.rs "_s);
+	QVERIFY2(warningSpy.isEmpty(), "ShimmerText, ModelsDialog hover, Ctrl+T, or Composer emitted QML warnings");
+}
+void TestMainWindow::splitJumpToEndResizeBlurFadeAndSidebarDragWork()
+{
+	MainFixture f;
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+	window->requestActivate();
+	// 1) Resizable sidebar: drag handle wider, then double-click to reset.
+	auto* sidebar = findByTypePrefix(window->contentItem(), "Sidebar_QMLTYPE");
+	auto* handle = findItem(window->contentItem(), [](QQuickItem* item) { return item->objectName() == u"sidebarResizeHandle"_s; });
+	QVERIFY(sidebar && handle);
+	QCOMPARE(qRound(sidebar->width()), 264);
+	const QPoint hCenter = handle->mapToScene(QPointF(handle->width() / 2.0, handle->height() / 2.0)).toPoint();
+	QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, hCenter);
+	QTest::mouseMove(window, hCenter + QPoint(20, 0));
+	QTest::mouseMove(window, hCenter + QPoint(80, 0));
+	QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, hCenter + QPoint(80, 0));
+	QTRY_VERIFY(f.workspace->settings()->sidebarWidth() > 300);
+	QCOMPARE(qRound(sidebar->width()), f.workspace->settings()->sidebarWidth());
+	const QPoint hNewCenter = handle->mapToScene(QPointF(handle->width() / 2.0, handle->height() / 2.0)).toPoint();
+	QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, hNewCenter);
+	QTRY_COMPARE(f.workspace->settings()->sidebarWidth(), 264);
+	// Collapsing sidebar mid-drag disables drag/handle and animates smoothly to 0.
+	const QPoint hResetCenter = handle->mapToScene(QPointF(handle->width() / 2.0, handle->height() / 2.0)).toPoint();
+	QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, hResetCenter);
+	QTest::mouseMove(window, hResetCenter + QPoint(40, 0));
+	QTRY_VERIFY(sidebar->property("resizing").toBool());
+	f.workspace->commands()->run(u"sidebar"_s);
+	QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, hResetCenter + QPoint(40, 0));
+	QTRY_VERIFY(!sidebar->property("resizing").toBool() && !handle->isVisible());
+	QTRY_COMPARE(qRound(sidebar->width()), 0);
+	f.workspace->commands()->run(u"sidebar"_s);
+	QTRY_COMPARE(qRound(sidebar->width()), 264);
+	// 2) Enter split view, click jumpToEnd on unfocused tile without opening Composer.
+	f.workspace->toggleSplit();
+	QQuickItem* tile = nullptr;
+	QTRY_VERIFY([&] {
+		tile = findByTypePrefix(window->contentItem(), "Tile_QMLTYPE");
+		return tile != nullptr && tile->property("arrived").toBool();
+	}());
+	f.workspace->focusTile({});
+	QVERIFY(f.workspace->focusedTileId().isEmpty());
+	auto* chat = findByTypePrefix(tile, "ChatView_QMLTYPE");
+	auto* pane = findByTypePrefix(tile, "SessionPane_QMLTYPE");
+	QVERIFY(chat && pane);
+	const qreal minY = chat->property("minContentY").toReal();
+	chat->setProperty("following", false);
+	chat->setProperty("contentY", minY);
+	QQuickItem* jumpBtn = nullptr;
+	QTRY_VERIFY([&] {
+		jumpBtn = findItem(pane, [](QQuickItem* item) {
+			return QByteArray(item->metaObject()->className()).startsWith("CircleButton_QMLTYPE") && item->isVisible();
+		});
+		return jumpBtn != nullptr && jumpBtn->opacity() > 0.9;
+	}());
+	const QPoint jPos = jumpBtn->mapToScene(QPointF(jumpBtn->width() / 2.0, jumpBtn->height() / 2.0)).toPoint();
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, jPos);
+	QTRY_VERIFY(chat->property("following").toBool());
+	QVERIFY(f.workspace->focusedTileId().isEmpty());
+	// 3) Window resize in split mode triggers blur-fade transition and settles cleanly.
+	window->setWidth(window->width() + 140);
+	QTRY_VERIFY(tile->property("resizingLayout").toBool());
+	QTRY_VERIFY(pane->property("opacity").toReal() < 0.99);
+	QTRY_VERIFY(!tile->property("resizingLayout").toBool() && qFuzzyCompare(pane->property("opacity").toReal(), 1.0));
+	QVERIFY2(warningSpy.isEmpty(), "Sidebar drag, jumpToEnd, or split resize blur-fade emitted QML warnings");
+}
 QTEST_MAIN(TestMainWindow)
 #include "tst_main_window.moc"

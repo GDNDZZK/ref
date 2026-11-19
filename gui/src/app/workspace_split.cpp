@@ -26,6 +26,7 @@ QCoro::Task<> Workspace::enterSplit()
 {
 	m_split = true;
 	emit splitViewChanged();
+	syncTiles();
 	const Result<void> watching = co_await m_directory.setWatchAll(true);
 	toastFailure(watching);
 	if(!m_split)

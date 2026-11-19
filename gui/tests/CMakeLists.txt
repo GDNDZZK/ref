@@ -165,10 +165,12 @@ set(tool_block_qml_names
 	ImageBlock.qml
 	ReasoningBlock.qml
 	MarkdownBlock.qml
+	TableBlock.qml
 	CodeBlock.qml
 	ToolBlock.qml
 	ErrorBlock.qml
 	MetaBlock.qml
+	ThemedScrollBar.qml
 	ProseText.qml
 	StreamCaret.qml
 	ImageStrip.qml
