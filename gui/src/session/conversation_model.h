@@ -3,7 +3,6 @@
 
 #include "proto/types.h"
 #include "session/blocks.h"
-#include "session/fence_splitter.h"
 
 #include <QAbstractListModel>
 #include <QHash>
@@ -40,9 +39,12 @@ class ConversationModel : public QAbstractListModel
 public:
 	enum Role
 	{
-		KindRole = Qt::UserRole + 1, // "user", "reasoning", "markdown", "code", "tool", "error" or "image"
-		ContentRole,                 // text; for a tool block, its title; for an image, its name
+		KindRole = Qt::UserRole + 1, // "user", "reasoning", "markdown", "table", "code", "tool", "error" or "image"
+		ContentRole,                 // text; for a tool block, its title; for an image, its name; for a table, raw markdown
 		LanguageRole,                // code blocks: the fence's language, may be empty
+		TableHeadersRole,            // table blocks: header cell strings (markdownForDisplay)
+		TableAlignmentsRole,         // table blocks: "left", "center" or "right" per column
+		TableRowsRole,               // table blocks: list of row cell string lists (markdownForDisplay)
 		StreamingRole,               // still receiving content; for a tool block, not finished
 		OutputRole,                  // tool blocks
 		FailedRole,                  // tool blocks
@@ -151,9 +153,8 @@ private:
 		proto::Part part;
 		qsizetype rows = 0;
 		bool streaming = false;
-		FenceSplitter splitter{}; // follows the text of a streaming text part
+		TextSplitter splitter{}; // follows the text of a streaming text part
 	};
-
 	struct MessageNode
 	{
 		MessageHeader header; // `parts` stays empty, see `parts` below

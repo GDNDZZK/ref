@@ -17,6 +17,8 @@ qt_add_library(refgui_session STATIC
 	session_controller.h
 	stream_pacer.cpp
 	stream_pacer.h
+	table_splitter.cpp
+	table_splitter.h
 	tool_content.cpp
 	tool_content.h
 )

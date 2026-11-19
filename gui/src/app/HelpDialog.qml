@@ -13,6 +13,7 @@ ModalDialog {
 		{title: qsTr("Interrupt the session"), keys: ["Esc", "Esc"]},
 		{title: qsTr("Next agent"), keys: ["Tab"]},
 		{title: qsTr("Previous agent"), keys: ["Shift", "Tab"]},
+		{title: qsTr("Cycle model variant"), keys: [Qt.platform.os === "osx" ? "⌘" : "Ctrl", "T"]},
 		{title: qsTr("Earlier prompts"), keys: ["↑", "↓"]},
 		{title: qsTr("Move between tiles (split view)"), keys: ["Alt", "←↑↓→"]}
 	]

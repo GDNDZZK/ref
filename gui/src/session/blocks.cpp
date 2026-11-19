@@ -43,10 +43,66 @@ void startBlock(QList<Block>& blocks, Block block)
 	blocks.append(std::move(block));
 }
 
-void applySplitEvent(QList<Block>& blocks, const FenceSplitter::Event& event, const Block& identity)
+void applyTableEvent(QList<Block>& blocks, const TableSplitter::Event& event, const Block& identity)
+{
+	if(const auto* started = std::get_if<TableSplitter::TableStarted>(&event))
+	{
+		if(started->replaceChars > 0 && !blocks.isEmpty() && blocks.last().kind == Block::Kind::Markdown)
+		{
+			QString& content = blocks.last().content;
+			content.chop(std::min(started->replaceChars, content.size()));
+			while(content.endsWith(u'\n'))
+			{
+				content.chop(1);
+			}
+			if(content.isEmpty())
+			{
+				blocks.removeLast();
+			}
+		}
+		Block table = identity;
+		table.kind = Block::Kind::Table;
+		table.content = started->rawMarkdown;
+		table.tableHeaders = started->headers;
+		table.tableAlignments = started->alignments;
+		startBlock(blocks, std::move(table));
+		return;
+	}
+	if(const auto* row = std::get_if<TableSplitter::TableRowAppended>(&event))
+	{
+		Block& table = blocks.last();
+		table.content += u'\n' + row->rawLine;
+		table.tableRows.append(row->cells);
+		return;
+	}
+	if(std::holds_alternative<TableSplitter::TableClosed>(event))
+	{
+		if(!blocks.isEmpty() && blocks.last().kind == Block::Kind::Table)
+		{
+			blocks.last().streaming = false;
+		}
+		return;
+	}
+
+	const bool continuesLast = !blocks.isEmpty() && blocks.last().kind == Block::Kind::Markdown && blocks.last().streaming;
+	if(!continuesLast)
+	{
+		Block markdown = identity;
+		markdown.kind = Block::Kind::Markdown;
+		startBlock(blocks, std::move(markdown));
+	}
+	blocks.last().content += std::get<TableSplitter::TextAppended>(event).text;
+}
+
+void applySplitEvent(QList<Block>& blocks, TextSplitter& splitter, const FenceSplitter::Event& event, const Block& identity)
 {
 	if(const auto* opened = std::get_if<FenceSplitter::CodeOpened>(&event))
 	{
+		for(const TableSplitter::Event& tableEvent : splitter.table.finish())
+		{
+			applyTableEvent(blocks, tableEvent, identity);
+		}
+		splitter.inCode = true;
 		Block code = identity;
 		code.kind = Block::Kind::Code;
 		code.language = opened->language;
@@ -55,21 +111,22 @@ void applySplitEvent(QList<Block>& blocks, const FenceSplitter::Event& event, co
 	}
 	if(std::holds_alternative<FenceSplitter::CodeClosed>(event))
 	{
+		splitter.inCode = false;
 		blocks.last().streaming = false;
 		return;
 	}
 
-	// Prose after a closed fence starts a new Markdown block.
-	const bool continuesLast = !blocks.isEmpty() && (blocks.last().kind == Block::Kind::Markdown || blocks.last().streaming);
-	if(!continuesLast)
+	const QString& text = std::get<FenceSplitter::TextAppended>(event).text;
+	if(splitter.inCode)
 	{
-		Block markdown = identity;
-		markdown.kind = Block::Kind::Markdown;
-		startBlock(blocks, std::move(markdown));
+		blocks.last().content += text;
+		return;
 	}
-	blocks.last().content += std::get<FenceSplitter::TextAppended>(event).text;
+	for(const TableSplitter::Event& tableEvent : splitter.table.feed(text))
+	{
+		applyTableEvent(blocks, tableEvent, identity);
+	}
 }
-
 Block::ImageRef imageRef(const proto::ImageData& image, const QString& name = {})
 {
 	return {.id = image.id.value_or(QString()), .mime = image.mime, .size = static_cast<qint64>(image.size.value_or(0)), .name = name};
@@ -124,19 +181,23 @@ QList<Block> toolBlocks(const MessageHeader& header, qsizetype index, const prot
 	return {block};
 }
 
-QList<Block> textBlocks(const MessageHeader& header, qsizetype index, const QString& text, bool streaming, FenceSplitter& splitter)
+QList<Block> textBlocks(const MessageHeader& header, qsizetype index, const QString& text, bool streaming, TextSplitter& splitter)
 {
 	QList<Block> blocks;
 	const Block identity = makeBlock(Block::Kind::Markdown, header, index);
-	for(const FenceSplitter::Event& event : splitter.feed(text))
+	for(const FenceSplitter::Event& event : splitter.fence.feed(text))
 	{
-		applySplitEvent(blocks, event, identity);
+		applySplitEvent(blocks, splitter, event, identity);
 	}
 	if(!streaming)
 	{
-		for(const FenceSplitter::Event& event : splitter.finish())
+		for(const FenceSplitter::Event& event : splitter.fence.finish())
 		{
-			applySplitEvent(blocks, event, identity);
+			applySplitEvent(blocks, splitter, event, identity);
+		}
+		for(const TableSplitter::Event& tableEvent : splitter.table.finish())
+		{
+			applyTableEvent(blocks, tableEvent, identity);
 		}
 		if(!blocks.isEmpty())
 		{
@@ -225,6 +286,8 @@ QString kindName(Block::Kind kind)
 		return u"reasoning"_s;
 	case Block::Kind::Markdown:
 		return u"markdown"_s;
+	case Block::Kind::Table:
+		return u"table"_s;
 	case Block::Kind::Code:
 		return u"code"_s;
 	case Block::Kind::Tool:
@@ -261,7 +324,7 @@ bool isPartStreaming(const MessageHeader& header, const proto::Part& part, bool 
 	return std::holds_alternative<proto::TextPart>(part) && isLast;
 }
 
-QList<Block> assistantPartBlocks(const MessageHeader& header, qsizetype index, const proto::Part& part, bool streaming, FenceSplitter& splitter)
+QList<Block> assistantPartBlocks(const MessageHeader& header, qsizetype index, const proto::Part& part, bool streaming, TextSplitter& splitter)
 {
 	if(const auto* text = std::get_if<proto::TextPart>(&part))
 	{
@@ -278,12 +341,12 @@ QList<Block> assistantPartBlocks(const MessageHeader& header, qsizetype index, c
 	return {}; // images and unknown parts have no place in an assistant turn
 }
 
-void feedText(QList<Block>& blocks, FenceSplitter& splitter, const MessageHeader& header, qsizetype index, QStringView delta)
+void feedText(QList<Block>& blocks, TextSplitter& splitter, const MessageHeader& header, qsizetype index, QStringView delta)
 {
 	const Block identity = makeBlock(Block::Kind::Markdown, header, index);
-	for(const FenceSplitter::Event& event : splitter.feed(delta))
+	for(const FenceSplitter::Event& event : splitter.fence.feed(delta))
 	{
-		applySplitEvent(blocks, event, identity);
+		applySplitEvent(blocks, splitter, event, identity);
 	}
 }
 

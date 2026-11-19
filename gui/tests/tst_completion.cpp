@@ -16,6 +16,7 @@ private slots:
 	void fileTargetIsTheWordAfterAtIncludingCustomCommands();
 	void shellModeTargetsCommandsAndPaths();
 	void shellSegmentsFlagsMidTokenAndWindowsPathsWork();
+	void shellWrappersTargetWrappedCommand();
 };
 
 void TestCompletion::commandTargetIsTheWholeSingleWord()
@@ -27,8 +28,27 @@ void TestCompletion::commandTargetIsTheWholeSingleWord()
 
 	QCOMPARE(completionTarget(u"/"_s, 1, false).kind, Kind::Command);
 	QCOMPARE(completionTarget(u"/rename now"_s, 11, false).kind, Kind::None); // /rename has free-form text, no arg list
-	QCOMPARE(completionTarget(u"/mod"_s, 2, false).kind, Kind::None);          // cursor not at the end
-	QCOMPARE(completionTarget(u"text /mod"_s, 9, false).kind, Kind::None);
+	auto midWord = completionTarget(u"/mod"_s, 2, false);
+	QCOMPARE(midWord.kind, Kind::Command);
+	QCOMPARE(midWord.query, u"m"_s);
+	QCOMPARE(midWord.start, 0);
+	QCOMPARE(midWord.end, 4);
+	auto midText = completionTarget(u"text /mod more"_s, 9, false);
+	QCOMPARE(midText.kind, Kind::Command);
+	QCOMPARE(midText.query, u"mod"_s);
+	QCOMPARE(midText.start, 5);
+	QCOMPARE(midText.end, 9);
+	QCOMPARE(completionTarget(u"src/main.rs"_s, 11, false).kind, Kind::None);
+	QCOMPARE(completionTarget(u"https://a.b"_s, 11, false).kind, Kind::None);
+	QCOMPARE(completionTarget(u"/etc/hosts"_s, 10, false).kind, Kind::None);
+	QCOMPARE(completionTarget(u"hello /mod"_s, 6, false).kind, Kind::None); // cursor before `/`
+	QCOMPARE(completionTarget(u"/"_s, 0, false).kind, Kind::None);          // cursor before `/`
+	auto afterSlashOnly = completionTarget(u"hello /mod"_s, 7, false);
+	QCOMPARE(afterSlashOnly.kind, Kind::Command);
+	QCOMPARE(afterSlashOnly.query, QString());
+	QCOMPARE(afterSlashOnly.start, 6);
+	QCOMPARE(afterSlashOnly.end, 10);
+	QCOMPARE(completionTarget(u"check /foo\\bar"_s, 14, false).kind, Kind::None);
 }
 
 void TestCompletion::commandArgTargetCoversBuiltinsAndAliases()
@@ -214,6 +234,84 @@ void TestCompletion::shellSegmentsFlagsMidTokenAndWindowsPathsWork()
 	QCOMPARE(target.start, 5);
 	QCOMPARE(target.end, 11);
 }
+void TestCompletion::shellWrappersTargetWrappedCommand()
+{
+	auto target = completionTarget(u"sudo doc"_s, 8, true);
+	QCOMPARE(target.kind, Kind::ShellCommand);
+	QCOMPARE(target.query, u"doc"_s);
+	QCOMPARE(target.start, 5);
+	QVERIFY(!target.atLineStart);
+	target = completionTarget(u"sudo -u root doc"_s, 16, true);
+	QCOMPARE(target.kind, Kind::ShellCommand);
+	QCOMPARE(target.query, u"doc"_s);
+	target = completionTarget(u"sudo -u "_s, 8, true, true);
+	QCOMPARE(target.kind, Kind::None); // wrapper flag arg suppresses completion
+	QCOMPARE(completionTarget(u"sudo -u ro"_s, 10, true).kind, Kind::None);
+	QCOMPARE(completionTarget(u"timeout "_s, 8, true, true).kind, Kind::None);
+	QCOMPARE(completionTarget(u"timeout 5"_s, 9, true).kind, Kind::None);
+	QCOMPARE(completionTarget(u"timeout 5s"_s, 10, true).kind, Kind::None);
+	target = completionTarget(u"time sudo env FOO=1 doc"_s, 23, true);
+	QCOMPARE(target.kind, Kind::ShellCommand);
+	QCOMPARE(target.query, u"doc"_s);
+	target = completionTarget(u"timeout 5s car"_s, 14, true);
+	QCOMPARE(target.kind, Kind::ShellCommand);
+	QCOMPARE(target.query, u"car"_s);
+	target = completionTarget(u"taskset -c 0,1 car"_s, 18, true);
+	QCOMPARE(target.kind, Kind::ShellCommand);
+	QCOMPARE(target.query, u"car"_s);
+	target = completionTarget(u"taskset 0x1 car"_s, 15, true);
+	QCOMPARE(target.kind, Kind::ShellCommand);
+	QCOMPARE(target.query, u"car"_s);
+	target = completionTarget(u"sudo doc src/ma"_s, 15, true);
+	QCOMPARE(target.kind, Kind::ShellPath);
+	QCOMPARE(target.query, u"src/ma"_s);
+	QCOMPARE(completionTarget(u"sudo ./run"_s, 10, true).kind, Kind::ShellPath);
+	target = completionTarget(u"sudo "_s, 5, true, true);
+	QCOMPARE(target.kind, Kind::ShellCommand);
+	QCOMPARE(target.query, QString());
+	// Path-prefixed wrappers.
+	target = completionTarget(u"/usr/bin/sudo car"_s, 17, true);
+	QCOMPARE(target.kind, Kind::ShellCommand);
+	QCOMPARE(target.query, u"car"_s);
+	target = completionTarget(u"/bin/env FOO=1 car"_s, 18, true);
+	QCOMPARE(target.kind, Kind::ShellCommand);
+	QCOMPARE(target.query, u"car"_s);
+	target = completionTarget(u"C:\\tools\\sudo -u root car"_s, 25, true);
+	QCOMPARE(target.kind, Kind::ShellCommand);
+	QCOMPARE(target.query, u"car"_s);
 
+	// Clustered and attached short flags, plus wrapper flag parity.
+	QCOMPARE(completionTarget(u"sudo -Eu "_s, 9, true, true).kind, Kind::None);
+	target = completionTarget(u"sudo -Eu root car"_s, 17, true);
+	QCOMPARE(target.kind, Kind::ShellCommand);
+	QCOMPARE(target.query, u"car"_s);
+	target = completionTarget(u"sudo -Euroot car"_s, 16, true);
+	QCOMPARE(target.kind, Kind::ShellCommand);
+	QCOMPARE(target.query, u"car"_s);
+	QCOMPARE(completionTarget(u"timeout -vk "_s, 12, true, true).kind, Kind::None);
+	QCOMPARE(completionTarget(u"timeout -vk 5s "_s, 15, true, true).kind, Kind::None);
+	target = completionTarget(u"timeout -vk 5s 10s car"_s, 22, true);
+	QCOMPARE(target.kind, Kind::ShellCommand);
+	QCOMPARE(target.query, u"car"_s);
+	target = completionTarget(u"timeout -vk5s 5s car"_s, 20, true);
+	QCOMPARE(target.kind, Kind::ShellCommand);
+	QCOMPARE(target.query, u"car"_s);
+	QCOMPARE(completionTarget(u"taskset -pc "_s, 12, true, true).kind, Kind::None);
+	target = completionTarget(u"taskset -p car"_s, 14, true);
+	QCOMPARE(target.kind, Kind::ShellCommand);
+	QCOMPARE(target.query, u"car"_s);
+	target = completionTarget(u"taskset -cp car"_s, 15, true);
+	QCOMPARE(target.kind, Kind::ShellCommand);
+	QCOMPARE(target.query, u"car"_s);
+	target = completionTarget(u"taskset -pc 0,1 car"_s, 19, true);
+	QCOMPARE(target.kind, Kind::ShellCommand);
+	QCOMPARE(target.query, u"car"_s);
+	target = completionTarget(u"watch -d car"_s, 12, true);
+	QCOMPARE(target.kind, Kind::ShellCommand);
+	QCOMPARE(target.query, u"car"_s);
+	target = completionTarget(u"watch -n 2 car"_s, 14, true);
+	QCOMPARE(target.kind, Kind::ShellCommand);
+	QCOMPARE(target.query, u"car"_s);
+}
 QTEST_GUILESS_MAIN(TestCompletion)
 #include "tst_completion.moc"

@@ -7,7 +7,8 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QSaveFile>
-
+#include <QtMath>
+#include <algorithm>
 using namespace Qt::StringLiterals;
 using namespace std::chrono_literals;
 
@@ -108,6 +109,26 @@ void readEdge(const QJsonObject& root, const QString& sectionKey, const QString&
 	value = read;
 }
 
+void readSidebarWidth(const QJsonObject& root, const QString& sectionKey, const QString& key, int& value, Problems& problems)
+{
+	const QJsonObject fields = section(root, sectionKey);
+	if(!fields.contains(key))
+	{
+		return;
+	}
+	if(!fields.value(key).isDouble())
+	{
+		problems.add(u"%1: expected a size in pixels"_s.arg(fieldPath(sectionKey, key)));
+		return;
+	}
+	const int read = qRound(fields.value(key).toDouble());
+	if(read <= 0)
+	{
+		problems.add(u"%1: expected a size in pixels"_s.arg(fieldPath(sectionKey, key)));
+		return;
+	}
+	value = std::clamp(read, Settings::MinSidebarWidth, Settings::MaxSidebarWidth);
+}
 } // namespace
 
 const QString Settings::System = u"system"_s;
@@ -205,6 +226,11 @@ void Settings::setSidebarVisible(bool visible)
 	set(m_sidebarVisible, visible, &Settings::sidebarVisibleChanged);
 }
 
+void Settings::setSidebarWidth(int width)
+{
+	set(m_sidebarWidth, std::clamp(width, MinSidebarWidth, MaxSidebarWidth), &Settings::sidebarWidthChanged);
+}
+
 void Settings::setWindowWidth(int width)
 {
 	set(m_windowWidth, width, &Settings::windowSizeChanged);
@@ -264,7 +290,7 @@ void Settings::readFields(const QJsonObject& root)
 	readFlag(root, NotificationsKey, TurnErrorKey, m_notifyTurnError, problems);
 
 	readFlag(root, SidebarKey, VisibleKey, m_sidebarVisible, problems);
-
+	readSidebarWidth(root, SidebarKey, WidthKey, m_sidebarWidth, problems);
 	readEdge(root, WindowKey, WidthKey, m_windowWidth, problems);
 	readEdge(root, WindowKey, HeightKey, m_windowHeight, problems);
 
@@ -289,6 +315,7 @@ QJsonObject Settings::toJson() const
 
 	QJsonObject sidebar = section(root, SidebarKey);
 	sidebar.insert(VisibleKey, m_sidebarVisible);
+	sidebar.insert(WidthKey, m_sidebarWidth);
 	root.insert(SidebarKey, sidebar);
 
 	QJsonObject window = section(root, WindowKey);

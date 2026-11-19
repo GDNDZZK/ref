@@ -54,7 +54,7 @@ QList<FenceSplitter::Event> FenceSplitter::feed(QStringView delta)
 QList<FenceSplitter::Event> FenceSplitter::finish()
 {
 	QList<Event> events;
-	endLine(events);
+	endLine(events, true);
 	return events;
 }
 
@@ -117,7 +117,7 @@ void FenceSplitter::appendToLine(QStringView text, QList<Event>& events)
 	m_heldLine.clear();
 }
 
-void FenceSplitter::endLine(QList<Event>& events)
+void FenceSplitter::endLine(QList<Event>& events, bool endOfInput)
 {
 	const bool lineWasHeld = !std::exchange(m_lineReleased, false);
 	const QString line = std::exchange(m_heldLine, {});
@@ -146,6 +146,20 @@ void FenceSplitter::endLine(QList<Event>& events)
 	if(lineWasHeld)
 	{
 		emitText(stripCodeIndent(line), events);
+	}
+	if(!m_lazyProseLineBreaks && !m_openFence && !endOfInput)
+	{
+		m_atBlockStart = false;
+		TextAppended* previous = events.isEmpty() ? nullptr : std::get_if<TextAppended>(&events.back());
+		if(previous)
+		{
+			previous->text.append(u'\n');
+		}
+		else
+		{
+			events.append(TextAppended{QString(1, u'\n')});
+		}
+		return;
 	}
 	++m_pendingLineBreaks;
 }

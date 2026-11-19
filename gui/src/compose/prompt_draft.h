@@ -6,7 +6,7 @@
 #include <QString>
 
 #include <optional>
-
+#include <utility>
 namespace refgui::compose
 {
 
@@ -57,13 +57,21 @@ public:
 
 	// The prompt as it is sent, and the draft emptied.
 	Submission take();
+	// Atomic `[Image N]` token helpers for attached images.
+	qsizetype snapCursor(qsizetype cursor, qsizetype previousCursor) const;
+	std::pair<qsizetype, qsizetype> expandSelection(qsizetype start, qsizetype end) const;
+	bool deletePlaceholderAt(qsizetype cursor, bool backward);
 	// Empties the draft.
 	void clear();
-
 private:
+	struct TokenSpan
+	{
+		qsizetype start = 0;
+		qsizetype end = 0;
+	};
+	QList<TokenSpan> tokenSpans() const;
 	QString nextToken();
 	void dropOrphans();
-
 	QString m_text;
 	qsizetype m_cursor = 0;
 	QList<Attachment> m_attachments;

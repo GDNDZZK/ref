@@ -16,7 +16,7 @@
 #include <QPointer>
 #include <QTimer>
 #include <QUrl>
-
+#include <QVariantMap>
 #include <chrono>
 #include <functional>
 #include <optional>
@@ -49,6 +49,7 @@ class ComposerModel : public QObject
 	Q_PROPERTY(bool ready READ isReady NOTIFY readyChanged)
 	Q_PROPERTY(QAbstractItemModel* attachments READ attachments CONSTANT)
 	Q_PROPERTY(QAbstractItemModel* queue READ queue CONSTANT)
+	Q_PROPERTY(int queueCount READ queueCount NOTIFY queueCountChanged)
 	Q_PROPERTY(QAbstractItemModel* files READ files CONSTANT)
 	Q_PROPERTY(QAbstractItemModel* completions READ completions CONSTANT)
 	Q_PROPERTY(QString completionKind READ completionKind NOTIFY completionChanged)
@@ -82,6 +83,7 @@ public:
 	bool isReady() const;
 	QAbstractItemModel* attachments() { return &m_attachments; }
 	QAbstractItemModel* queue() { return &m_queue; }
+	int queueCount() const { return m_queue.rowCount(); }
 	QAbstractItemModel* files() { return &m_files; }
 	QAbstractItemModel* completions() { return &m_completions; }
 	// "none", "command", "argument", "file", "shellCommand" or "shellPath".
@@ -109,7 +111,9 @@ public:
 	// The text area's text and cursor after the user changed them.
 	Q_INVOKABLE void edit(const QString& text, int cursor);
 	Q_INVOKABLE void moveCursor(int cursor);
-
+	Q_INVOKABLE int snapCursor(int cursor, int previousCursor) const;
+	Q_INVOKABLE QVariantMap expandSelection(int start, int end) const;
+	Q_INVOKABLE bool deletePlaceholderAt(int cursor, bool backward);
 	// Sends the prompt (or runs the shell line in shell mode). False when there is nothing to
 	// send, an unknown `/foo` command was blocked, or the session is not ready.
 	Q_INVOKABLE bool submit();
@@ -136,8 +140,8 @@ public:
 	Q_INVOKABLE void triggerCompletion();
 	// The `@` list entry `row` replaces the mention being typed; the command replaces the text.
 	Q_INVOKABLE void acceptFile(int row);
-	Q_INVOKABLE void completeCommand(const QString& name);
-	// Accepts entry `row` from `completions`. Returns true when a completed slash argument should submit now.
+	Q_INVOKABLE void completeCommand(const QString& name, bool appendSpace = true);
+	Q_INVOKABLE bool isStandaloneCommandTarget() const;
 	Q_INVOKABLE bool acceptCompletionItem(int row, bool viaEnter = false);
 	// Closes the list until the text changes.
 	Q_INVOKABLE void dismissCompletion();
@@ -161,6 +165,7 @@ signals:
 	// The user typed in the input box (resets popup explicit selection).
 	void userEdited();
 	void shellModeChanged();
+	void queueCountChanged();
 	void readyChanged();
 	void completionChanged();
 	void interruptArmedChanged();

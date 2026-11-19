@@ -1,6 +1,6 @@
 import QtQuick
+import QtQuick.Effects
 import RefGui
-
 // One session in split view: a header with its state and the session pane below. The pane is
 // the same item while the tile is zoomed, so scroll position and streaming survive.
 Item {
@@ -46,7 +46,13 @@ Item {
 	readonly property real targetWidth: expanded ? zoomRect.width : placedSlot.width
 	readonly property real paneTargetWidth: Math.max(0, targetWidth - 2 * targetBorderWidth)
 	property real paneWidthFloor: paneTargetWidth
-
+	property bool arrived: false
+	property bool resizingLayout: false
+	property real settledLayoutWidth: 0
+	readonly property int resizeSettleMs: 130
+	readonly property real resizeFadeOpacity: 0.15
+	readonly property int resizeBlurMax: 16
+	readonly property real resizeBlurStrength: 0.6
 	x: expanded ? zoomRect.x : placedSlot.x
 	y: expanded ? zoomRect.y : placedSlot.y
 	width: targetWidth
@@ -60,8 +66,20 @@ Item {
 	Behavior on x { NumberAnimation { duration: tile.travelDuration; easing.type: Motion.ease } }
 	Behavior on y { NumberAnimation { duration: tile.travelDuration; easing.type: Motion.ease } }
 	Behavior on width { NumberAnimation { id: widthAnim; duration: tile.travelDuration; easing.type: Motion.ease } }
-	onPaneTargetWidthChanged: paneWidthFloor = pane.width > 0 ? Math.min(pane.width, paneTargetWidth) : paneTargetWidth
 	Behavior on height { NumberAnimation { duration: tile.travelDuration; easing.type: Motion.ease } }
+	onPaneTargetWidthChanged: {
+		paneWidthFloor = pane.width > 0 ? Math.min(pane.width, paneTargetWidth) : paneTargetWidth
+		if (!arrived || travelling || sidebarAnimating) {
+			settledLayoutWidth = paneTargetWidth
+			resizingLayout = false
+			resizeSettleTimer.stop()
+			return
+		}
+		if (Math.abs(paneTargetWidth - settledLayoutWidth) > 1) {
+			resizingLayout = true
+			resizeSettleTimer.restart()
+		}
+	}
 	Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: tile.fading ? Motion.exitEase : Motion.ease } }
 	Behavior on scale { NumberAnimation { duration: Motion.standard; easing.type: tile.fading ? Motion.exitEase : Motion.ease } }
 
@@ -83,11 +101,30 @@ Item {
 	Timer {
 		id: settle
 		interval: Motion.slow
-		onTriggered: tile.unzooming = false
+		onTriggered: {
+			tile.unzooming = false
+			if (!tile.resizingLayout)
+				tile.settledLayoutWidth = tile.paneTargetWidth
+		}
+	}
+
+	Timer {
+		id: resizeSettleTimer
+		interval: tile.resizeSettleMs
+		onTriggered: {
+			tile.settledLayoutWidth = tile.paneTargetWidth
+			tile.resizingLayout = false
+		}
+	}
+
+	onSidebarAnimatingChanged: {
+		if (!sidebarAnimating && !resizingLayout)
+			settledLayoutWidth = paneTargetWidth
 	}
 
 	// A tile arrives by fading and growing into its slot.
 	Component.onCompleted: {
+		settledLayoutWidth = paneTargetWidth
 		if (expanded)
 			unzooming = true
 		arrival.start()
@@ -96,6 +133,11 @@ Item {
 		id: arrival
 		NumberAnimation { target: frame; property: "opacity"; from: 0; to: 1; duration: Motion.standard; easing.type: Motion.ease }
 		NumberAnimation { target: frame; property: "scale"; from: Motion.tileEnterScale; to: 1; duration: Motion.standard; easing.type: Motion.ease }
+		onFinished: {
+			tile.arrived = true
+			if (!tile.resizingLayout)
+				tile.settledLayoutWidth = tile.paneTargetWidth
+		}
 	}
 
 	LiveInfo {
@@ -116,8 +158,7 @@ Item {
 		color: Theme.background
 		border.width: tile.targetBorderWidth
 		border.color: tile.fading ? Theme.background : (tile.focused || tile.expanded ? Theme.accentText : (tile.hasRoot ? tile.rootColor : Theme.border))
-		layer.enabled: !tile.travelling && (arrival.running || tile.fading || tile.othersZoomed)
-		layer.smooth: true
+		layer.enabled: !tile.travelling && (tile.fading || tile.othersZoomed)
 
 		Behavior on radius { NumberAnimation { duration: tile.travelDuration; easing.type: Motion.ease } }
 		Behavior on border.color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
@@ -259,6 +300,7 @@ Item {
 		}
 		SessionPane {
 			id: pane
+			readonly property bool supportsBlur: GraphicsInfo.api !== GraphicsInfo.Software
 			anchors {
 				top: header.bottom
 				left: parent.left
@@ -275,12 +317,35 @@ Item {
 				const inset = anchors.leftMargin + anchors.rightMargin
 				if (tile.sidebarAnimating)
 					return Math.max(0, tile.stableWidth - inset)
+				if (tile.resizingLayout)
+					return tile.settledLayoutWidth
 				if (widthAnim.running)
 					return tile.paneWidthFloor
 				return width
 			}
 			keysEnabled: tile.focused || tile.expanded
 			composerShown: tile.focused || tile.expanded
+			opacity: tile.resizingLayout ? tile.resizeFadeOpacity : 1
+			Behavior on opacity {
+				NumberAnimation {
+					duration: tile.resizingLayout ? Motion.quick : Motion.standard
+					easing.type: tile.resizingLayout ? Easing.OutCubic : Easing.OutExpo
+				}
+			}
+			layer.enabled: pane.supportsBlur && (tile.resizingLayout || resizeBlur.blur > 0.01)
+			layer.smooth: true
+			layer.effect: MultiEffect {
+				id: resizeBlur
+				blurEnabled: true
+				blurMax: tile.resizeBlurMax
+				blur: tile.resizingLayout ? tile.resizeBlurStrength : 0
+				Behavior on blur {
+					NumberAnimation {
+						duration: tile.resizingLayout ? Motion.quick : Motion.standard
+						easing.type: tile.resizingLayout ? Easing.OutCubic : Easing.OutExpo
+					}
+				}
+			}
 		}
 
 		// A click anywhere in an unfocused pane focuses the tile, and its input box. The overlay
@@ -293,7 +358,9 @@ Item {
 				enabled: !tile.focused
 				acceptedButtons: Qt.LeftButton
 				gesturePolicy: TapHandler.DragThreshold
-				onTapped: {
+				onTapped: eventPoint => {
+					if (pane.isJumpButtonAt(eventPoint.scenePosition))
+						return
 					Workspace.focusTile(tile.sessionId)
 					pane.focusInput()
 				}

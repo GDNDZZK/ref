@@ -39,6 +39,9 @@ QList<int> changedRoles(const Block& before, const Block& after)
 		{Role::KindRole, before.kind != after.kind},
 		{Role::ContentRole, before.content != after.content},
 		{Role::LanguageRole, before.language != after.language},
+		{Role::TableHeadersRole, before.tableHeaders != after.tableHeaders},
+		{Role::TableAlignmentsRole, before.tableAlignments != after.tableAlignments},
+		{Role::TableRowsRole, before.tableRows != after.tableRows},
 		{Role::StreamingRole, before.streaming != after.streaming},
 		{Role::OutputRole, before.output != after.output},
 		{Role::FailedRole, before.failed != after.failed},
@@ -123,6 +126,36 @@ QList<proto::Part> partsOf(const auto& nodes)
 	return parts;
 }
 
+void ensureTableCache(const Block& block)
+{
+	const bool valid = block.tableCache.sourceHeaders == block.tableHeaders && block.tableCache.sourceRows == block.tableRows
+	                   && block.tableCache.renderedHeaders.size() == block.tableHeaders.size();
+	if(valid)
+	{
+		return;
+	}
+	block.tableCache.sourceHeaders = block.tableHeaders;
+	block.tableCache.sourceRows = block.tableRows;
+	block.tableCache.renderedHeaders.clear();
+	block.tableCache.renderedHeaders.reserve(block.tableHeaders.size());
+	for(const QString& cell : block.tableHeaders)
+	{
+		block.tableCache.renderedHeaders.append(markdownForDisplay(cell));
+	}
+	block.tableCache.renderedRows.clear();
+	block.tableCache.renderedRows.reserve(block.tableRows.size());
+	for(const QStringList& row : block.tableRows)
+	{
+		QStringList renderedRow;
+		renderedRow.reserve(row.size());
+		for(const QString& cell : row)
+		{
+			renderedRow.append(markdownForDisplay(cell));
+		}
+		block.tableCache.renderedRows.append(renderedRow);
+	}
+}
+
 } // namespace
 
 int ConversationModel::rowCount(const QModelIndex& parent) const
@@ -146,6 +179,7 @@ bool ConversationModel::isExpandedByDefault(const Block& block) const
 		return m_toolsExpanded;
 	case Block::Kind::User:
 	case Block::Kind::Markdown:
+	case Block::Kind::Table:
 	case Block::Kind::Code:
 	case Block::Kind::Error:
 	case Block::Kind::Image:
@@ -193,6 +227,14 @@ QVariant ConversationModel::data(const QModelIndex& index, int role) const
 		return block.markdownCache.rendered;
 	case LanguageRole:
 		return block.language;
+	case TableHeadersRole:
+		ensureTableCache(block);
+		return block.tableCache.renderedHeaders;
+	case TableAlignmentsRole:
+		return block.tableAlignments;
+	case TableRowsRole:
+		ensureTableCache(block);
+		return block.tableCache.renderedRows;
 	case StreamingRole:
 		return block.streaming;
 	case OutputRole:
@@ -321,6 +363,9 @@ QHash<int, QByteArray> ConversationModel::roleNames() const
 		{KindRole, "kind"},
 		{ContentRole, "content"},
 		{LanguageRole, "language"},
+		{TableHeadersRole, "tableHeaders"},
+		{TableAlignmentsRole, "tableAlignments"},
+		{TableRowsRole, "tableRows"},
 		{StreamingRole, "streaming"},
 		{OutputRole, "output"},
 		{FailedRole, "failed"},
@@ -973,6 +1018,10 @@ void ConversationModel::replaceRows(qsizetype first, qsizetype oldCount, const Q
 		if(row.content == previous.content)
 		{
 			row.markdownCache = previous.markdownCache;
+		}
+		if(row.tableHeaders == previous.tableHeaders && row.tableRows == previous.tableRows)
+		{
+			row.tableCache = previous.tableCache;
 		}
 		const QList<int> roles = changedRoles(previous, row);
 		if(roles.isEmpty())
