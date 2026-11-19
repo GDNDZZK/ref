@@ -28,6 +28,9 @@ class Settings : public QObject
 	Q_PROPERTY(bool notifyTurnError READ notifyTurnError WRITE setNotifyTurnError NOTIFY notifyKindsChanged)
 	Q_PROPERTY(QStringList notifyKinds READ notifyKinds NOTIFY notifyKindsChanged)
 	Q_PROPERTY(bool sidebarVisible READ sidebarVisible WRITE setSidebarVisible NOTIFY sidebarVisibleChanged)
+	Q_PROPERTY(bool sidebarTodoExpanded READ sidebarTodoExpanded WRITE setSidebarTodoExpanded NOTIFY sidebarTodoExpandedChanged)
+	Q_PROPERTY(bool sidebarRunningExpanded READ sidebarRunningExpanded WRITE setSidebarRunningExpanded NOTIFY sidebarRunningExpandedChanged)
+	Q_PROPERTY(bool sidebarHistoryExpanded READ sidebarHistoryExpanded WRITE setSidebarHistoryExpanded NOTIFY sidebarHistoryExpandedChanged)
 	Q_PROPERTY(int sidebarWidth READ sidebarWidth WRITE setSidebarWidth NOTIFY sidebarWidthChanged)
 	Q_PROPERTY(int windowWidth READ windowWidth WRITE setWindowWidth NOTIFY windowSizeChanged)
 	Q_PROPERTY(int windowHeight READ windowHeight WRITE setWindowHeight NOTIFY windowSizeChanged)
@@ -60,6 +63,9 @@ public:
 	// turn_done, turn_error. Empty when notifications are off.
 	QStringList notifyKinds() const;
 	bool sidebarVisible() const { return m_sidebarVisible; }
+	bool sidebarTodoExpanded() const { return m_sidebarTodoExpanded; }
+	bool sidebarRunningExpanded() const { return m_sidebarRunningExpanded; }
+	bool sidebarHistoryExpanded() const { return m_sidebarHistoryExpanded; }
 	int sidebarWidth() const { return m_sidebarWidth; }
 	int windowWidth() const { return m_windowWidth; }
 	int windowHeight() const { return m_windowHeight; }
@@ -72,6 +78,9 @@ public:
 	void setNotifyTurnDone(bool enabled);
 	void setNotifyTurnError(bool enabled);
 	void setSidebarVisible(bool visible);
+	void setSidebarTodoExpanded(bool expanded);
+	void setSidebarRunningExpanded(bool expanded);
+	void setSidebarHistoryExpanded(bool expanded);
 	void setSidebarWidth(int width);
 	void setWindowWidth(int width);
 	void setWindowHeight(int height);
@@ -87,6 +96,9 @@ signals:
 	void languageChanged();
 	void notifyKindsChanged();
 	void sidebarVisibleChanged();
+	void sidebarTodoExpandedChanged();
+	void sidebarRunningExpandedChanged();
+	void sidebarHistoryExpandedChanged();
 	void sidebarWidthChanged();
 	void windowSizeChanged();
 	void saveFailed(const QString& reason);
@@ -109,6 +121,9 @@ private:
 	bool m_notifyTurnDone = true;
 	bool m_notifyTurnError = true;
 	bool m_sidebarVisible = true;
+	bool m_sidebarTodoExpanded = true;
+	bool m_sidebarRunningExpanded = true;
+	bool m_sidebarHistoryExpanded = true;
 	int m_sidebarWidth = DefaultSidebarWidth;
 	int m_windowWidth = DefaultWindowWidth;
 	int m_windowHeight = DefaultWindowHeight;
