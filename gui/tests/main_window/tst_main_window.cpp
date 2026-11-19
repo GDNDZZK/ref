@@ -2818,24 +2818,22 @@ void TestMainWindow::uiZoomSettingsShortcutsResizeAndPopupsScaleCleanly()
 	QMetaObject::invokeMethod(menuObj, "close");
 	QTRY_VERIFY(!menuObj->property("opened").toBool());
 
-	QObject* settingsTip = nullptr;
-	QQuickItem* settingsBtn = findItem(window->contentItem(), [&settingsTip](QQuickItem* item) {
-		if(!QByteArray(item->metaObject()->className()).startsWith("IconButton_QMLTYPE"))
-		{
-			return false;
-		}
-		for(QObject* ch : item->children())
-		{
-			if(QByteArray(ch->metaObject()->className()).startsWith("PlainToolTip")
-			   && ch->property("text").toString() == u"Settings"_s)
-			{
-				settingsTip = ch;
-				return true;
-			}
-		}
-		return false;
+	QQuickItem* settingsBtn = findItem(sidebar, [](QQuickItem* item) {
+		return item->property("iconName").toString() == u"sliders"_s
+		       && item->property("tooltipText").toString() == u"Settings"_s;
 	});
-	QVERIFY(settingsBtn && settingsTip);
+	QVERIFY(settingsBtn);
+	QObject* settingsTip = nullptr;
+	for(QObject* ch : settingsBtn->findChildren<QObject*>())
+	{
+		if(QByteArray(ch->metaObject()->className()).startsWith("PlainToolTip")
+		   && ch->property("text").toString() == u"Settings"_s)
+		{
+			settingsTip = ch;
+			break;
+		}
+	}
+	QVERIFY(settingsTip);
 	settingsTip->setProperty("delay", 0);
 
 	const auto verifyToolTipGeometry = [&](double scale) {
