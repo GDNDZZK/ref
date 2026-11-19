@@ -238,7 +238,7 @@ Column {
 		controlWidth: 200
 		showDivider: true
 		showReset: { void section.editor.revision; return section.editor.contains(["compaction", "recommend"]) }
-		onResetClicked: section.resetPath(["compaction", "recommend"])
+		onResetClicked: { section.resetPath(["compaction", "recommend"]); compactionRecommendField.resetState() }
 
 		NumberField {
 			id: compactionRecommendField
@@ -260,7 +260,7 @@ Column {
 		controlWidth: 200
 		showDivider: true
 		showReset: { void section.editor.revision; return section.editor.contains(["compaction", "threshold"]) }
-		onResetClicked: section.resetPath(["compaction", "threshold"])
+		onResetClicked: { section.resetPath(["compaction", "threshold"]); compactionThresholdField.resetState() }
 
 		NumberField {
 			id: compactionThresholdField
@@ -292,7 +292,7 @@ Column {
 		controlWidth: 200
 		showDivider: true
 		showReset: { void section.editor.revision; return section.editor.contains(["retry", "max_delay"]) }
-		onResetClicked: section.resetPath(["retry", "max_delay"])
+		onResetClicked: { section.resetPath(["retry", "max_delay"]); retryMaxDelayField.resetState() }
 
 		NumberField {
 			id: retryMaxDelayField
@@ -387,7 +387,7 @@ Column {
 		stacked: true
 		showDivider: true
 		showReset: { void section.editor.revision; return section.editor.contains(["enabled_providers"]) }
-		onResetClicked: section.resetPath(["enabled_providers"])
+		onResetClicked: { section.resetPath(["enabled_providers"]); enabledProvidersEditor.resetState() }
 
 		StringListEditor {
 			id: enabledProvidersEditor
@@ -406,7 +406,7 @@ Column {
 		description: qsTr("Provider IDs listed here are skipped even if configured or in environment.")
 		stacked: true
 		showReset: { void section.editor.revision; return section.editor.contains(["disabled_providers"]) }
-		onResetClicked: section.resetPath(["disabled_providers"])
+		onResetClicked: { section.resetPath(["disabled_providers"]); disabledProvidersEditor.resetState() }
 
 		StringListEditor {
 			id: disabledProvidersEditor

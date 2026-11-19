@@ -502,8 +502,8 @@ Column {
 		showReset: { void section.editor.revision; return section.editor.contains(["instructions"]) }
 		onResetClicked: {
 			section.forceActiveFocus()
-			instructionsEditor.resetState()
 			section.editor.removeAt(["instructions"])
+			instructionsEditor.resetState()
 		}
 
 		StringListEditor {
@@ -525,8 +525,8 @@ Column {
 		showReset: { void section.editor.revision; return section.editor.contains(["skills"]) }
 		onResetClicked: {
 			section.forceActiveFocus()
-			skillsEditor.resetState()
 			section.editor.removeAt(["skills"])
+			skillsEditor.resetState()
 		}
 
 		StringListEditor {
