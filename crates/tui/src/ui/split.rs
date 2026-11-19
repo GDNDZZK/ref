@@ -282,7 +282,7 @@ pub fn input_rect(r: Rect) -> Option<Rect> {
 }
 
 /// Draws the focused tile's input separator; returns the input rect.
-pub fn draw_input_sep(buf: &mut Buffer, r: Rect) -> Rect {
+pub fn draw_input_sep(buf: &mut Buffer, r: Rect, shell_mode: bool) -> Rect {
     if r.width < 4 || r.height < 5 {
         return Rect::default();
     }
@@ -291,7 +291,11 @@ pub fn draw_input_sep(buf: &mut Buffer, r: Rect) -> Rect {
     for x in r.x + 1..r.x + r.width - 1 {
         buf.set_string(x, y, "┄", st);
     }
-    buf.set_string(r.x + 1, y + 1, "›", theme::fg(theme::PRIMARY));
+    if shell_mode {
+        buf.set_string(r.x + 1, y + 1, "!", theme::bold(theme::WARNING));
+    } else {
+        buf.set_string(r.x + 1, y + 1, "›", theme::fg(theme::PRIMARY));
+    }
     input_rect(r).unwrap_or_default()
 }
 
