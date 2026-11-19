@@ -308,10 +308,12 @@ bool ComposerModel::variantAvailable() const
 
 void ComposerModel::edit(const QString& text, int cursor)
 {
-	const bool typedBang = !m_shellMode && text == ShellPrefix && m_draft.text().isEmpty();
+	const bool typedBang = !m_draft.shellMode() && text == ShellPrefix && m_draft.text().isEmpty();
 	if(typedBang)
 	{
-		setShellMode(true);
+		const bool wasShell = m_draft.shellMode();
+		m_draft.setShellMode(true);
+		syncShellMode(wasShell);
 		changeDraft(); // the text area drops the `!`
 		emit userEdited();
 		return;
@@ -384,7 +386,7 @@ void ComposerModel::cancelBinarySearch()
 void ComposerModel::triggerCompletion()
 {
 	m_completionDismissed = false;
-	if(m_shellMode)
+	if(m_draft.shellMode())
 	{
 		m_forceShellEmpty = true;
 	}
@@ -394,9 +396,8 @@ void ComposerModel::triggerCompletion()
 void ComposerModel::updateCompletion()
 {
 	using Kind = compose::CompletionTarget::Kind;
-	const compose::CompletionTarget target = compose::completionTarget(m_draft.text(), m_draft.cursor(), m_shellMode, m_forceShellEmpty);
+	const compose::CompletionTarget target = compose::completionTarget(m_draft.text(), m_draft.cursor(), m_draft.shellMode(), m_forceShellEmpty);
 	m_target = target;
-
 	if(m_completionDismissed || target.kind == Kind::None)
 	{
 		cancelFileSearch();
@@ -950,14 +951,13 @@ QCoro::Task<> ComposerModel::findBinaries(QString query, quint64 serial)
 	}
 }
 
-void ComposerModel::setShellMode(bool shellMode)
+void ComposerModel::syncShellMode(bool wasShellMode)
 {
-	if(shellMode == m_shellMode)
+	if(m_draft.shellMode() == wasShellMode)
 	{
 		return;
 	}
-	m_shellMode = shellMode;
-	if(!m_shellMode)
+	if(!m_draft.shellMode())
 	{
 		m_forceShellEmpty = false;
 	}
@@ -966,12 +966,12 @@ void ComposerModel::setShellMode(bool shellMode)
 
 void ComposerModel::leaveShell()
 {
-	if(!m_shellMode)
+	if(!m_draft.shellMode())
 	{
 		return;
 	}
-	setShellMode(false);
 	m_draft.clear();
+	syncShellMode(true);
 	changeDraft();
 }
 
@@ -981,7 +981,7 @@ bool ComposerModel::submit()
 	{
 		return false;
 	}
-	if(!m_shellMode && m_draft.attachments().isEmpty() && workspace::CommandRegistry::isSingleSlashToken(m_draft.text()))
+	if(!m_draft.shellMode() && m_draft.attachments().isEmpty() && workspace::CommandRegistry::isSingleSlashToken(m_draft.text()))
 	{
 		const QString typed = m_draft.text().trimmed().mid(1);
 		const QString suggestion = workspace::CommandRegistry::suggestSlashFrom(typed, m_config.config().commands);
@@ -1000,12 +1000,13 @@ bool ComposerModel::submit()
 	m_browser.reset();
 	disarmInterrupt();
 
-	if(m_shellMode)
+	const bool wasShell = m_draft.shellMode();
+	if(wasShell)
 	{
 		const QString command = m_draft.text().trimmed();
 		m_history.push(ShellPrefix + command);
-		setShellMode(false);
-		m_draft.clear();
+		m_draft.take();
+		syncShellMode(wasShell);
 		changeDraft();
 		sendShell(command);
 		return true;
@@ -1018,6 +1019,7 @@ bool ComposerModel::submit()
 		images.append(attachment.image);
 	}
 	const QString text = m_draft.take().text.trimmed();
+	syncShellMode(wasShell);
 	changeDraft();
 	sendPrompt(text, std::move(images), true);
 	return true;
@@ -1025,10 +1027,12 @@ bool ComposerModel::submit()
 
 void ComposerModel::finishCommand()
 {
+	const bool wasShell = m_draft.shellMode();
 	m_forceShellEmpty = false;
 	m_browser.reset();
 	m_history.push(m_draft.text());
-	m_draft.clear();
+	m_draft.take();
+	syncShellMode(wasShell);
 	changeDraft();
 }
 
@@ -1081,8 +1085,7 @@ QCoro::Task<> ComposerModel::sendShell(QString command)
 {
 	// Back into the box as a shell line, so nothing typed is lost.
 	const auto restore = [&] {
-		restoreDraft(command, {});
-		setShellMode(true);
+		restoreDraftWithMode(command, {}, true);
 	};
 	if(co_await awaitAndReport(m_controller.runShell(command), restore))
 	{
@@ -1113,13 +1116,14 @@ QCoro::Task<> ComposerModel::expandAndSend(QString name, QString args)
 
 bool ComposerModel::historyPrevious()
 {
-	const bool atStart = m_draft.text().isEmpty() || m_draft.cursor() == 0 || (m_shellMode && !m_draft.text().contains(u'\n'));
+	const bool shell = m_draft.shellMode();
+	const bool atStart = m_draft.text().isEmpty() || m_draft.cursor() == 0 || (shell && !m_draft.text().contains(u'\n'));
 	if(!m_browser.browsing() && !atStart)
 	{
 		return false;
 	}
-	const QString current = m_shellMode ? ShellPrefix + m_draft.text() : m_draft.text();
-	if(const auto entry = m_browser.previous(current, m_shellMode))
+	const QString current = shell ? ShellPrefix + m_draft.text() : m_draft.text();
+	if(const auto entry = m_browser.previous(current, shell))
 	{
 		fillFromHistory(*entry);
 	}
@@ -1144,11 +1148,12 @@ bool ComposerModel::historyNext()
 
 void ComposerModel::fillFromHistory(const QString& entry)
 {
+	const bool wasShell = m_draft.shellMode();
 	const bool isShell = entry.startsWith(ShellPrefix);
 	const QString text = isShell ? entry.mid(ShellPrefix.size()) : entry;
 	m_forceShellEmpty = false;
-	setShellMode(isShell);
-	m_draft.setText(text, text.size());
+	m_draft.replace(text, text.size(), isShell);
+	syncShellMode(wasShell);
 	m_completionDismissed = isShell; // avoid popping binary completions while walking shell history
 	changeDraft();
 }
@@ -1188,22 +1193,29 @@ QCoro::Task<> ComposerModel::removeQueued(QString messageId)
 
 void ComposerModel::restoreDraft(const QString& text, const QList<proto::NamedImage>& images)
 {
+	restoreDraftWithMode(text, images, false);
+}
+
+void ComposerModel::restoreDraftWithMode(const QString& text, const QList<proto::NamedImage>& images, bool shellMode)
+{
+	const bool wasShell = m_draft.shellMode();
 	m_forceShellEmpty = false;
-	setShellMode(false);
-	m_draft.restore(text, images);
+	m_draft.restore(text, images, shellMode);
+	syncShellMode(wasShell);
 	m_browser.reset();
 	changeDraft();
 }
 
 void ComposerModel::clearDraft()
 {
+	const bool wasShell = m_draft.shellMode();
 	if(m_draft.text().size() >= DiscardKeepLength)
 	{
-		m_history.push(m_shellMode ? ShellPrefix + m_draft.text() : m_draft.text());
+		m_history.push(wasShell ? ShellPrefix + m_draft.text() : m_draft.text());
 	}
 	m_forceShellEmpty = false;
-	setShellMode(false);
 	m_draft.clear();
+	syncShellMode(wasShell);
 	m_browser.reset();
 	changeDraft();
 }
@@ -1215,10 +1227,12 @@ bool ComposerModel::escape()
 		dismissCompletion();
 		return true;
 	}
-	if(m_shellMode)
+	if(m_draft.shellMode())
 	{
-		setShellMode(false);
+		m_draft.setShellMode(false);
+		syncShellMode(true);
 		updateCompletion();
+		emit draftChanged();
 		return true;
 	}
 	if(!m_controller.isTurnInProgress())
@@ -1346,7 +1360,7 @@ bool ComposerModel::acceptCompletionItem(int row, bool viaEnter)
 
 bool ComposerModel::pasteFromClipboard()
 {
-	if(m_shellMode)
+	if(m_draft.shellMode())
 	{
 		return false;
 	}
@@ -1392,6 +1406,16 @@ bool ComposerModel::pasteFromClipboard()
 	}
 	attachImage(compose::imageFromBytes(bytes, PngMime, PastedImageName));
 	return true;
+}
+
+bool ComposerModel::canPaste() const
+{
+	const QMimeData* data = QGuiApplication::clipboard()->mimeData();
+	if(!data)
+	{
+		return false;
+	}
+	return data->hasImage() || data->hasUrls() || data->hasText();
 }
 
 int ComposerModel::attachUrls(const QList<QUrl>& urls)
@@ -1485,6 +1509,38 @@ bool ComposerModel::deletePlaceholderAt(int cursor, bool backward)
 	m_forceShellEmpty = false;
 	m_completionDismissed = false;
 	m_browser.reset();
+	changeDraft();
+	emit userEdited();
+	return true;
+}
+
+bool ComposerModel::undo()
+{
+	const bool wasShell = m_draft.shellMode();
+	if(!m_draft.undo())
+	{
+		return false;
+	}
+	m_forceShellEmpty = false;
+	m_completionDismissed = false;
+	m_browser.reset();
+	syncShellMode(wasShell);
+	changeDraft();
+	emit userEdited();
+	return true;
+}
+
+bool ComposerModel::redo()
+{
+	const bool wasShell = m_draft.shellMode();
+	if(!m_draft.redo())
+	{
+		return false;
+	}
+	m_forceShellEmpty = false;
+	m_completionDismissed = false;
+	m_browser.reset();
+	syncShellMode(wasShell);
 	changeDraft();
 	emit userEdited();
 	return true;

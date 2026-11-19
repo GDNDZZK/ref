@@ -267,6 +267,9 @@ private slots:
 	void shellEscapeClipboardPipelinesDuplicateSessionsAndBackslashPathsWork();
 	void atomicImagePlaceholderHelpersSyncDraftAndAttachments();
 	void midTextSlashReplacementAndShellWrapperCompletionWork();
+	void imageNumberingResetsPerDraft();
+	void undoRedoSyncAttachmentsAndHistoryAvoidsTokenCollision();
+	void undoRedoSyncShellModeCanPasteAndUserEdited();
 };
 
 void TestComposerModel::labelsFollowTheSessionAndTheConfiguration()
@@ -1012,5 +1015,189 @@ void TestComposerModel::midTextSlashReplacementAndShellWrapperCompletionWork()
 	QTRY_COMPARE(f.composer.completions()->rowCount(), 1);
 	QCOMPARE(f.composer.completions()->index(0, 0).data(composer::CompletionItemModel::ValueRole).toString(), u"docker"_s);
 }
+
+void TestComposerModel::imageNumberingResetsPerDraft()
+{
+	Fixture f;
+	QImage img(4, 4, QImage::Format_RGB32);
+	img.fill(Qt::red);
+	QGuiApplication::clipboard()->setImage(img);
+
+	// paste -> submit -> paste starts back at [Image 1].
+	QVERIFY(f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.text(), u"[Image 1] "_s);
+	QVERIFY(f.composer.submit());
+	QTRY_COMPARE(f.requestsOf(u"prompt"_s).size(), 1);
+	QCOMPARE(f.composer.attachments()->rowCount(), 0);
+	QVERIFY(f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.text(), u"[Image 1] "_s);
+
+	// paste -> removeAttachment -> paste resets to [Image 1].
+	f.composer.removeAttachment(0);
+	QCOMPARE(f.composer.attachments()->rowCount(), 0);
+	QVERIFY(f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.text(), u"[Image 1] "_s);
+
+	// paste -> edit dropping the token -> paste resets to [Image 1].
+	f.type(u"just words"_s);
+	QCOMPARE(f.composer.attachments()->rowCount(), 0);
+	QVERIFY(f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.text(), u"just words [Image 1] "_s);
+
+	// Partial deletion keeps rising ([Image 1]/[Image 2] -> [Image 3]); clearDraft() resets to [Image 1].
+	QVERIFY(f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.text(), u"just words [Image 1] [Image 2] "_s);
+	QCOMPARE(f.composer.attachments()->rowCount(), 2);
+	f.composer.removeAttachment(0);
+	QCOMPARE(f.composer.attachments()->rowCount(), 1);
+	QVERIFY(f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.attachments()->rowCount(), 2);
+	QCOMPARE(f.composer.attachments()->index(0, 0).data(composer::AttachmentModel::TokenRole).toString(), u"[Image 2]"_s);
+	QCOMPARE(f.composer.attachments()->index(1, 0).data(composer::AttachmentModel::TokenRole).toString(), u"[Image 3]"_s);
+	QVERIFY(f.composer.text().contains(u"[Image 3]"_s));
+
+	f.composer.clearDraft();
+	QVERIFY(f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.text(), u"[Image 1] "_s);
+}
+
+void TestComposerModel::undoRedoSyncAttachmentsAndHistoryAvoidsTokenCollision()
+{
+	Fixture f;
+	QImage img(4, 4, QImage::Format_RGB32);
+	img.fill(Qt::green);
+	QGuiApplication::clipboard()->setImage(img);
+
+	// Attach -> type word char-by-char -> undo restores "[Image 1] " with attachment -> undo restores "" -> redo.
+	QVERIFY(f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.text(), u"[Image 1] "_s);
+	f.composer.edit(u"[Image 1] w"_s, 11);
+	f.composer.edit(u"[Image 1] wo"_s, 12);
+	f.composer.edit(u"[Image 1] wor"_s, 13);
+	f.composer.edit(u"[Image 1] word"_s, 14);
+	QVERIFY(f.composer.undo());
+	QCOMPARE(f.composer.text(), u"[Image 1] "_s);
+	QCOMPARE(f.composer.attachments()->rowCount(), 1);
+	QVERIFY(f.composer.undo());
+	QCOMPARE(f.composer.text(), QString());
+	QCOMPARE(f.composer.attachments()->rowCount(), 0);
+	QVERIFY(!f.composer.undo());
+	QVERIFY(f.composer.redo());
+	QCOMPARE(f.composer.text(), u"[Image 1] "_s);
+	QCOMPARE(f.composer.attachments()->rowCount(), 1);
+	QVERIFY(f.composer.redo());
+	QCOMPARE(f.composer.text(), u"[Image 1] word"_s);
+	QCOMPARE(f.composer.attachments()->rowCount(), 1);
+
+	// Selection-delete/cut -> undo restores attachment and m_lastImageNumber == 1.
+	f.type(QString());
+	QCOMPARE(f.composer.attachments()->rowCount(), 0);
+	QVERIFY(f.composer.undo());
+	QCOMPARE(f.composer.text(), u"[Image 1] word"_s);
+	QCOMPARE(f.composer.attachments()->rowCount(), 1);
+	QVERIFY(f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.attachments()->rowCount(), 2);
+	QCOMPARE(f.composer.attachments()->index(1, 0).data(composer::AttachmentModel::TokenRole).toString(), u"[Image 2]"_s);
+
+	// Submit clears undo/redo history.
+	QVERIFY(f.composer.submit());
+	QTRY_COMPARE(f.requestsOf(u"prompt"_s).size(), 1);
+	QVERIFY(!f.composer.undo());
+	QVERIFY(!f.composer.redo());
+
+	// History recall with "[Image 1] explain" + attach yields [Image 2].
+	f.history.push(u"[Image 1] explain"_s);
+	QVERIFY(f.composer.historyPrevious());
+	QCOMPARE(f.composer.text(), u"[Image 1] explain"_s);
+	QVERIFY(f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.text(), u"[Image 1] explain [Image 2] "_s);
+	QCOMPARE(f.composer.attachments()->rowCount(), 1);
+	QCOMPARE(f.composer.attachments()->index(0, 0).data(composer::AttachmentModel::TokenRole).toString(), u"[Image 2]"_s);
+}
+
+void TestComposerModel::undoRedoSyncShellModeCanPasteAndUserEdited()
+{
+	Fixture f;
+	QSignalSpy editedSpy(&f.composer, &ComposerModel::userEdited);
+	QSignalSpy shellSpy(&f.composer, &ComposerModel::shellModeChanged);
+	QSignalSpy draftSpy(&f.composer, &ComposerModel::draftChanged);
+
+	// Empty undo/redo do not emit userEdited().
+	QVERIFY(!f.composer.canUndo());
+	QVERIFY(!f.composer.canRedo());
+	QVERIFY(!f.composer.undo());
+	QVERIFY(!f.composer.redo());
+	QCOMPARE(editedSpy.count(), 0);
+
+	// canPaste() reflects clipboard image, text, URLs, or empty state.
+	QGuiApplication::clipboard()->setMimeData(new QMimeData());
+	QVERIFY(!f.composer.canPaste());
+	QImage img(4, 4, QImage::Format_RGB32);
+	img.fill(Qt::yellow);
+	QGuiApplication::clipboard()->setImage(img);
+	QVERIFY(f.composer.canPaste());
+	QGuiApplication::clipboard()->setText(u"hello"_s);
+	QVERIFY(f.composer.canPaste());
+	auto* urlMime = new QMimeData();
+	urlMime->setUrls({QUrl::fromLocalFile(u"/tmp/example.txt"_s)});
+	QGuiApplication::clipboard()->setMimeData(urlMime);
+	QVERIFY(f.composer.canPaste());
+
+	// 1) [Image 1] + Up to "!make" -> undo restores prompt mode + attachment; redo restores shell mode.
+	f.history.push(u"!make"_s);
+	QGuiApplication::clipboard()->setImage(img);
+	QVERIFY(f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.attachments()->rowCount(), 1);
+	QVERIFY(!f.composer.shellMode());
+	f.composer.moveCursor(0);
+	QVERIFY(f.composer.historyPrevious());
+	QVERIFY(f.composer.shellMode());
+	QCOMPARE(f.composer.text(), u"make"_s);
+	QCOMPARE(f.composer.attachments()->rowCount(), 0);
+	editedSpy.clear();
+	shellSpy.clear();
+	draftSpy.clear();
+	QVERIFY(f.composer.undo());
+	QCOMPARE(editedSpy.count(), 1);
+	QCOMPARE(shellSpy.count(), 1);
+	QVERIFY(draftSpy.count() >= 1);
+	QVERIFY(!f.composer.shellMode());
+	QCOMPARE(f.composer.text(), u"[Image 1] "_s);
+	QCOMPARE(f.composer.attachments()->rowCount(), 1);
+	QVERIFY(f.composer.canRedo());
+	QVERIFY(f.composer.redo());
+	QCOMPARE(editedSpy.count(), 2);
+	QCOMPARE(shellSpy.count(), 2);
+	QVERIFY(f.composer.shellMode());
+	QCOMPARE(f.composer.text(), u"make"_s);
+	QCOMPARE(f.composer.attachments()->rowCount(), 0);
+
+	// 2) "!cmd" + clearDraft() -> undo restores shell mode and text.
+	f.composer.clearDraft();
+	QVERIFY(!f.composer.shellMode());
+	QVERIFY(f.composer.undo());
+	QVERIFY(f.composer.shellMode());
+	QCOMPARE(f.composer.text(), u"make"_s);
+
+	// 3) escape() exiting shell mode (after dismissing completion) is undoable and emits draftChanged for canUndo.
+	QVERIFY(f.composer.escape()); // dismisses shell completion matching "!make" in history
+	QVERIFY(f.composer.shellMode());
+	QVERIFY(f.composer.escape()); // exits shell mode
+	QVERIFY(!f.composer.shellMode());
+	QVERIFY(f.composer.canUndo());
+	QVERIFY(f.composer.undo());
+	QVERIFY(f.composer.shellMode());
+	QCOMPARE(f.composer.text(), u"make"_s);
+
+	// 4) Typing "!" -> undo leaves shell mode; redo re-enters shell mode.
+	f.composer.clearDraft();
+	f.type(u"!"_s);
+	QVERIFY(f.composer.shellMode());
+	QVERIFY(f.composer.undo());
+	QVERIFY(!f.composer.shellMode());
+	QVERIFY(f.composer.redo());
+	QVERIFY(f.composer.shellMode());
+}
+
 QTEST_MAIN(TestComposerModel)
 #include "tst_composer_model.moc"

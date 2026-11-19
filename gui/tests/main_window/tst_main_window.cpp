@@ -144,6 +144,10 @@ private:
 			m_sessions[id].insert(u"model"_s, modelObj);
 			m_fake.respond(request, {{u"session"_s, m_sessions.value(id)}});
 		}
+		else if(op == u"prompt"_s)
+		{
+			m_fake.respond(request, {{u"queued"_s, false}, {u"message_id"_s, u"u_prompt_1"_s}});
+		}
 		else if(op == u"shell"_s)
 		{
 			m_shellCommands.append(request.value(u"command"_s).toString());
@@ -388,6 +392,7 @@ private slots:
 	void shimmerTextModelsHoverCtrlTAtomicImageAndCompletionsWork();
 	void splitJumpToEndResizeBlurFadeAndSidebarDragWork();
 	void sidebarSectionsCollapseExpandAndResizeWithoutOscillation();
+	void composerUndoRedoSyncsAttachmentsAndHistoryAvoidsCollision();
 };
 
 void TestMainWindow::initTestCase()
@@ -1784,6 +1789,9 @@ void TestMainWindow::shimmerTextModelsHoverCtrlTAtomicImageAndCompletionsWork()
 	QTest::keyClick(window, Qt::Key_Delete); // deletes "[Image 1] " atomically
 	QCOMPARE(f.workspace->current()->composer()->text(), QString());
 	QCOMPARE(f.workspace->current()->composer()->attachments()->rowCount(), 0);
+	QVERIFY(f.workspace->current()->composer()->pasteFromClipboard());
+	QCOMPARE(f.workspace->current()->composer()->text(), u"[Image 1] "_s);
+	f.workspace->current()->composer()->clearDraft();
 	const auto typeText = [&](const QString& text) {
 		for(const QChar ch : text)
 		{
@@ -2056,6 +2064,205 @@ void TestMainWindow::sidebarSectionsCollapseExpandAndResizeWithoutOscillation()
 	QTRY_VERIFY(todoFlickable->isVisible());
 
 	QVERIFY2(warningSpy.isEmpty(), "Sidebar collapse/expand, keyboard toggle, or drag emitted QML warnings");
+}
+
+void TestMainWindow::composerUndoRedoSyncsAttachmentsAndHistoryAvoidsCollision()
+{
+	MainFixture f;
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+	window->requestActivate();
+
+	auto* composerItem = findByTypePrefix(window->contentItem(), "Composer");
+	QVERIFY(composerItem);
+	QMetaObject::invokeMethod(composerItem, "focusInput");
+	auto* textArea = qobject_cast<QQuickItem*>(window->activeFocusItem());
+	QVERIFY(textArea);
+	auto* composer = f.workspace->current()->composer();
+	QVERIFY(composer);
+
+	QImage img(4, 4, QImage::Format_RGB32);
+	img.fill(Qt::blue);
+	QGuiApplication::clipboard()->setImage(img);
+	const auto typeText = [&](const QString& text) {
+		for(const QChar ch : text)
+		{
+			const Qt::Key k = ch.isLetter() ? static_cast<Qt::Key>(ch.toUpper().unicode()) : static_cast<Qt::Key>(ch.unicode());
+			const Qt::KeyboardModifiers mods = ch.isUpper() ? Qt::ShiftModifier : Qt::NoModifier;
+			QTest::keyClick(window, k, mods);
+		}
+	};
+	const auto triggerRedo = [&] {
+		QTest::keyClick(window, Qt::Key_Y, Qt::ControlModifier);
+	};
+
+	// 1) Attach -> type word -> Ctrl+Z restores "[Image 1] " with attachment -> Ctrl+Z restores "" -> Redo restores.
+	QVERIFY(composer->pasteFromClipboard());
+	QCOMPARE(composer->text(), u"[Image 1] "_s);
+	QCOMPARE(composer->attachments()->rowCount(), 1);
+	typeText(u"word"_s);
+	QCOMPARE(composer->text(), u"[Image 1] word"_s);
+	QCOMPARE(textArea->property("text").toString(), u"[Image 1] word"_s);
+
+	QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
+	QCOMPARE(composer->text(), u"[Image 1] "_s);
+	QCOMPARE(textArea->property("text").toString(), u"[Image 1] "_s);
+	QCOMPARE(composer->attachments()->rowCount(), 1);
+
+	QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
+	QCOMPARE(composer->text(), QString());
+	QCOMPARE(textArea->property("text").toString(), QString());
+	QCOMPARE(composer->attachments()->rowCount(), 0);
+	QVERIFY(composer->pasteFromClipboard());
+	QCOMPARE(composer->text(), u"[Image 1] "_s);
+	QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
+	QCOMPARE(composer->text(), QString());
+	QCOMPARE(composer->attachments()->rowCount(), 0);
+
+	// Re-run attach -> type -> Ctrl+Z -> Ctrl+Z -> Ctrl+Y redo path.
+	QVERIFY(composer->pasteFromClipboard());
+	typeText(u"word"_s);
+	QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
+	QCOMPARE(composer->text(), u"[Image 1] "_s);
+	QCOMPARE(composer->attachments()->rowCount(), 1);
+	QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
+	QCOMPARE(composer->text(), QString());
+	QCOMPARE(composer->attachments()->rowCount(), 0);
+	triggerRedo();
+	QCOMPARE(composer->text(), u"[Image 1] "_s);
+	QCOMPARE(textArea->property("text").toString(), u"[Image 1] "_s);
+	QCOMPARE(composer->attachments()->rowCount(), 1);
+	triggerRedo();
+	QCOMPARE(composer->text(), u"[Image 1] word"_s);
+	QCOMPARE(textArea->property("text").toString(), u"[Image 1] word"_s);
+	QCOMPARE(composer->attachments()->rowCount(), 1);
+	QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
+	QCOMPARE(composer->text(), u"[Image 1] "_s);
+
+	// 2) Select-all + Delete / Cut -> Ctrl+Z restores both "[Image 1] " text and attachment (next attach is [Image 2]).
+	QTest::keyClick(window, Qt::Key_A, Qt::ControlModifier);
+	QTest::keyClick(window, Qt::Key_Delete);
+	QCOMPARE(composer->text(), QString());
+	QCOMPARE(composer->attachments()->rowCount(), 0);
+	QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
+	QCOMPARE(composer->text(), u"[Image 1] "_s);
+	QCOMPARE(textArea->property("text").toString(), u"[Image 1] "_s);
+	QCOMPARE(composer->attachments()->rowCount(), 1);
+
+	QTest::keyClick(window, Qt::Key_A, Qt::ControlModifier);
+	QTest::keyClick(window, Qt::Key_X, Qt::ControlModifier);
+	QCOMPARE(composer->text(), QString());
+	QCOMPARE(composer->attachments()->rowCount(), 0);
+	QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
+	QCOMPARE(composer->text(), u"[Image 1] "_s);
+	QCOMPARE(textArea->property("text").toString(), u"[Image 1] "_s);
+	QCOMPARE(composer->attachments()->rowCount(), 1);
+	QTest::keyClick(window, Qt::Key_End);
+	QGuiApplication::clipboard()->setImage(img);
+	QVERIFY(composer->pasteFromClipboard());
+	QCOMPARE(composer->text(), u"[Image 1] [Image 2] "_s);
+	QCOMPARE(composer->attachments()->rowCount(), 2);
+	QCOMPARE(composer->attachments()->index(0, 0).data(composer::AttachmentModel::TokenRole).toString(), u"[Image 1]"_s);
+	QCOMPARE(composer->attachments()->index(1, 0).data(composer::AttachmentModel::TokenRole).toString(), u"[Image 2]"_s);
+
+	// Also verify Ctrl+Shift+Z triggers Redo.
+	QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
+	QCOMPARE(composer->text(), u"[Image 1] "_s);
+	QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier);
+	QCOMPARE(composer->text(), u"[Image 1] [Image 2] "_s);
+	QCOMPARE(composer->attachments()->rowCount(), 2);
+
+	// 3) Submit -> history Up recall of "[Image 1] explain" -> paste yields [Image 2] without collision.
+	composer->clearDraft();
+	composer->edit(u"[Image 1] explain"_s, 17);
+	QVERIFY(composer->submit());
+	QCOMPARE(composer->text(), QString());
+	QTest::keyClick(window, Qt::Key_Up);
+	QCOMPARE(composer->text(), u"[Image 1] explain"_s);
+	QCOMPARE(textArea->property("text").toString(), u"[Image 1] explain"_s);
+	QVERIFY(composer->pasteFromClipboard());
+	QCOMPARE(composer->text(), u"[Image 1] explain [Image 2] "_s);
+	QCOMPARE(textArea->property("text").toString(), u"[Image 1] explain [Image 2] "_s);
+	QCOMPARE(composer->attachments()->rowCount(), 1);
+	QCOMPARE(composer->attachments()->index(0, 0).data(composer::AttachmentModel::TokenRole).toString(), u"[Image 2]"_s);
+
+	// 4) QTextDocument built-in undo/redo is disabled, and right-click ContextMenu syncs Undo/Redo/Paste + shellMode.
+	composer->clearDraft();
+	QVERIFY(!textArea->property("canUndo").toBool());
+	QVERIFY(!textArea->property("canRedo").toBool());
+	QGuiApplication::clipboard()->setImage(img);
+	QVERIFY(composer->pasteFromClipboard());
+	QCOMPARE(composer->text(), u"[Image 1] "_s);
+	QTest::keyClick(window, Qt::Key_A, Qt::ControlModifier);
+	QTest::keyClick(window, Qt::Key_Delete);
+	QCOMPARE(composer->text(), QString());
+	QCOMPARE(composer->attachments()->rowCount(), 0);
+	QVERIFY(!textArea->property("canUndo").toBool());
+	QMetaObject::invokeMethod(textArea, "undo");
+	QCOMPARE(textArea->property("text").toString(), QString());
+	QCOMPARE(composer->text(), QString());
+
+	auto* contextMenu = textArea->findChild<QObject*>(u"composerContextMenu"_s);
+	auto* menuUndo = textArea->findChild<QObject*>(u"composerMenuUndo"_s);
+	auto* menuRedo = textArea->findChild<QObject*>(u"composerMenuRedo"_s);
+	auto* menuPaste = textArea->findChild<QObject*>(u"composerMenuPaste"_s);
+	QVERIFY(contextMenu && menuUndo && menuRedo && menuPaste);
+	QGuiApplication::clipboard()->setImage(img);
+	QMetaObject::invokeMethod(contextMenu, "open");
+	QTRY_VERIFY(contextMenu->property("visible").toBool());
+	QVERIFY(menuUndo->property("enabled").toBool());
+	QVERIFY(!menuRedo->property("enabled").toBool());
+	QVERIFY(menuPaste->property("enabled").toBool());
+	QMetaObject::invokeMethod(menuUndo, "triggered");
+	QMetaObject::invokeMethod(contextMenu, "close");
+	QCOMPARE(composer->text(), u"[Image 1] "_s);
+	QCOMPARE(textArea->property("text").toString(), u"[Image 1] "_s);
+	QCOMPARE(composer->attachments()->rowCount(), 1);
+	QVERIFY(menuRedo->property("enabled").toBool());
+	QMetaObject::invokeMethod(menuRedo, "triggered");
+	QCOMPARE(composer->text(), QString());
+	QCOMPARE(composer->attachments()->rowCount(), 0);
+	QMetaObject::invokeMethod(menuUndo, "triggered");
+	QCOMPARE(composer->text(), u"[Image 1] "_s);
+	QCOMPARE(composer->attachments()->rowCount(), 1);
+	QTest::keyClick(window, Qt::Key_End);
+	QMetaObject::invokeMethod(menuPaste, "triggered");
+	QCOMPARE(composer->text(), u"[Image 1] [Image 2] "_s);
+	QCOMPARE(composer->attachments()->rowCount(), 2);
+
+	// 5) ShellMode + attachment undo/redo round-trip end-to-end in Composer.qml.
+	composer->clearDraft();
+	typeText(u"!make"_s);
+	QVERIFY(composer->shellMode());
+	QVERIFY(composer->submit());
+	QVERIFY(!composer->shellMode());
+	QVERIFY(composer->pasteFromClipboard());
+	QCOMPARE(composer->attachments()->rowCount(), 1);
+	QTest::keyClick(window, Qt::Key_Home);
+	QTest::keyClick(window, Qt::Key_Up);
+	QVERIFY(composer->shellMode());
+	QCOMPARE(composer->text(), u"make"_s);
+	QCOMPARE(composer->attachments()->rowCount(), 0);
+	QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
+	QVERIFY(!composer->shellMode());
+	QCOMPARE(composer->text(), u"[Image 1] "_s);
+	QCOMPARE(composer->attachments()->rowCount(), 1);
+	QTest::keyClick(window, Qt::Key_Y, Qt::ControlModifier);
+	QVERIFY(composer->shellMode());
+	QCOMPARE(composer->text(), u"make"_s);
+	QCOMPARE(composer->attachments()->rowCount(), 0);
+	QVERIFY2(warningSpy.isEmpty(), "Composer undo/redo and token collision test emitted QML warnings");
 }
 
 QTEST_MAIN(TestMainWindow)

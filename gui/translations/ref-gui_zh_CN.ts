@@ -444,6 +444,41 @@
         <source>Waiting for the ref backend…</source>
         <translation>正在等待 ref 后端…</translation>
     </message>
+    <message>
+        <location filename="../src/app/Composer.qml" line="200"/>
+        <source>Undo</source>
+        <translation>撤销</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Composer.qml" line="206"/>
+        <source>Redo</source>
+        <translation>重做</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Composer.qml" line="213"/>
+        <source>Cut</source>
+        <translation>剪切</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Composer.qml" line="219"/>
+        <source>Copy</source>
+        <translation>复制</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Composer.qml" line="225"/>
+        <source>Paste</source>
+        <translation>粘贴</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Composer.qml" line="234"/>
+        <source>Delete</source>
+        <translation>删除</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Composer.qml" line="241"/>
+        <source>Select All</source>
+        <translation>全选</translation>
+    </message>
 </context>
 <context>
     <name>ComposerTags</name>
