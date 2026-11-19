@@ -1,6 +1,6 @@
 //! Anthropic Messages API (`POST {base}/messages`).
 
-use crate::error::stream_error;
+use crate::error::stream_error_json;
 use crate::sse::{SseEvent, data_values};
 use crate::util::{
     Assembler, DEFAULT_ANTHROPIC_BASE, IMAGE_OMITTED, NO_TOOL_OUTPUT, SEE_ATTACHED_IMAGE,
@@ -660,7 +660,7 @@ impl AnthropicState {
             "error" => {
                 let err = ev.get("error").unwrap_or(ev);
                 let (code, message) = error_fields(err);
-                return Err(stream_error(code.as_deref(), &message));
+                return Err(stream_error_json(code.as_deref(), &message, err, &[ev]));
             }
             _ => {} // ping and future events
         }
