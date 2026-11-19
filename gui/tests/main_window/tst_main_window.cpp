@@ -832,9 +832,9 @@ void TestMainWindow::statusLineRetryTooltipShowsFullErrorWithoutWarnings()
 	retryTip->setProperty("visible", true);
 	QTRY_VERIFY(retryTip->property("opened").toBool());
 	const qreal maxContentWidth = retryTip->property("maxContentWidth").toReal();
-	const qreal leftPadding = retryTip->property("leftPadding").toReal();
-	const qreal rightPadding = retryTip->property("rightPadding").toReal();
-	QVERIFY(retryTip->property("width").toReal() <= maxContentWidth + leftPadding + rightPadding + 0.5);
+	const qreal padX = retryTip->property("padX").toReal();
+	const qreal uiScale = retryTip->property("uiScale").toReal();
+	QVERIFY(retryTip->property("width").toReal() <= (maxContentWidth + 2.0 * padX) * uiScale + 0.5);
 	QCOMPARE(retryTip->property("text").toString(), fullError);
 
 	QObject* contextTip = nullptr;
@@ -2342,14 +2342,21 @@ void TestMainWindow::switchClicksWithHitPaddingInsideConfigFlickableAndResetButt
 		}
 		return nullptr;
 	};
-	const auto scrollIntoView = [](QQuickItem* scroller, QQuickItem* target) {
+	const auto scrollIntoView = [window](QQuickItem* scroller, QQuickItem* target) {
 		QQuickItem* contentItem = scroller->property("contentItem").value<QQuickItem*>();
 		QVERIFY(contentItem);
+		QTRY_VERIFY(scroller->property("contentHeight").toReal() + 1.0
+		            >= target->mapToItem(contentItem, QPointF(0.0, 0.0)).y() + target->height());
 		const QPointF inContent = target->mapToItem(contentItem, QPointF(0.0, 0.0));
 		const qreal viewH = scroller->height();
 		const qreal maxY = std::max(0.0, scroller->property("contentHeight").toReal() - viewH);
 		scroller->setProperty("contentY", std::clamp(inContent.y() - viewH / 2.0 + target->height() / 2.0, 0.0, maxY));
 		QCoreApplication::processEvents();
+		const QPointF targetCenter = target->mapToScene(QPointF(target->width() / 2.0, target->height() / 2.0));
+		const qreal scrollerTop = scroller->mapToScene(QPointF(0.0, 0.0)).y();
+		const qreal scrollerBottom = scrollerTop + viewH;
+		QVERIFY(targetCenter.y() > scrollerTop && targetCenter.y() < scrollerBottom);
+		QVERIFY(targetCenter.y() >= 0.0 && targetCenter.y() < window->height());
 	};
 
 	f.workspace->commands()->run(u"config"_s);
@@ -2363,6 +2370,16 @@ void TestMainWindow::switchClicksWithHitPaddingInsideConfigFlickableAndResetButt
 	QTRY_VERIFY(panel->property("shown").toBool() && qFuzzyCompare(panel->scale(), 1.0));
 	QQuickItem* scroller = findByTypePrefix(configDialog, "QQuickFlickable");
 	QVERIFY(scroller);
+	const auto waitFormRow = [scroller](QQuickItem* control) {
+		QQuickItem* contentItem = scroller->property("contentItem").value<QQuickItem*>();
+		QVERIFY(contentItem);
+		QQuickItem* slot = control ? control->parentItem() : nullptr;
+		QQuickItem* formRow = slot ? slot->parentItem() : nullptr;
+		QVERIFY(formRow);
+		QTRY_VERIFY(formRow->isVisible() && formRow->y() > 0.0
+		            && scroller->property("contentHeight").toReal()
+		                   >= formRow->mapToItem(contentItem, QPointF(0.0, 0.0)).y() + formRow->height());
+	};
 
 	// 1) Switch inside ConfigDialog Flickable responds to normal click and slight-drift click in hitArea padding.
 	auto* autoSwitch = findByName(configDialog, u"compactionAutoSwitch"_s);
@@ -2406,6 +2423,7 @@ void TestMainWindow::switchClicksWithHitPaddingInsideConfigFlickableAndResetButt
 	auto* chunkField = findByName(provSection, u"providerChunkTimeout_p1"_s);
 	auto* headersEd = findByName(provSection, u"providerHeadersEditor_p1"_s);
 	QVERIFY(ctxField && chunkField && headersEd);
+	waitFormRow(ctxField);
 	QCOMPARE(ctxField->property("value").toInt(), 64000);
 	QCOMPARE(chunkField->property("value").toInt(), 12000);
 	QCOMPARE(headersEd->property("entries").toList().size(), 1);
@@ -2486,6 +2504,7 @@ void TestMainWindow::switchClicksWithHitPaddingInsideConfigFlickableAndResetButt
 
 	QQuickItem* globalDelayInput = findByTypePrefix(globalDelayField, "QQuickTextInput");
 	QVERIFY(globalDelayInput);
+	waitFormRow(globalDelayField);
 	scrollIntoView(scroller, globalDelayField);
 	globalDelayInput->forceActiveFocus();
 	QTRY_VERIFY(globalDelayInput->hasActiveFocus());
@@ -2513,6 +2532,7 @@ void TestMainWindow::switchClicksWithHitPaddingInsideConfigFlickableAndResetButt
 	QCoreApplication::processEvents();
 	auto* agentDelayMap = findByName(agentsSection, u"agentDelayMap_build"_s);
 	QVERIFY(agentDelayMap);
+	waitFormRow(agentDelayMap->parentItem());
 	QCOMPARE(agentDelayMap->property("entries").toList().size(), 1);
 	QQuickItem* agentDelayKeyInput = findItem(agentDelayMap, [](QQuickItem* item) {
 		return QByteArray(item->metaObject()->className()).startsWith("QQuickTextInput")
@@ -2661,7 +2681,7 @@ void TestMainWindow::uiZoomSettingsShortcutsResizeAndPopupsScaleCleanly()
 	}());
 	auto* panel = findByTypePrefix(settingsDialog, "QQuickRectangle");
 	QVERIFY(panel);
-	QTRY_VERIFY(qFuzzyCompare(panel->scale(), 1.0));
+	QTRY_VERIFY(qFuzzyCompare(panel->scale(), 1.0) && qFuzzyCompare(panel->property("dropOffset").toReal() + 1.0, 1.0));
 
 	auto* outBtn = findByName(settingsDialog, u"uiScaleOutButton"_s);
 	auto* inBtn = findByName(settingsDialog, u"uiScaleInButton"_s);
@@ -2678,6 +2698,30 @@ void TestMainWindow::uiZoomSettingsShortcutsResizeAndPopupsScaleCleanly()
 	QVERIFY(resetBtn->isVisible());
 	QVERIFY(qFuzzyCompare(scaledRoot->scale(), 1.1));
 	QVERIFY(qFuzzyCompare(scaledRoot->width(), window->width() / 1.1));
+	QPointF prevResetCenter;
+	bool hasPrevResetCenter = false;
+	QTRY_VERIFY([&] {
+		if(!resetBtn->isVisible() || resetBtn->width() <= 0.0 || resetBtn->height() <= 0.0)
+		{
+			hasPrevResetCenter = false;
+			return false;
+		}
+		if(outBtn->x() < resetBtn->width() + 7.0)
+		{
+			hasPrevResetCenter = false;
+			return false;
+		}
+		const QPointF center = resetBtn->mapToScene(QPointF(resetBtn->width() / 2.0, resetBtn->height() / 2.0));
+		if(center.x() < 0.0 || center.x() >= window->width() || center.y() < 0.0 || center.y() >= window->height())
+		{
+			hasPrevResetCenter = false;
+			return false;
+		}
+		const bool settled = hasPrevResetCenter && center == prevResetCenter;
+		prevResetCenter = center;
+		hasPrevResetCenter = true;
+		return settled;
+	}());
 
 	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
 	                  resetBtn->mapToScene(QPointF(resetBtn->width() / 2.0, resetBtn->height() / 2.0)).toPoint());
@@ -2727,11 +2771,12 @@ void TestMainWindow::uiZoomSettingsShortcutsResizeAndPopupsScaleCleanly()
 	}());
 	QQuickItem* profileSelect = findByName(configDialog, u"configProfileSelect"_s);
 	QVERIFY(profileSelect);
+	QTRY_VERIFY(profileSelect->property("enabled").toBool());
 	QMetaObject::invokeMethod(profileSelect, "openPopup");
 	QObject* selectPopup = nullptr;
 	for(QObject* ch : profileSelect->children())
 	{
-		if(QByteArray(ch->metaObject()->className()).startsWith("QQuickPopup"))
+		if(ch->objectName() == u"selectPopup"_s)
 		{
 			selectPopup = ch;
 			break;

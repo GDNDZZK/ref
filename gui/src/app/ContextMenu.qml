@@ -10,7 +10,7 @@ Popup {
 	property var entries: []
 	readonly property int textInset: 14
 	readonly property int menuPadding: 4
-	readonly property real uiScale: Workspace.settings.uiScale
+	readonly property real uiScale: UiScale.factor
 
 	signal triggered(int index)
 

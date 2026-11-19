@@ -272,7 +272,8 @@ FocusScope {
 
 	Popup {
 		id: popup
-		readonly property real uiScale: Workspace.settings.uiScale
+		objectName: "selectPopup"
+		readonly property real uiScale: UiScale.factor
 
 		y: box.height + 4
 		width: popupInner.width * uiScale
