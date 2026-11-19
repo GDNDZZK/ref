@@ -1,6 +1,8 @@
 //! Multi-line prompt editor: CJK-aware cursor, soft wrap, selection, paste tokens, image
 //! attachments, history and undo.
 
+use std::sync::Arc;
+
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -38,6 +40,35 @@ pub struct Attachment {
     pub name: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct Snapshot {
+    text: String,
+    cursor: usize,
+    pastes: Arc<Vec<Paste>>,
+    images: Arc<Vec<Attachment>>,
+    paste_seq: usize,
+    image_seq: usize,
+}
+
+fn pastes_eq(a: &[Paste], b: &[Paste]) -> bool {
+    a.len() == b.len()
+        && a.iter()
+            .zip(b)
+            .all(|(x, y)| x.token == y.token && x.text == y.text)
+}
+
+fn images_eq(a: &[Attachment], b: &[Attachment]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(x, y)| {
+            x.token == y.token
+                && x.name == y.name
+                && x.image.mime == y.image.mime
+                && x.image.data == y.image.data
+                && x.image.id == y.image.id
+                && x.image.size == y.image.size
+        })
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Editor {
     pub text: String,
@@ -51,8 +82,8 @@ pub struct Editor {
     image_seq: usize,
     /// Preferred visual column for up/down.
     pref_col: Option<usize>,
-    undo: Vec<(String, usize)>,
-    redo: Vec<(String, usize)>,
+    undo: Vec<Snapshot>,
+    redo: Vec<Snapshot>,
     /// Width used by the last layout (for up/down).
     pub last_width: usize,
     /// Scroll offset of visible rows.
@@ -84,32 +115,96 @@ impl Editor {
         self.text.is_empty() && self.images.is_empty()
     }
 
+    fn matches_snapshot(&self, s: &Snapshot) -> bool {
+        s.text == self.text
+            && s.paste_seq == self.paste_seq
+            && s.image_seq == self.image_seq
+            && pastes_eq(&s.pastes, &self.pastes)
+            && images_eq(&s.images, &self.images)
+    }
+
+    fn capture_snapshot(&self) -> Snapshot {
+        let pastes = self
+            .undo
+            .last()
+            .filter(|s| pastes_eq(&s.pastes, &self.pastes))
+            .map(|s| Arc::clone(&s.pastes))
+            .unwrap_or_else(|| Arc::new(self.pastes.clone()));
+        let images = self
+            .undo
+            .last()
+            .filter(|s| images_eq(&s.images, &self.images))
+            .map(|s| Arc::clone(&s.images))
+            .unwrap_or_else(|| Arc::new(self.images.clone()));
+        Snapshot {
+            text: self.text.clone(),
+            cursor: self.cursor,
+            pastes,
+            images,
+            paste_seq: self.paste_seq,
+            image_seq: self.image_seq,
+        }
+    }
+
     fn snapshot(&mut self) {
-        if self.undo.last().is_some_and(|(t, _)| *t == self.text) {
+        if self.undo.last().is_some_and(|s| self.matches_snapshot(s)) {
             return;
         }
-        self.undo.push((self.text.clone(), self.cursor));
+        let snap = self.capture_snapshot();
+        self.undo.push(snap);
         if self.undo.len() > UNDO_LIMIT {
             self.undo.remove(0);
         }
         self.redo.clear();
     }
 
+    fn swap_snapshot(&mut self, snap: Snapshot) -> Snapshot {
+        let text = std::mem::replace(&mut self.text, snap.text);
+        let cursor = self.cursor;
+        let paste_seq = std::mem::replace(&mut self.paste_seq, snap.paste_seq);
+        let image_seq = std::mem::replace(&mut self.image_seq, snap.image_seq);
+
+        let pastes = if pastes_eq(&snap.pastes, &self.pastes) {
+            Arc::clone(&snap.pastes)
+        } else {
+            let prev = std::mem::take(&mut self.pastes);
+            self.pastes = Arc::try_unwrap(snap.pastes).unwrap_or_else(|a| (*a).clone());
+            Arc::new(prev)
+        };
+
+        let images = if images_eq(&snap.images, &self.images) {
+            Arc::clone(&snap.images)
+        } else {
+            let prev = std::mem::take(&mut self.images);
+            self.images = Arc::try_unwrap(snap.images).unwrap_or_else(|a| (*a).clone());
+            Arc::new(prev)
+        };
+
+        self.cursor = snap.cursor.min(self.text.len());
+        self.anchor = None;
+        self.pref_col = None;
+
+        Snapshot {
+            text,
+            cursor,
+            pastes,
+            images,
+            paste_seq,
+            image_seq,
+        }
+    }
+
     pub fn undo(&mut self) {
-        if let Some((t, c)) = self.undo.pop() {
-            self.redo
-                .push((std::mem::replace(&mut self.text, t), self.cursor));
-            self.cursor = c.min(self.text.len());
-            self.anchor = None;
+        if let Some(snap) = self.undo.pop() {
+            let redo = self.swap_snapshot(snap);
+            self.redo.push(redo);
         }
     }
 
     pub fn redo(&mut self) {
-        if let Some((t, c)) = self.redo.pop() {
-            self.undo
-                .push((std::mem::replace(&mut self.text, t), self.cursor));
-            self.cursor = c.min(self.text.len());
-            self.anchor = None;
+        if let Some(snap) = self.redo.pop() {
+            let undo = self.swap_snapshot(snap);
+            self.undo.push(undo);
         }
     }
 
@@ -123,8 +218,7 @@ impl Editor {
         self.gc_tokens();
     }
 
-    pub fn clear(&mut self) {
-        self.snapshot();
+    fn reset_fields(&mut self) {
         self.text.clear();
         self.cursor = 0;
         self.anchor = None;
@@ -135,6 +229,18 @@ impl Editor {
         self.scroll = 0;
         self.hscroll = 0;
         self.press_off = None;
+    }
+
+    pub fn clear(&mut self) {
+        self.snapshot();
+        self.reset_fields();
+    }
+
+    /// Replaces the entire editor contents with a single image attachment as one undo step.
+    pub fn replace_with_image(&mut self, image: ImageData, name: Option<String>) {
+        self.snapshot();
+        self.reset_fields();
+        self.attach_image_raw(image, name);
     }
 
     // -- selection ----------------------------------------------------------
@@ -151,14 +257,22 @@ impl Editor {
         self.selection().map(|(a, b)| self.text[a..b].to_string())
     }
 
-    fn delete_selection(&mut self) -> bool {
+    fn delete_selection_raw(&mut self) -> bool {
         if let Some((a, b)) = self.selection() {
-            self.snapshot();
             self.text.replace_range(a..b, "");
             self.cursor = a;
             self.anchor = None;
             self.gc_tokens();
             return true;
+        }
+        self.anchor = None;
+        false
+    }
+
+    fn delete_selection(&mut self) -> bool {
+        if self.selection().is_some() {
+            self.snapshot();
+            return self.delete_selection_raw();
         }
         self.anchor = None;
         false
@@ -184,6 +298,10 @@ impl Editor {
         if !self.delete_selection() {
             self.snapshot_coalesced(s);
         }
+        self.insert_raw(s);
+    }
+
+    fn insert_raw(&mut self, s: &str) {
         let s = s.replace("\r\n", "\n").replace('\r', "\n");
         let s = expand_tabs(&s);
         self.text.insert_str(self.cursor, &s);
@@ -548,6 +666,8 @@ impl Editor {
         let s = crate::text::sanitize(&s);
         let lines = s.lines().count();
         if lines >= PASTE_COLLAPSE_LINES || s.chars().count() > PASTE_COLLAPSE_CHARS {
+            self.snapshot();
+            self.delete_selection_raw();
             self.paste_seq += 1;
             let token = if lines > 1 {
                 format!("[Pasted ~{lines} lines]")
@@ -564,13 +684,19 @@ impl Editor {
                 token: token.clone(),
                 text: s,
             });
-            self.insert(&token);
+            self.insert_raw(&token);
         } else {
             self.insert(&s);
         }
     }
 
     pub fn attach_image(&mut self, image: ImageData, name: Option<String>) {
+        self.snapshot();
+        self.delete_selection_raw();
+        self.attach_image_raw(image, name);
+    }
+
+    fn attach_image_raw(&mut self, image: ImageData, name: Option<String>) {
         self.image_seq += 1;
         let token = image_token(self.image_seq);
         self.images.push(Attachment {
@@ -583,7 +709,7 @@ impl Editor {
         } else {
             ""
         };
-        self.insert(&format!("{pad}{token} "));
+        self.insert_raw(&format!("{pad}{token} "));
     }
 
     /// Puts a previously sent prompt back: fills an empty editor, otherwise appends it after a
@@ -623,7 +749,7 @@ impl Editor {
         self.anchor = None;
         self.pref_col = None;
         for (image, name) in images {
-            self.attach_image(image, name);
+            self.attach_image_raw(image, name);
         }
     }
 
@@ -656,6 +782,7 @@ impl Editor {
             .collect();
         self.clear();
         self.undo.clear();
+        self.redo.clear();
         Submit { text, images }
     }
 
@@ -1054,6 +1181,8 @@ impl Editor {
         self.text.replace_range(start..self.cursor, s);
         self.cursor = start + s.len();
         self.anchor = None;
+        self.pref_col = None;
+        self.gc_tokens();
     }
 }
 
@@ -1517,5 +1646,152 @@ mod tests {
         e.attach_image(img("7"), None);
         assert_eq!(e.text, "[Image 1] ");
         assert_eq!(e.images[0].token, "[Image 1]");
+    }
+
+    #[test]
+    fn undo_redo_syncs_image_attachment_and_seq() {
+        let mut e = Editor::default();
+        e.attach_image(img("a"), Some("a.png".into()));
+        assert_eq!(e.text, "[Image 1] ");
+        assert_eq!(e.images.len(), 1);
+        assert_eq!(e.image_seq, 1);
+
+        e.undo();
+        assert!(e.text.is_empty());
+        assert!(e.images.is_empty());
+        assert_eq!(e.image_seq, 0);
+        assert!(e.is_empty());
+
+        e.redo();
+        assert_eq!(e.text, "[Image 1] ");
+        assert_eq!(e.images.len(), 1);
+        assert_eq!(e.images[0].token, "[Image 1]");
+        assert_eq!(e.image_seq, 1);
+
+        // Undoing back to empty lets the next attachment reuse [Image 1].
+        e.undo();
+        assert!(e.is_empty());
+        e.attach_image(img("b"), None);
+        assert_eq!(e.text, "[Image 1] ");
+        assert_eq!(e.images.len(), 1);
+        assert_eq!(e.images[0].image.data, "b");
+        assert_eq!(e.image_seq, 1);
+    }
+
+    #[test]
+    fn undo_after_deleting_image_or_clear_restores_attachment() {
+        // Backspace deletes the token; undo restores both text and attachment.
+        let mut e = Editor::default();
+        e.attach_image(img("a"), None);
+        e.backspace();
+        e.backspace();
+        assert!(e.is_empty());
+        assert_eq!(e.image_seq, 0);
+        e.undo();
+        assert_eq!(e.text, "[Image 1]");
+        assert_eq!(e.images.len(), 1);
+        assert_eq!(e.image_seq, 1);
+        e.undo();
+        assert_eq!(e.text, "[Image 1] ");
+        assert_eq!(e.images.len(), 1);
+        assert_eq!(e.image_seq, 1);
+        e.attach_image(img("b"), None);
+        assert_eq!(e.text, "[Image 1] [Image 2] ");
+
+        // Forward delete drops the token; undo restores attachment and seq.
+        let mut e = Editor::default();
+        e.attach_image(img("a"), None);
+        e.buf_start();
+        e.delete();
+        assert_eq!(e.text, " ");
+        assert!(e.images.is_empty());
+        assert_eq!(e.image_seq, 0);
+        e.undo();
+        assert_eq!(e.text, "[Image 1] ");
+        assert_eq!(e.images.len(), 1);
+        assert_eq!(e.image_seq, 1);
+
+        // clear() drops attachments; undo restores text, attachment, and seq.
+        e.buf_end();
+        e.insert("hi");
+        e.clear();
+        assert!(e.is_empty());
+        assert_eq!(e.image_seq, 0);
+        e.undo();
+        assert_eq!(e.text, "[Image 1] hi");
+        assert_eq!(e.images.len(), 1);
+        assert_eq!(e.images[0].token, "[Image 1]");
+        assert_eq!(e.image_seq, 1);
+        let sub = e.submit();
+        assert_eq!(sub.text, "[Image 1] hi");
+        assert_eq!(sub.images.len(), 1);
+    }
+
+    #[test]
+    fn undo_redo_syncs_pastes_and_shares_image_arc() {
+        let mut e = Editor::default();
+        e.paste("line1\nline2\nline3\n");
+        assert_eq!(e.text, "[Pasted ~3 lines]");
+        assert_eq!(e.pastes.len(), 1);
+        assert_eq!(e.paste_seq, 1);
+        e.undo();
+        assert!(e.text.is_empty());
+        assert!(e.pastes.is_empty());
+        assert_eq!(e.paste_seq, 0);
+        e.redo();
+        assert_eq!(e.text, "[Pasted ~3 lines]");
+        assert_eq!(e.pastes.len(), 1);
+        assert_eq!(e.paste_seq, 1);
+        assert_eq!(e.submit().text, "line1\nline2\nline3\n");
+
+        // Typing 200 words with an attached image reuses the same Arc across snapshots.
+        let mut e = Editor::default();
+        e.attach_image(img("big-payload"), None);
+        for i in 0..210 {
+            e.insert(&format!("w{i} "));
+        }
+        let image_arcs: Vec<_> = e
+            .undo
+            .iter()
+            .filter(|s| !s.images.is_empty())
+            .map(|s| &s.images)
+            .collect();
+        assert!(image_arcs.len() >= 190);
+        let first = image_arcs[0];
+        assert!(image_arcs.iter().all(|a| Arc::ptr_eq(first, a)));
+    }
+
+    #[test]
+    fn replace_before_cursor_gcs_overwritten_tokens_and_resets_image_seq() {
+        let mut e = Editor::default();
+        e.attach_image(img("1"), None);
+        e.insert("/cmd arg");
+        e.replace_before_cursor(0, "/other ");
+        assert_eq!(e.text, "/other ");
+        assert!(e.images.is_empty());
+        assert_eq!(e.image_seq, 0);
+
+        // Next attachment starts back at [Image 1].
+        e.attach_image(img("2"), None);
+        assert_eq!(e.text, "/other [Image 1] ");
+        assert_eq!(e.images.len(), 1);
+        assert_eq!(e.images[0].token, "[Image 1]");
+
+        // Undo reverts attach_image and then replace_before_cursor, restoring [Image 1] + img("1").
+        e.undo();
+        assert_eq!(e.text, "/other ");
+        assert!(e.images.is_empty());
+        e.undo();
+        assert_eq!(e.text, "[Image 1] /cmd arg");
+        assert_eq!(e.images.len(), 1);
+        assert_eq!(e.images[0].image.data, "1");
+        assert_eq!(e.image_seq, 1);
+
+        // Overwritten paste tokens are also garbage-collected.
+        let mut e = Editor::default();
+        e.paste("a\nb\nc\n");
+        assert_eq!(e.pastes.len(), 1);
+        e.replace_before_cursor(0, "done");
+        assert!(e.pastes.is_empty());
     }
 }
