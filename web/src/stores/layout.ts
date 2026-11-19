@@ -31,7 +31,9 @@ export const useLayoutStore = defineStore('layout', () => {
     ),
   )
   const sidebarWidth = computed(() => clampWidth(settings.settings.sidebarWidth))
-
+  const sidebarTodoExpanded = computed(() => settings.settings.sidebarTodoExpanded)
+  const sidebarRunningExpanded = computed(() => settings.settings.sidebarRunningExpanded)
+  const sidebarHistoryExpanded = computed(() => settings.settings.sidebarHistoryExpanded)
   function clampWidth(value: number): number {
     return clamp(Math.round(value), metrics.sidebarMinWidth, maxSidebarWidth.value)
   }
@@ -53,6 +55,17 @@ export const useLayoutStore = defineStore('layout', () => {
     else settings.update((draft) => (draft.sidebarOpen = !draft.sidebarOpen))
   }
 
+  function toggleSidebarTodo(): void {
+    settings.update((draft) => (draft.sidebarTodoExpanded = !draft.sidebarTodoExpanded))
+  }
+
+  function toggleSidebarRunning(): void {
+    settings.update((draft) => (draft.sidebarRunningExpanded = !draft.sidebarRunningExpanded))
+  }
+
+  function toggleSidebarHistory(): void {
+    settings.update((draft) => (draft.sidebarHistoryExpanded = !draft.sidebarHistoryExpanded))
+  }
   // After choosing something in the drawer, so that the content is visible again.
   function closeDrawer(): void {
     drawerOpen.value = false
@@ -62,9 +75,15 @@ export const useLayoutStore = defineStore('layout', () => {
     narrow,
     sidebarVisible,
     sidebarWidth,
+    sidebarTodoExpanded,
+    sidebarRunningExpanded,
+    sidebarHistoryExpanded,
     setSidebarWidth,
     resetSidebarWidth,
     toggleSidebar,
+    toggleSidebarTodo,
+    toggleSidebarRunning,
+    toggleSidebarHistory,
     closeDrawer,
   }
 })

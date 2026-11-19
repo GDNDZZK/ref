@@ -60,6 +60,11 @@ async fn bind_requested(host: &str, port: u16) -> anyhow::Result<TcpListener> {
     }
 }
 
+fn is_random_port_busy(error: &std::io::Error) -> bool {
+    matches!(error.kind(), std::io::ErrorKind::AddrInUse)
+        || (cfg!(windows) && error.kind() == std::io::ErrorKind::PermissionDenied)
+}
+
 /// Binds the real listener at each try, so no other program can take the port between
 /// "free" and "bound".
 async fn bind_random(host: &str) -> anyhow::Result<TcpListener> {
@@ -67,7 +72,7 @@ async fn bind_random(host: &str) -> anyhow::Result<TcpListener> {
         let port = rand::rng().random_range(RANDOM_PORTS);
         match TcpListener::bind((host, port)).await {
             Ok(listener) => return Ok(listener),
-            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => continue,
+            Err(e) if is_random_port_busy(&e) => continue,
             Err(e) => return Err(e).with_context(|| format!("cannot listen on {host}:{port}")),
         }
     }
@@ -172,5 +177,17 @@ mod tests {
             assert_eq!(read_last_port(&dir), expected, "{text:?}");
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn random_port_busy_retries_addr_in_use_and_windows_permission_denied() {
+        let addr_in_use = std::io::Error::from(std::io::ErrorKind::AddrInUse);
+        assert!(is_random_port_busy(&addr_in_use));
+
+        let permission_denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        assert_eq!(is_random_port_busy(&permission_denied), cfg!(windows));
+
+        let addr_not_avail = std::io::Error::from(std::io::ErrorKind::AddrNotAvailable);
+        assert!(!is_random_port_busy(&addr_not_avail));
     }
 }

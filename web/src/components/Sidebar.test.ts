@@ -284,4 +284,72 @@ describe('Sidebar', () => {
     expect(aside.classes()).not.toContain('resizing')
     wrapper.unmount()
   })
+
+  it('toggles Todo, Running, and History sections, persists state, and keeps resize working', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1200 })
+    const { workspace, wrapper } = mountSidebar()
+    const layout = useLayoutStore()
+    if (!layout.sidebarVisible) layout.toggleSidebar()
+    workspace.onFrame({
+      kind: 'sessions',
+      sessions: [info({ id: 's1', name: 'alpha', todos: [{ content: 'step 1', status: 'pending' }] })],
+    })
+    workspace.currentId = 's1'
+    await nextTick()
+
+    const toggles = wrapper.findAll('button.section-toggle')
+    expect(toggles).toHaveLength(3)
+    const [todoToggle, runningToggle, historyToggle] = toggles as [
+      (typeof toggles)[number],
+      (typeof toggles)[number],
+      (typeof toggles)[number],
+    ]
+    const todoBody = wrapper.get('.todo-body')
+    const runningSlot = wrapper.get('.running-slot')
+    const historySlot = wrapper.get('.history-slot')
+    const lists = wrapper.get('.lists')
+
+    expect(todoToggle.attributes('aria-expanded')).toBe('true')
+    expect(runningToggle.attributes('aria-expanded')).toBe('true')
+    expect(historyToggle.attributes('aria-expanded')).toBe('true')
+    expect(todoBody.attributes('inert')).toBeUndefined()
+    expect(runningSlot.attributes('inert')).toBeUndefined()
+    expect(historySlot.attributes('inert')).toBeUndefined()
+    expect(lists.classes()).not.toContain('history-collapsed')
+
+    await todoToggle.trigger('click')
+    expect(todoToggle.attributes('aria-expanded')).toBe('false')
+    expect(todoBody.attributes('inert')).toBeDefined()
+    expect(todoBody.classes()).not.toContain('open')
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({ sidebarTodoExpanded: false })
+
+    await runningToggle.trigger('click')
+    expect(runningToggle.attributes('aria-expanded')).toBe('false')
+    expect(runningSlot.attributes('inert')).toBeDefined()
+    expect(runningSlot.classes()).not.toContain('open')
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({ sidebarRunningExpanded: false })
+
+    await historyToggle.trigger('click')
+    expect(historyToggle.attributes('aria-expanded')).toBe('false')
+    expect(historySlot.attributes('inert')).toBeDefined()
+    expect(historySlot.classes()).not.toContain('open')
+    expect(lists.classes()).toContain('history-collapsed')
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({ sidebarHistoryExpanded: false })
+
+    // Resizing still works when sections are collapsed, and double-click resets width.
+    const handle = wrapper.get('.resize-handle')
+    await handle.trigger('pointerdown', { button: 0, pointerId: 4, clientX: metrics.sidebarWidth })
+    await handle.trigger('pointermove', { pointerId: 4, clientX: 320 })
+    await handle.trigger('pointerup', { pointerId: 4 })
+    expect(layout.sidebarWidth).toBe(320)
+    await handle.trigger('dblclick')
+    expect(layout.sidebarWidth).toBe(metrics.sidebarWidth)
+
+    // Expand History back and verify class + inert clear.
+    await historyToggle.trigger('click')
+    expect(historyToggle.attributes('aria-expanded')).toBe('true')
+    expect(historySlot.attributes('inert')).toBeUndefined()
+    expect(lists.classes()).not.toContain('history-collapsed')
+    wrapper.unmount()
+  })
 })
