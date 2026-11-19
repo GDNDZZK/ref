@@ -64,6 +64,7 @@ public:
 	}
 
 	void setMessages(const QString& id, const QJsonArray& messages) { m_messages.insert(id, messages); }
+	void setTodos(const QString& id, const QJsonArray& todos) { m_sessions[id][u"todos"_s] = todos; }
 	QString savedConfigRawText() const { return m_configRawText; }
 	void setConfigRawText(const QString& text) { m_configRawText = text; }
 	int saveConfigCalls() const { return m_saveConfigCalls; }
@@ -386,6 +387,7 @@ private slots:
 	void tableBlockRendersAndSelectionLeavesAboveRowsUntouched();
 	void shimmerTextModelsHoverCtrlTAtomicImageAndCompletionsWork();
 	void splitJumpToEndResizeBlurFadeAndSidebarDragWork();
+	void sidebarSectionsCollapseExpandAndResizeWithoutOscillation();
 };
 
 void TestMainWindow::initTestCase()
@@ -1846,12 +1848,14 @@ void TestMainWindow::splitJumpToEndResizeBlurFadeAndSidebarDragWork()
 	QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, hResetCenter);
 	QTest::mouseMove(window, hResetCenter + QPoint(40, 0));
 	QTRY_VERIFY(sidebar->property("resizing").toBool());
+	const int draggedWidth = f.workspace->settings()->sidebarWidth();
+	QCOMPARE(draggedWidth, 304);
 	f.workspace->commands()->run(u"sidebar"_s);
 	QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, hResetCenter + QPoint(40, 0));
 	QTRY_VERIFY(!sidebar->property("resizing").toBool() && !handle->isVisible());
 	QTRY_COMPARE(qRound(sidebar->width()), 0);
 	f.workspace->commands()->run(u"sidebar"_s);
-	QTRY_COMPARE(qRound(sidebar->width()), 264);
+	QTRY_COMPARE(qRound(sidebar->width()), draggedWidth);
 	// 2) Enter split view, click jumpToEnd on unfocused tile without opening Composer.
 	f.workspace->toggleSplit();
 	QQuickItem* tile = nullptr;
@@ -1885,5 +1889,142 @@ void TestMainWindow::splitJumpToEndResizeBlurFadeAndSidebarDragWork()
 	QTRY_VERIFY(!tile->property("resizingLayout").toBool() && qFuzzyCompare(pane->property("opacity").toReal(), 1.0));
 	QVERIFY2(warningSpy.isEmpty(), "Sidebar drag, jumpToEnd, or split resize blur-fade emitted QML warnings");
 }
+
+void TestMainWindow::sidebarSectionsCollapseExpandAndResizeWithoutOscillation()
+{
+	MainFixture f;
+	const QJsonArray todos{
+		QJsonObject{{u"content"_s, u"Inspect sidebar"_s}, {u"status"_s, u"completed"_s}},
+		QJsonObject{{u"content"_s, u"Add collapse sections"_s}, {u"status"_s, u"in_progress"_s}},
+	};
+	f.stub.setTodos(u"ses_a"_s, todos);
+	QJsonArray sessions;
+	QJsonObject sesA = sessionInfoJson(u"ses_a"_s, {.title = u"Session ses_a"_s, .createdAt = 1});
+	sesA[u"todos"_s] = todos;
+	sessions.append(sesA);
+	sessions.append(sessionInfoJson(u"ses_b"_s, {.title = u"Session ses_b"_s, .createdAt = 2}));
+	for(int i = 0; i < 10; ++i)
+	{
+		const QString id = u"ses_extra_%1"_s.arg(i);
+		f.stub.add(id, 3 + i);
+		sessions.append(sessionInfoJson(id, {.title = u"Session "_s + id, .createdAt = 3 + i}));
+	}
+	f.fake.send({{u"kind"_s, u"sessions"_s}, {u"sessions"_s, sessions}});
+	f.fake.send({{u"kind"_s, u"event"_s}, {u"session_id"_s, u"ses_a"_s}, {u"event"_s, QJsonObject{{u"type"_s, u"info"_s}, {u"info"_s, sesA}}}});
+	QTRY_COMPARE(f.workspace->current()->todoTotal(), 2);
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+	window->requestActivate();
+
+	const auto findByName = [](QQuickItem* root, const QString& name) {
+		return findItem(root, [&name](QQuickItem* item) { return item->objectName() == name; });
+	};
+	auto* sidebar = findByTypePrefix(window->contentItem(), "Sidebar_QMLTYPE");
+	auto* handle = findByName(window->contentItem(), u"sidebarResizeHandle"_s);
+	QVERIFY(sidebar && handle);
+	QCOMPARE(qRound(sidebar->width()), 264);
+
+	// 1) Pixel-by-pixel drag increases width monotonically without oscillation, and double-click resets to 264.
+	const QPoint hCenter = handle->mapToScene(QPointF(handle->width() / 2.0, handle->height() / 2.0)).toPoint();
+	QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, hCenter);
+	QTest::mouseMove(window, hCenter + QPoint(10, 0));
+	QTRY_COMPARE(f.workspace->settings()->sidebarWidth(), 274);
+	QTest::mouseMove(window, hCenter + QPoint(20, 0));
+	QCOMPARE(f.workspace->settings()->sidebarWidth(), 284);
+	QTest::mouseMove(window, hCenter + QPoint(21, 0));
+	QCOMPARE(f.workspace->settings()->sidebarWidth(), 285);
+	QTest::mouseMove(window, hCenter + QPoint(80, 0));
+	QCOMPARE(f.workspace->settings()->sidebarWidth(), 344);
+	QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, hCenter + QPoint(80, 0));
+	QTRY_COMPARE(qRound(sidebar->width()), 344);
+
+	const QPoint hNewCenter = handle->mapToScene(QPointF(handle->width() / 2.0, handle->height() / 2.0)).toPoint();
+	QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, hNewCenter);
+	QTRY_COMPARE(f.workspace->settings()->sidebarWidth(), 264);
+	QTRY_COMPARE(qRound(sidebar->width()), 264);
+
+	// 2) Todo, Running, and History sections collapse/expand on header click and share height dynamically.
+	auto* todoSection = findByName(sidebar, u"todoSection"_s);
+	auto* todoHeader = findByName(sidebar, u"todoSectionHeader"_s);
+	auto* todoFlickable = findByName(sidebar, u"todoListFlickable"_s);
+	auto* runningHeader = findByName(sidebar, u"runningSectionHeader"_s);
+	auto* runningList = findByName(sidebar, u"runningList"_s);
+	auto* historyHeader = findByName(sidebar, u"historySectionHeader"_s);
+	auto* historyBody = findByName(sidebar, u"historyBody"_s);
+	QVERIFY(todoSection && todoHeader && todoFlickable && runningHeader && runningList && historyHeader && historyBody);
+	QTRY_VERIFY(todoSection->isVisible());
+	QTRY_VERIFY(todoFlickable->isVisible());
+	QTRY_VERIFY(runningList->isVisible());
+	QTRY_VERIFY(historyBody->isVisible());
+	const qreal todoExpandedHeight = todoSection->height();
+	const qreal runningHeightWithHistory = runningList->height();
+	const qreal historyBodyInitialHeight = historyBody->height();
+	QVERIFY(todoExpandedHeight > todoHeader->height());
+	QVERIFY(runningHeightWithHistory > 0.0);
+	QVERIFY(historyBodyInitialHeight > 0.0);
+
+	const auto clickCenter = [&](QQuickItem* item) {
+		const QPoint pt = item->mapToScene(QPointF(item->width() / 2.0, item->height() / 2.0)).toPoint();
+		QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, pt);
+	};
+
+	// Collapse & expand Todo.
+	clickCenter(todoHeader);
+	QVERIFY(!f.workspace->settings()->sidebarTodoExpanded());
+	QTRY_VERIFY(!todoFlickable->isVisible());
+	QTRY_COMPARE(qRound(todoSection->height()), qRound(todoHeader->height()));
+	QVERIFY(todoHeader->isVisible());
+
+	clickCenter(todoHeader);
+	QVERIFY(f.workspace->settings()->sidebarTodoExpanded());
+	QTRY_VERIFY(todoFlickable->isVisible());
+	QTRY_COMPARE(qRound(todoSection->height()), qRound(todoExpandedHeight));
+
+	// Focus history search input, then collapse History -> clears focus and lets Running claim freed height.
+	auto* searchInput = findByTypePrefix(historyBody, "QQuickTextInput");
+	QVERIFY(searchInput);
+	searchInput->forceActiveFocus();
+	QTRY_VERIFY(searchInput->hasActiveFocus());
+
+	clickCenter(historyHeader);
+	QVERIFY(!f.workspace->settings()->sidebarHistoryExpanded());
+	QVERIFY(!searchInput->hasActiveFocus());
+	QTRY_VERIFY(!historyBody->isVisible());
+	QVERIFY(historyHeader->isVisible());
+	QTRY_VERIFY(runningList->height() > runningHeightWithHistory + 40.0);
+
+	// Collapse Running -> Running list hides while its header remains visible.
+	clickCenter(runningHeader);
+	QVERIFY(!f.workspace->settings()->sidebarRunningExpanded());
+	QTRY_VERIFY(!runningList->isVisible());
+	QVERIFY(runningHeader->isVisible());
+
+	// Expand History while Running is collapsed -> History claims the freed space.
+	clickCenter(historyHeader);
+	QVERIFY(f.workspace->settings()->sidebarHistoryExpanded());
+	QTRY_VERIFY(historyBody->isVisible());
+	QTRY_VERIFY(historyBody->height() > historyBodyInitialHeight + 40.0);
+
+	// Expand Running -> restores original split between Running and History.
+	clickCenter(runningHeader);
+	QVERIFY(f.workspace->settings()->sidebarRunningExpanded());
+	QTRY_VERIFY(runningList->isVisible());
+	QTRY_COMPARE(qRound(runningList->height()), qRound(runningHeightWithHistory));
+
+	QVERIFY2(warningSpy.isEmpty(), "Sidebar collapse/expand or drag emitted QML warnings");
+}
+
 QTEST_MAIN(TestMainWindow)
 #include "tst_main_window.moc"
