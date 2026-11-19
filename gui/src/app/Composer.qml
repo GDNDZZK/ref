@@ -1,6 +1,6 @@
 // Adapted from an early version of LightBlueCube/qutie
 import QtQuick
-import QtQuick.Controls.Basic
+import QtQuick.Controls.Basic as Basic
 import RefGui
 
 // Message input of one session. Enter sends, Shift+Enter inserts a line break. While a reply
@@ -154,7 +154,7 @@ Item {
 			onRemoveRequested: row => composer.model.removeAttachment(row)
 		}
 
-		ScrollView {
+		Basic.ScrollView {
 			anchors {
 				left: parent.left
 				right: parent.right
@@ -165,9 +165,10 @@ Item {
 			}
 			height: Math.min(input.implicitHeight, composer.maxInputHeight)
 
-			TextArea {
+			Basic.TextArea {
 				id: input
 				property bool syncing: false
+				property bool pasteMenuEnabled: false
 				property int lastCursor: 0
 				property int preSnapCursor: -1
 				property int preSnapPrev: 0
@@ -177,7 +178,7 @@ Item {
 					: composer.session.busy ? qsTr("Type to queue a message…")
 					: qsTr("Message ref")
 				placeholderTextColor: Theme.textMuted
-				wrapMode: TextArea.Wrap
+				wrapMode: Basic.TextArea.Wrap
 				// What is written back (history, undo, a withdrawn prompt) is text, whatever tags it holds.
 				textFormat: TextEdit.PlainText
 				color: Theme.text
@@ -185,7 +186,66 @@ Item {
 				selectedTextColor: Theme.text
 				font.pixelSize: Theme.fontSize
 				background: null
-
+				Component.onCompleted: TextEditSupport.disableUndoRedo(input.textDocument)
+				Basic.ContextMenu.menu: Basic.Menu {
+					id: editMenu
+					objectName: "composerContextMenu"
+					palette.window: Theme.surface
+					palette.windowText: Theme.text
+					palette.dark: Theme.border
+					palette.mid: Theme.border
+					palette.light: Theme.surfaceHover
+					palette.midlight: Theme.surfaceHover
+					palette.disabled.windowText: Theme.textMuted
+					onAboutToShow: input.pasteMenuEnabled = composer.model.canPaste()
+					Basic.MenuItem {
+						objectName: "composerMenuUndo"
+						text: qsTr("Undo")
+						enabled: composer.model.canUndo
+						onTriggered: composer.model.undo()
+					}
+					Basic.MenuItem {
+						objectName: "composerMenuRedo"
+						text: qsTr("Redo")
+						enabled: composer.model.canRedo
+						onTriggered: composer.model.redo()
+					}
+					Basic.MenuSeparator {}
+					Basic.MenuItem {
+						objectName: "composerMenuCut"
+						text: qsTr("Cut")
+						enabled: !input.readOnly && input.selectedText.length > 0
+						onTriggered: input.cut()
+					}
+					Basic.MenuItem {
+						objectName: "composerMenuCopy"
+						text: qsTr("Copy")
+						enabled: input.selectedText.length > 0
+						onTriggered: input.copy()
+					}
+					Basic.MenuItem {
+						objectName: "composerMenuPaste"
+						text: qsTr("Paste")
+						enabled: !input.readOnly && input.pasteMenuEnabled
+						onTriggered: {
+							if (!composer.model.pasteFromClipboard())
+								input.paste()
+						}
+					}
+					Basic.MenuItem {
+						objectName: "composerMenuDelete"
+						text: qsTr("Delete")
+						enabled: !input.readOnly && input.selectedText.length > 0
+						onTriggered: input.remove(input.selectionStart, input.selectionEnd)
+					}
+					Basic.MenuSeparator {}
+					Basic.MenuItem {
+						objectName: "composerMenuSelectAll"
+						text: qsTr("Select All")
+						enabled: input.length > 0
+						onTriggered: input.selectAll()
+					}
+				}
 				function syncSelectionBounds() {
 					if (syncing || inputMethodComposing || selectionStart === selectionEnd)
 						return

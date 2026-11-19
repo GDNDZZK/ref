@@ -144,6 +144,10 @@ private:
 			m_sessions[id].insert(u"model"_s, modelObj);
 			m_fake.respond(request, {{u"session"_s, m_sessions.value(id)}});
 		}
+		else if(op == u"prompt"_s)
+		{
+			m_fake.respond(request, {{u"queued"_s, false}, {u"message_id"_s, u"u_prompt_1"_s}});
+		}
 		else if(op == u"shell"_s)
 		{
 			m_shellCommands.append(request.value(u"command"_s).toString());
@@ -2192,6 +2196,72 @@ void TestMainWindow::composerUndoRedoSyncsAttachmentsAndHistoryAvoidsCollision()
 	QCOMPARE(textArea->property("text").toString(), u"[Image 1] explain [Image 2] "_s);
 	QCOMPARE(composer->attachments()->rowCount(), 1);
 	QCOMPARE(composer->attachments()->index(0, 0).data(composer::AttachmentModel::TokenRole).toString(), u"[Image 2]"_s);
+
+	// 4) QTextDocument built-in undo/redo is disabled, and right-click ContextMenu syncs Undo/Redo/Paste + shellMode.
+	composer->clearDraft();
+	QVERIFY(!textArea->property("canUndo").toBool());
+	QVERIFY(!textArea->property("canRedo").toBool());
+	QGuiApplication::clipboard()->setImage(img);
+	QVERIFY(composer->pasteFromClipboard());
+	QCOMPARE(composer->text(), u"[Image 1] "_s);
+	QTest::keyClick(window, Qt::Key_A, Qt::ControlModifier);
+	QTest::keyClick(window, Qt::Key_Delete);
+	QCOMPARE(composer->text(), QString());
+	QCOMPARE(composer->attachments()->rowCount(), 0);
+	QVERIFY(!textArea->property("canUndo").toBool());
+	QMetaObject::invokeMethod(textArea, "undo");
+	QCOMPARE(textArea->property("text").toString(), QString());
+	QCOMPARE(composer->text(), QString());
+
+	auto* contextMenu = textArea->findChild<QObject*>(u"composerContextMenu"_s);
+	auto* menuUndo = textArea->findChild<QObject*>(u"composerMenuUndo"_s);
+	auto* menuRedo = textArea->findChild<QObject*>(u"composerMenuRedo"_s);
+	auto* menuPaste = textArea->findChild<QObject*>(u"composerMenuPaste"_s);
+	QVERIFY(contextMenu && menuUndo && menuRedo && menuPaste);
+	QGuiApplication::clipboard()->setImage(img);
+	QMetaObject::invokeMethod(contextMenu, "open");
+	QTRY_VERIFY(contextMenu->property("visible").toBool());
+	QVERIFY(menuUndo->property("enabled").toBool());
+	QVERIFY(!menuRedo->property("enabled").toBool());
+	QVERIFY(menuPaste->property("enabled").toBool());
+	QMetaObject::invokeMethod(menuUndo, "triggered");
+	QMetaObject::invokeMethod(contextMenu, "close");
+	QCOMPARE(composer->text(), u"[Image 1] "_s);
+	QCOMPARE(textArea->property("text").toString(), u"[Image 1] "_s);
+	QCOMPARE(composer->attachments()->rowCount(), 1);
+	QVERIFY(menuRedo->property("enabled").toBool());
+	QMetaObject::invokeMethod(menuRedo, "triggered");
+	QCOMPARE(composer->text(), QString());
+	QCOMPARE(composer->attachments()->rowCount(), 0);
+	QMetaObject::invokeMethod(menuUndo, "triggered");
+	QCOMPARE(composer->text(), u"[Image 1] "_s);
+	QCOMPARE(composer->attachments()->rowCount(), 1);
+	QTest::keyClick(window, Qt::Key_End);
+	QMetaObject::invokeMethod(menuPaste, "triggered");
+	QCOMPARE(composer->text(), u"[Image 1] [Image 2] "_s);
+	QCOMPARE(composer->attachments()->rowCount(), 2);
+
+	// 5) ShellMode + attachment undo/redo round-trip end-to-end in Composer.qml.
+	composer->clearDraft();
+	typeText(u"!make"_s);
+	QVERIFY(composer->shellMode());
+	QVERIFY(composer->submit());
+	QVERIFY(!composer->shellMode());
+	QVERIFY(composer->pasteFromClipboard());
+	QCOMPARE(composer->attachments()->rowCount(), 1);
+	QTest::keyClick(window, Qt::Key_Home);
+	QTest::keyClick(window, Qt::Key_Up);
+	QVERIFY(composer->shellMode());
+	QCOMPARE(composer->text(), u"make"_s);
+	QCOMPARE(composer->attachments()->rowCount(), 0);
+	QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
+	QVERIFY(!composer->shellMode());
+	QCOMPARE(composer->text(), u"[Image 1] "_s);
+	QCOMPARE(composer->attachments()->rowCount(), 1);
+	QTest::keyClick(window, Qt::Key_Y, Qt::ControlModifier);
+	QVERIFY(composer->shellMode());
+	QCOMPARE(composer->text(), u"make"_s);
+	QCOMPARE(composer->attachments()->rowCount(), 0);
 	QVERIFY2(warningSpy.isEmpty(), "Composer undo/redo and token collision test emitted QML warnings");
 }
 

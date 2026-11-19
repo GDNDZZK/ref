@@ -79,10 +79,39 @@ void PromptDraft::setCursor(qsizetype cursor)
 	m_cursor = clamped;
 	m_coalescing = false;
 }
+void PromptDraft::setShellMode(bool shellMode)
+{
+	if(shellMode == m_shellMode)
+	{
+		return;
+	}
+	pushUndoSnapshot(currentSnapshot());
+	m_coalescing = false;
+	m_shellMode = shellMode;
+}
+
+void PromptDraft::replace(const QString& text, qsizetype cursor, bool shellMode)
+{
+	if(text == m_text && shellMode == m_shellMode)
+	{
+		setCursor(cursor);
+		return;
+	}
+	pushUndoSnapshot(currentSnapshot());
+	m_coalescing = false;
+	m_shellMode = shellMode;
+	m_text = text;
+	m_cursor = std::clamp<qsizetype>(cursor, 0, text.size());
+	dropOrphans();
+}
 
 PromptDraft::Snapshot PromptDraft::currentSnapshot() const
 {
-	return {.text = m_text, .cursor = m_cursor, .attachments = m_attachments, .lastImageNumber = m_lastImageNumber};
+	return {.text = m_text,
+	        .cursor = m_cursor,
+	        .attachments = m_attachments,
+	        .lastImageNumber = m_lastImageNumber,
+	        .shellMode = m_shellMode};
 }
 
 void PromptDraft::applySnapshot(Snapshot snapshot)
@@ -91,6 +120,7 @@ void PromptDraft::applySnapshot(Snapshot snapshot)
 	m_cursor = std::clamp<qsizetype>(snapshot.cursor, 0, m_text.size());
 	m_attachments = std::move(snapshot.attachments);
 	m_lastImageNumber = snapshot.lastImageNumber;
+	m_shellMode = snapshot.shellMode;
 }
 
 void PromptDraft::pushUndoSnapshot(Snapshot snapshot)
@@ -109,6 +139,7 @@ void PromptDraft::resetState()
 	m_cursor = 0;
 	m_attachments.clear();
 	m_lastImageNumber = 0;
+	m_shellMode = false;
 }
 
 QString PromptDraft::nextToken(QStringView extraText)
@@ -195,7 +226,7 @@ void PromptDraft::removeAttachment(qsizetype index)
 	}
 }
 
-void PromptDraft::restore(const QString& text, const QList<proto::NamedImage>& images)
+void PromptDraft::restore(const QString& text, const QList<proto::NamedImage>& images, bool shellMode)
 {
 	if(text.trimmed().isEmpty() && images.isEmpty())
 	{
@@ -204,6 +235,7 @@ void PromptDraft::restore(const QString& text, const QList<proto::NamedImage>& i
 
 	pushUndoSnapshot(currentSnapshot());
 	m_coalescing = false;
+	m_shellMode = shellMode;
 
 	QList<int> numbers = tokenNumbers(text);
 	std::ranges::sort(numbers);
@@ -282,7 +314,7 @@ bool PromptDraft::redo()
 
 void PromptDraft::clear()
 {
-	if(!m_text.isEmpty() || !m_attachments.isEmpty())
+	if(!m_text.isEmpty() || !m_attachments.isEmpty() || m_shellMode)
 	{
 		pushUndoSnapshot(currentSnapshot());
 	}

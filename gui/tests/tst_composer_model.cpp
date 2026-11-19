@@ -269,6 +269,7 @@ private slots:
 	void midTextSlashReplacementAndShellWrapperCompletionWork();
 	void imageNumberingResetsPerDraft();
 	void undoRedoSyncAttachmentsAndHistoryAvoidsTokenCollision();
+	void undoRedoSyncShellModeCanPasteAndUserEdited();
 };
 
 void TestComposerModel::labelsFollowTheSessionAndTheConfiguration()
@@ -1112,6 +1113,90 @@ void TestComposerModel::undoRedoSyncAttachmentsAndHistoryAvoidsTokenCollision()
 	QCOMPARE(f.composer.text(), u"[Image 1] explain [Image 2] "_s);
 	QCOMPARE(f.composer.attachments()->rowCount(), 1);
 	QCOMPARE(f.composer.attachments()->index(0, 0).data(composer::AttachmentModel::TokenRole).toString(), u"[Image 2]"_s);
+}
+
+void TestComposerModel::undoRedoSyncShellModeCanPasteAndUserEdited()
+{
+	Fixture f;
+	QSignalSpy editedSpy(&f.composer, &ComposerModel::userEdited);
+	QSignalSpy shellSpy(&f.composer, &ComposerModel::shellModeChanged);
+	QSignalSpy draftSpy(&f.composer, &ComposerModel::draftChanged);
+
+	// Empty undo/redo do not emit userEdited().
+	QVERIFY(!f.composer.canUndo());
+	QVERIFY(!f.composer.canRedo());
+	QVERIFY(!f.composer.undo());
+	QVERIFY(!f.composer.redo());
+	QCOMPARE(editedSpy.count(), 0);
+
+	// canPaste() reflects clipboard image, text, URLs, or empty state.
+	QGuiApplication::clipboard()->setMimeData(new QMimeData());
+	QVERIFY(!f.composer.canPaste());
+	QImage img(4, 4, QImage::Format_RGB32);
+	img.fill(Qt::yellow);
+	QGuiApplication::clipboard()->setImage(img);
+	QVERIFY(f.composer.canPaste());
+	QGuiApplication::clipboard()->setText(u"hello"_s);
+	QVERIFY(f.composer.canPaste());
+	auto* urlMime = new QMimeData();
+	urlMime->setUrls({QUrl::fromLocalFile(u"/tmp/example.txt"_s)});
+	QGuiApplication::clipboard()->setMimeData(urlMime);
+	QVERIFY(f.composer.canPaste());
+
+	// 1) [Image 1] + Up to "!make" -> undo restores prompt mode + attachment; redo restores shell mode.
+	f.history.push(u"!make"_s);
+	QGuiApplication::clipboard()->setImage(img);
+	QVERIFY(f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.attachments()->rowCount(), 1);
+	QVERIFY(!f.composer.shellMode());
+	f.composer.moveCursor(0);
+	QVERIFY(f.composer.historyPrevious());
+	QVERIFY(f.composer.shellMode());
+	QCOMPARE(f.composer.text(), u"make"_s);
+	QCOMPARE(f.composer.attachments()->rowCount(), 0);
+	editedSpy.clear();
+	shellSpy.clear();
+	draftSpy.clear();
+	QVERIFY(f.composer.undo());
+	QCOMPARE(editedSpy.count(), 1);
+	QCOMPARE(shellSpy.count(), 1);
+	QVERIFY(draftSpy.count() >= 1);
+	QVERIFY(!f.composer.shellMode());
+	QCOMPARE(f.composer.text(), u"[Image 1] "_s);
+	QCOMPARE(f.composer.attachments()->rowCount(), 1);
+	QVERIFY(f.composer.canRedo());
+	QVERIFY(f.composer.redo());
+	QCOMPARE(editedSpy.count(), 2);
+	QCOMPARE(shellSpy.count(), 2);
+	QVERIFY(f.composer.shellMode());
+	QCOMPARE(f.composer.text(), u"make"_s);
+	QCOMPARE(f.composer.attachments()->rowCount(), 0);
+
+	// 2) "!cmd" + clearDraft() -> undo restores shell mode and text.
+	f.composer.clearDraft();
+	QVERIFY(!f.composer.shellMode());
+	QVERIFY(f.composer.undo());
+	QVERIFY(f.composer.shellMode());
+	QCOMPARE(f.composer.text(), u"make"_s);
+
+	// 3) escape() exiting shell mode (after dismissing completion) is undoable and emits draftChanged for canUndo.
+	QVERIFY(f.composer.escape()); // dismisses shell completion matching "!make" in history
+	QVERIFY(f.composer.shellMode());
+	QVERIFY(f.composer.escape()); // exits shell mode
+	QVERIFY(!f.composer.shellMode());
+	QVERIFY(f.composer.canUndo());
+	QVERIFY(f.composer.undo());
+	QVERIFY(f.composer.shellMode());
+	QCOMPARE(f.composer.text(), u"make"_s);
+
+	// 4) Typing "!" -> undo leaves shell mode; redo re-enters shell mode.
+	f.composer.clearDraft();
+	f.type(u"!"_s);
+	QVERIFY(f.composer.shellMode());
+	QVERIFY(f.composer.undo());
+	QVERIFY(!f.composer.shellMode());
+	QVERIFY(f.composer.redo());
+	QVERIFY(f.composer.shellMode());
 }
 
 QTEST_MAIN(TestComposerModel)

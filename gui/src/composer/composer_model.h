@@ -45,6 +45,8 @@ class ComposerModel : public QObject
 	Q_PROPERTY(QString text READ text NOTIFY draftChanged)
 	Q_PROPERTY(int cursor READ cursor NOTIFY draftChanged)
 	Q_PROPERTY(bool hasContent READ hasContent NOTIFY draftChanged)
+	Q_PROPERTY(bool canUndo READ canUndo NOTIFY draftChanged)
+	Q_PROPERTY(bool canRedo READ canRedo NOTIFY draftChanged)
 	Q_PROPERTY(bool shellMode READ shellMode NOTIFY shellModeChanged)
 	Q_PROPERTY(bool ready READ isReady NOTIFY readyChanged)
 	Q_PROPERTY(QAbstractItemModel* attachments READ attachments CONSTANT)
@@ -78,7 +80,9 @@ public:
 	const QString& text() const { return m_draft.text(); }
 	int cursor() const { return static_cast<int>(m_draft.cursor()); }
 	bool hasContent() const { return !m_draft.isEmpty(); }
-	bool shellMode() const { return m_shellMode; }
+	bool canUndo() const { return m_draft.canUndo(); }
+	bool canRedo() const { return m_draft.canRedo(); }
+	bool shellMode() const { return m_draft.shellMode(); }
 	// Prompts can be sent: the backend is reachable and the session is attached.
 	bool isReady() const;
 	QAbstractItemModel* attachments() { return &m_attachments; }
@@ -151,10 +155,10 @@ public:
 	// Ctrl+V: attaches an image from the clipboard, or the image file whose path or URL is
 	// there. False when the clipboard holds something the text area should paste itself.
 	Q_INVOKABLE bool pasteFromClipboard();
+	Q_INVOKABLE bool canPaste() const;
 	// Dropped files: attaches images and inserts paths of other local files. Returns how many were handled.
 	Q_INVOKABLE int attachUrls(const QList<QUrl>& urls);
 	Q_INVOKABLE void removeAttachment(int row);
-
 public slots:
 	// Puts a prompt that was taken back (undo) into the draft.
 	void restoreDraft(const QString& text, const QList<refgui::proto::NamedImage>& images);
@@ -236,9 +240,9 @@ private:
 	void changeDraft();
 	// The draft was edited in the text area, which already shows it.
 	void draftEdited();
-	void setShellMode(bool shellMode);
+	void syncShellMode(bool wasShellMode);
+	void restoreDraftWithMode(const QString& text, const QList<proto::NamedImage>& images, bool shellMode);
 	void fillFromHistory(const QString& entry);
-	// Attaches images and inserts paths of other local files among `urls`; returns how many were handled.
 	int attachImageUrls(const QList<QUrl>& urls, bool reportOthers);
 	void attachImage(proto::NamedImage image);
 	void disarmInterrupt();
@@ -263,7 +267,6 @@ private:
 	QPointer<const workspace::SessionDirectory> m_directory;
 	compose::HistoryBrowser m_browser;
 	compose::PromptDraft m_draft;
-	bool m_shellMode = false;
 	bool m_forceShellEmpty = false;
 	compose::CompletionTarget m_target;
 	bool m_completionDismissed = false;
