@@ -84,6 +84,8 @@ pub struct Editor {
     pref_col: Option<usize>,
     undo: Vec<Snapshot>,
     redo: Vec<Snapshot>,
+    /// True while coalescing consecutive single-char inserts into one undo step.
+    coalescing: bool,
     /// Width used by the last layout (for up/down).
     pub last_width: usize,
     /// Scroll offset of visible rows.
@@ -183,6 +185,7 @@ impl Editor {
         self.cursor = snap.cursor.min(self.text.len());
         self.anchor = None;
         self.pref_col = None;
+        self.coalescing = false;
 
         Snapshot {
             text,
@@ -216,6 +219,7 @@ impl Editor {
         self.pref_col = None;
         self.hscroll = 0;
         self.gc_tokens();
+        self.coalescing = false;
     }
 
     fn reset_fields(&mut self) {
@@ -224,11 +228,14 @@ impl Editor {
         self.anchor = None;
         self.pastes.clear();
         self.images.clear();
+        self.paste_seq = 0;
         self.image_seq = 0;
         self.pref_col = None;
         self.scroll = 0;
         self.hscroll = 0;
+        self.dragging = false;
         self.press_off = None;
+        self.coalescing = false;
     }
 
     pub fn clear(&mut self) {
@@ -299,6 +306,7 @@ impl Editor {
             self.snapshot_coalesced(s);
         }
         self.insert_raw(s);
+        self.coalescing = is_coalescable_insert(s);
     }
 
     fn insert_raw(&mut self, s: &str) {
@@ -309,10 +317,9 @@ impl Editor {
         self.pref_col = None;
     }
 
-    /// Snapshot only at word boundaries so undo is not per-keystroke.
+    /// Snapshot unless continuing an active single-character typing run.
     fn snapshot_coalesced(&mut self, s: &str) {
-        let at_word_boundary = s.len() > 1 || s == " " || s == "\n";
-        if at_word_boundary || self.undo.is_empty() {
+        if !self.coalescing || !is_coalescable_insert(s) || self.undo.is_empty() {
             self.snapshot();
         }
     }
@@ -392,6 +399,7 @@ impl Editor {
         }
     }
     pub fn backspace(&mut self) {
+        self.coalescing = false;
         if self.delete_selection() {
             return;
         }
@@ -409,6 +417,7 @@ impl Editor {
     }
 
     pub fn delete(&mut self) {
+        self.coalescing = false;
         if self.delete_selection() {
             return;
         }
@@ -488,6 +497,7 @@ impl Editor {
     }
 
     pub fn delete_word_back(&mut self) {
+        self.coalescing = false;
         if self.delete_selection() {
             return;
         }
@@ -501,6 +511,7 @@ impl Editor {
     }
 
     pub fn delete_word_forward(&mut self) {
+        self.coalescing = false;
         if self.delete_selection() {
             return;
         }
@@ -527,6 +538,7 @@ impl Editor {
     }
 
     pub fn kill_to_start(&mut self) {
+        self.coalescing = false;
         let s = self.line_start();
         let s = if s == self.cursor && s > 0 { s - 1 } else { s };
         if s < self.cursor {
@@ -539,6 +551,7 @@ impl Editor {
     }
 
     pub fn kill_to_end(&mut self) {
+        self.coalescing = false;
         let e = self.line_end();
         let e = if e == self.cursor && e < self.text.len() {
             e + 1
@@ -556,6 +569,7 @@ impl Editor {
     // -- movement ------------------------------------------------------------
 
     pub fn left(&mut self) {
+        self.coalescing = false;
         let p = self.prev_boundary(self.cursor);
         self.cursor = self.token_containing(p).map_or(p, |(s, _)| s);
         self.pref_col = None;
@@ -565,6 +579,7 @@ impl Editor {
     }
 
     pub fn right(&mut self) {
+        self.coalescing = false;
         let p = self.next_boundary(self.cursor);
         self.cursor = self.token_containing(p).map_or(p, |(_, e)| e);
         self.pref_col = None;
@@ -574,6 +589,7 @@ impl Editor {
     }
 
     pub fn word_left(&mut self) {
+        self.coalescing = false;
         self.cursor = self.word_left_pos();
         self.pref_col = None;
         if self.anchor.is_some() {
@@ -582,6 +598,7 @@ impl Editor {
     }
 
     pub fn word_right(&mut self) {
+        self.coalescing = false;
         self.cursor = self.word_right_pos();
         self.pref_col = None;
         if self.anchor.is_some() {
@@ -590,20 +607,24 @@ impl Editor {
     }
 
     pub fn home(&mut self) {
+        self.coalescing = false;
         self.cursor = self.line_start();
         self.pref_col = None;
     }
 
     pub fn end(&mut self) {
+        self.coalescing = false;
         self.cursor = self.line_end();
         self.pref_col = None;
     }
 
     pub fn buf_start(&mut self) {
+        self.coalescing = false;
         self.cursor = 0;
     }
 
     pub fn buf_end(&mut self) {
+        self.coalescing = false;
         self.cursor = self.text.len();
     }
 
@@ -617,6 +638,7 @@ impl Editor {
     }
 
     fn vmove(&mut self, dir: i32) -> bool {
+        self.coalescing = false;
         let rows = self.layout(self.last_width.max(MIN_EDITOR_COLS));
         let (r, col) = self.cursor_rc(&rows);
         let nr = r as i32 + dir;
@@ -685,6 +707,7 @@ impl Editor {
                 text: s,
             });
             self.insert_raw(&token);
+            self.coalescing = false;
         } else {
             self.insert(&s);
         }
@@ -697,7 +720,11 @@ impl Editor {
     }
 
     fn attach_image_raw(&mut self, image: ImageData, name: Option<String>) {
-        self.image_seq += 1;
+        let max_text_seq = image_token_numbers(&self.text)
+            .into_iter()
+            .max()
+            .unwrap_or(0);
+        self.image_seq = self.image_seq.max(max_text_seq) + 1;
         let token = image_token(self.image_seq);
         self.images.push(Attachment {
             token: token.clone(),
@@ -710,6 +737,7 @@ impl Editor {
             ""
         };
         self.insert_raw(&format!("{pad}{token} "));
+        self.coalescing = false;
     }
 
     /// Puts a previously sent prompt back: fills an empty editor, otherwise appends it after a
@@ -733,6 +761,12 @@ impl Editor {
             restored = restored.replace(&image_token(n), &format!("\u{0}{i}\u{0}"));
             bound.push(img);
         }
+        let max_existing_seq = image_token_numbers(&self.text)
+            .into_iter()
+            .chain(image_token_numbers(&restored))
+            .max()
+            .unwrap_or(0);
+        self.image_seq = self.image_seq.max(max_existing_seq);
         for (i, (image, name)) in bound.into_iter().enumerate() {
             self.image_seq += 1;
             let token = image_token(self.image_seq);
@@ -751,6 +785,7 @@ impl Editor {
         for (image, name) in images {
             self.attach_image_raw(image, name);
         }
+        self.coalescing = false;
     }
 
     /// Drops tokens no longer present in the text.
@@ -758,6 +793,9 @@ impl Editor {
         let t = &self.text;
         self.pastes.retain(|p| t.contains(&p.token));
         self.images.retain(|a| t.contains(&a.token));
+        if self.pastes.is_empty() {
+            self.paste_seq = 0;
+        }
         if self.images.is_empty() {
             self.image_seq = 0;
         }
@@ -780,7 +818,7 @@ impl Editor {
             .filter(|a| self.text.contains(&a.token))
             .map(|a| (a.image.clone(), a.name.clone()))
             .collect();
-        self.clear();
+        self.reset_fields();
         self.undo.clear();
         self.redo.clear();
         Submit { text, images }
@@ -836,6 +874,7 @@ impl Editor {
     /// Left press at byte offset `off`: 1 click places the cursor (dragging then selects),
     /// 2 select the word, 3 the line.
     pub fn mouse_down(&mut self, off: usize, clicks: u8) {
+        self.coalescing = false;
         let off = off.min(self.text.len());
         self.pref_col = None;
         self.dragging = clicks <= 1;
@@ -879,6 +918,7 @@ impl Editor {
         if !self.dragging {
             return;
         }
+        self.coalescing = false;
         if self.anchor.is_none() {
             self.anchor = Some(self.press_off.unwrap_or(self.cursor));
         }
@@ -1183,6 +1223,7 @@ impl Editor {
         self.anchor = None;
         self.pref_col = None;
         self.gc_tokens();
+        self.coalescing = false;
     }
 }
 
@@ -1375,6 +1416,10 @@ fn image_token_numbers(text: &str) -> Vec<usize> {
         }
     }
     out
+}
+
+fn is_coalescable_insert(s: &str) -> bool {
+    s.len() == 1 && s != " " && s != "\n" && s != "\r" && s != "\t"
 }
 
 #[cfg(test)]
@@ -1793,5 +1838,149 @@ mod tests {
         assert_eq!(e.pastes.len(), 1);
         e.replace_before_cursor(0, "done");
         assert!(e.pastes.is_empty());
+    }
+
+    #[test]
+    fn single_char_typing_after_discrete_edits_and_moves_does_not_coalesce() {
+        // After attach_image, typing char-by-char creates a separate undo step.
+        let mut e = Editor::default();
+        e.attach_image(img("a"), None);
+        for ch in ["f", "i", "x"] {
+            e.insert(ch);
+        }
+        assert_eq!(e.text, "[Image 1] fix");
+        e.undo();
+        assert_eq!(e.text, "[Image 1] ");
+        assert_eq!(e.images.len(), 1);
+        e.undo();
+        assert!(e.is_empty());
+
+        // After redo, typing char-by-char does not coalesce into the redone state.
+        e.redo();
+        assert_eq!(e.text, "[Image 1] ");
+        for ch in ["o", "k"] {
+            e.insert(ch);
+        }
+        assert_eq!(e.text, "[Image 1] ok");
+        e.undo();
+        assert_eq!(e.text, "[Image 1] ");
+        assert_eq!(e.images.len(), 1);
+
+        // After collapsed paste, typing char-by-char creates its own undo step.
+        let mut e = Editor::default();
+        e.paste("line1\nline2\nline3\n");
+        for ch in ["!", "?"] {
+            e.insert(ch);
+        }
+        assert_eq!(e.text, "[Pasted ~3 lines]!?");
+        e.undo();
+        assert_eq!(e.text, "[Pasted ~3 lines]");
+        assert_eq!(e.pastes.len(), 1);
+        e.undo();
+        assert!(e.text.is_empty());
+        assert!(e.pastes.is_empty());
+
+        // After replace_before_cursor, restore, clear, and cursor movement.
+        let mut e = Editor::default();
+        e.insert("hello");
+        e.replace_before_cursor(0, "/cmd");
+        for ch in ["a", "b"] {
+            e.insert(ch);
+        }
+        assert_eq!(e.text, "/cmdab");
+        e.undo();
+        assert_eq!(e.text, "/cmd");
+
+        e.restore("old", vec![(img("r"), None)]);
+        for ch in ["x", "y"] {
+            e.insert(ch);
+        }
+        assert_eq!(e.text, "/cmd\n\nold [Image 1] xy");
+        e.undo();
+        assert_eq!(e.text, "/cmd\n\nold [Image 1] ");
+
+        e.clear();
+        for ch in ["n", "e", "w"] {
+            e.insert(ch);
+        }
+        assert_eq!(e.text, "new");
+        e.undo();
+        assert!(e.is_empty());
+
+        let mut e = Editor::default();
+        for ch in ["a", "b"] {
+            e.insert(ch);
+        }
+        e.left();
+        for ch in ["X", "Y"] {
+            e.insert(ch);
+        }
+        assert_eq!(e.text, "aXYb");
+        e.undo();
+        assert_eq!(e.text, "ab");
+    }
+
+    #[test]
+    fn paste_seq_resets_when_pastes_empty_and_submit_avoids_throwaway_snapshot() {
+        let mut e = Editor::default();
+        e.paste("l1\nl2\nl3\n");
+        e.paste("l1\nl2\nl3\n");
+        assert_eq!(e.text, "[Pasted ~3 lines][Pasted ~3 lines #2]");
+        assert_eq!(e.paste_seq, 2);
+
+        // Removing all paste tokens via gc_tokens() resets paste_seq to 0.
+        e.kill_to_start();
+        assert!(e.pastes.is_empty());
+        assert_eq!(e.paste_seq, 0);
+        e.paste("l1\nl2\nl3\n");
+        assert_eq!(e.text, "[Pasted ~3 lines]");
+        assert_eq!(e.paste_seq, 1);
+
+        // submit() resets paste_seq and dragging without leaving undo/redo snapshots.
+        e.dragging = true;
+        let sub = e.submit();
+        assert_eq!(sub.text, "l1\nl2\nl3\n");
+        assert_eq!(e.paste_seq, 0);
+        assert!(!e.dragging);
+        assert!(e.undo.is_empty());
+        assert!(e.redo.is_empty());
+
+        // clear() resets paste_seq, while undo still restores the pre-clear paste state.
+        e.paste("a\nb\nc\n");
+        e.paste("a\nb\nc\n");
+        assert_eq!(e.paste_seq, 2);
+        e.clear();
+        assert_eq!(e.paste_seq, 0);
+        assert!(e.pastes.is_empty());
+        e.paste("a\nb\nc\n");
+        assert_eq!(e.text, "[Pasted ~3 lines]");
+        assert_eq!(e.paste_seq, 1);
+        e.undo();
+        assert!(e.text.is_empty());
+        e.undo();
+        assert_eq!(e.text, "[Pasted ~3 lines][Pasted ~3 lines #2]");
+        assert_eq!(e.paste_seq, 2);
+        assert_eq!(e.pastes.len(), 2);
+    }
+
+    #[test]
+    fn attach_and_restore_skip_image_tokens_present_in_recalled_text() {
+        let mut e = Editor::default();
+        e.set_text("[Image 1] explain");
+        assert!(e.images.is_empty());
+        e.attach_image(img("new"), None);
+        assert_eq!(e.text, "[Image 1] explain [Image 2] ");
+        assert_eq!(e.images.len(), 1);
+        assert_eq!(e.images[0].token, "[Image 2]");
+        assert_eq!(e.image_seq, 2);
+
+        // restore() also skips [Image N] tokens already in recalled text.
+        let mut e = Editor::default();
+        e.set_text("[Image 1] explain");
+        e.restore("see [Image 1]", vec![(img("r"), None)]);
+        assert_eq!(e.text, "[Image 1] explain\n\nsee [Image 2]");
+        assert_eq!(e.images.len(), 1);
+        assert_eq!(e.images[0].token, "[Image 2]");
+        assert_eq!(e.image_seq, 2);
     }
 }

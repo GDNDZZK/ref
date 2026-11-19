@@ -725,6 +725,7 @@ fn maybe_image_path(app: &mut App) {
         Ok(Some((img, name))) => {
             app.editor.replace_with_image(img, Some(name.clone()));
             app.ac = None;
+            app.toasts.info(format!("Attached image {name}"));
         }
         Ok(None) => {}
         Err(e) => app.toasts.error(e),
