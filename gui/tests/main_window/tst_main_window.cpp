@@ -36,6 +36,7 @@
 #include <QWheelEvent>
 #include <QtTest>
 #include <memory>
+#include <algorithm>
 
 using namespace Qt::StringLiterals;
 using namespace refgui;
@@ -393,6 +394,9 @@ private slots:
 	void splitJumpToEndResizeBlurFadeAndSidebarDragWork();
 	void sidebarSectionsCollapseExpandAndResizeWithoutOscillation();
 	void composerUndoRedoSyncsAttachmentsAndHistoryAvoidsCollision();
+	void switchClicksWithHitPaddingInsideConfigFlickableAndResetButtonsClearFields();
+	void sidebarRunningRowsReorderByLongPressDragAndPersistAcrossFrames();
+	void uiZoomSettingsShortcutsResizeAndPopupsScaleCleanly();
 };
 
 void TestMainWindow::initTestCase()
@@ -2279,6 +2283,551 @@ void TestMainWindow::composerUndoRedoSyncsAttachmentsAndHistoryAvoidsCollision()
 	QCOMPARE(composer->text(), u"make"_s);
 	QCOMPARE(composer->attachments()->rowCount(), 0);
 	QVERIFY2(warningSpy.isEmpty(), "Composer undo/redo and token collision test emitted QML warnings");
+}
+
+void TestMainWindow::switchClicksWithHitPaddingInsideConfigFlickableAndResetButtonsClearFields()
+{
+	MainFixture f;
+	f.stub.setConfigRawText(u"{\n"
+	                        "  \"enabled_providers\": [\"anthropic\"],\n"
+	                        "  \"delay\": { \"bash\": 2 },\n"
+	                        "  \"agent\": { \"build\": { \"delay\": { \"bash\": 1 } } },\n"
+	                        "  \"provider\": {\n"
+	                        "    \"p1\": {\n"
+	                        "      \"options\": {\n"
+	                        "        \"chunkTimeout\": 12000,\n"
+	                        "        \"headers\": { \"X-Test\": \"1\" }\n"
+	                        "      },\n"
+	                        "      \"models\": {\n"
+	                        "        \"m1\": {\n"
+	                        "          \"limit\": { \"context\": 64000 }\n"
+	                        "        }\n"
+	                        "      }\n"
+	                        "    }\n"
+	                        "  }\n"
+	                        "}\n"_s);
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+	window->requestActivate();
+	QTRY_VERIFY(window->isActive());
+
+	const auto findByName = [](QQuickItem* root, const QString& name) {
+		return findItem(root, [&name](QQuickItem* item) { return item->objectName() == name; });
+	};
+	const auto findFormRowReset = [](QQuickItem* control) -> QQuickItem* {
+		QQuickItem* slot = control ? control->parentItem() : nullptr;
+		QQuickItem* formRow = slot ? slot->parentItem() : nullptr;
+		if(!formRow)
+		{
+			return nullptr;
+		}
+		for(QQuickItem* ch : formRow->childItems())
+		{
+			if(QByteArray(ch->metaObject()->className()).startsWith("TextButton_QMLTYPE"))
+			{
+				return ch;
+			}
+		}
+		return nullptr;
+	};
+	const auto scrollIntoView = [](QQuickItem* scroller, QQuickItem* target) {
+		QQuickItem* contentItem = scroller->property("contentItem").value<QQuickItem*>();
+		QVERIFY(contentItem);
+		const QPointF inContent = target->mapToItem(contentItem, QPointF(0.0, 0.0));
+		const qreal viewH = scroller->height();
+		const qreal maxY = std::max(0.0, scroller->property("contentHeight").toReal() - viewH);
+		scroller->setProperty("contentY", std::clamp(inContent.y() - viewH / 2.0 + target->height() / 2.0, 0.0, maxY));
+		QCoreApplication::processEvents();
+	};
+
+	f.workspace->commands()->run(u"config"_s);
+	QQuickItem* configDialog = nullptr;
+	QTRY_VERIFY([&] {
+		configDialog = findByName(window->contentItem(), u"configDialog"_s);
+		return configDialog != nullptr && !f.workspace->configEditor()->isLoading();
+	}());
+	QQuickItem* panel = findByName(configDialog, u"configDialogPanel"_s);
+	QVERIFY(panel);
+	QTRY_VERIFY(panel->property("shown").toBool() && qFuzzyCompare(panel->scale(), 1.0));
+	QQuickItem* scroller = findByTypePrefix(configDialog, "QQuickFlickable");
+	QVERIFY(scroller);
+
+	// 1) Switch inside ConfigDialog Flickable responds to normal click and slight-drift click in hitArea padding.
+	auto* autoSwitch = findByName(configDialog, u"compactionAutoSwitch"_s);
+	QVERIFY(autoSwitch);
+	scrollIntoView(scroller, autoSwitch);
+	QVERIFY(autoSwitch->property("checked").toBool());
+	const QPoint swCenter = autoSwitch->mapToScene(QPointF(autoSwitch->width() / 2.0, autoSwitch->height() / 2.0)).toPoint();
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, swCenter);
+	QTRY_VERIFY(!autoSwitch->property("checked").toBool());
+
+	// Click inside top hit padding (y = -4) with a 2px pointer drift inside Flickable.
+	const QPoint swPad = autoSwitch->mapToScene(QPointF(autoSwitch->width() / 2.0, -4.0)).toPoint();
+	QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, swPad);
+	QTest::mouseMove(window, swPad + QPoint(2, 2));
+	QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, swPad + QPoint(2, 2));
+	QTRY_VERIFY(autoSwitch->property("checked").toBool());
+
+	// 2) Reset buttons clear displayed values/entries and reset state cleanly.
+	auto* enabledProvEditor = findByName(configDialog, u"enabledProvidersEditor"_s);
+	QVERIFY(enabledProvEditor);
+	QCOMPARE(enabledProvEditor->property("values").toStringList(), (QStringList{u"anthropic"_s}));
+	QQuickItem* enabledProvReset = findFormRowReset(enabledProvEditor);
+	QVERIFY(enabledProvReset);
+	scrollIntoView(scroller, enabledProvReset);
+	QTRY_VERIFY(enabledProvReset->isVisible());
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
+	                  enabledProvReset->mapToScene(QPointF(enabledProvReset->width() / 2.0, enabledProvReset->height() / 2.0)).toPoint());
+	QTRY_VERIFY(enabledProvEditor->property("values").toStringList().isEmpty());
+	QTRY_VERIFY(!enabledProvReset->isVisible());
+	QVERIFY(!f.workspace->configEditor()->contains({u"enabled_providers"_s}));
+
+	QMetaObject::invokeMethod(configDialog, "selectCategory", Q_ARG(QVariant, u"providers"_s));
+	QCoreApplication::processEvents();
+	auto* provSection = findByName(configDialog, u"configProvidersSection"_s);
+	QVERIFY(provSection);
+	QMetaObject::invokeMethod(provSection, "setProviderExpanded", Q_ARG(QVariant, u"p1"_s), Q_ARG(QVariant, true));
+	QMetaObject::invokeMethod(provSection, "setModelExpanded", Q_ARG(QVariant, u"p1"_s), Q_ARG(QVariant, u"m1"_s), Q_ARG(QVariant, true));
+	QCoreApplication::processEvents();
+
+	auto* ctxField = findByName(provSection, u"modelContextField_p1_m1"_s);
+	auto* chunkField = findByName(provSection, u"providerChunkTimeout_p1"_s);
+	auto* headersEd = findByName(provSection, u"providerHeadersEditor_p1"_s);
+	QVERIFY(ctxField && chunkField && headersEd);
+	QCOMPARE(ctxField->property("value").toInt(), 64000);
+	QCOMPARE(chunkField->property("value").toInt(), 12000);
+	QCOMPARE(headersEd->property("entries").toList().size(), 1);
+
+	QQuickItem* ctxReset = findFormRowReset(ctxField);
+	QVERIFY(ctxReset);
+	scrollIntoView(scroller, ctxReset);
+	QTRY_VERIFY(ctxReset->isVisible());
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
+	                  ctxReset->mapToScene(QPointF(ctxReset->width() / 2.0, ctxReset->height() / 2.0)).toPoint());
+	QTRY_VERIFY(!ctxField->property("hasValue").toBool());
+	QCOMPARE(ctxField->property("inputText").toString(), QString());
+	QTRY_VERIFY(!ctxReset->isVisible());
+
+	QQuickItem* chunkReset = findFormRowReset(chunkField);
+	QVERIFY(chunkReset);
+	scrollIntoView(scroller, chunkReset);
+	QTRY_VERIFY(chunkReset->isVisible());
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
+	                  chunkReset->mapToScene(QPointF(chunkReset->width() / 2.0, chunkReset->height() / 2.0)).toPoint());
+	QTRY_VERIFY(!chunkField->property("hasValue").toBool());
+	QCOMPARE(chunkField->property("inputText").toString(), QString());
+	QTRY_VERIFY(!chunkReset->isVisible());
+
+	QQuickItem* headersReset = findFormRowReset(headersEd);
+	QVERIFY(headersReset);
+	scrollIntoView(scroller, headersReset);
+	QTRY_VERIFY(headersReset->isVisible());
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
+	                  headersReset->mapToScene(QPointF(headersReset->width() / 2.0, headersReset->height() / 2.0)).toPoint());
+	QTRY_VERIFY(headersEd->property("entries").toList().isEmpty());
+	QTRY_VERIFY(!headersReset->isVisible());
+
+	// 3) Clearing a 1-entry delay map key without blurring then clicking Reset resets delayMode cleanly,
+	//    and switching delay modes clears stale invalid syntax on inactive sub-editors.
+	QMetaObject::invokeMethod(configDialog, "selectCategory", Q_ARG(QVariant, u"permissions"_s));
+	QCoreApplication::processEvents();
+	auto* permSection = findByName(configDialog, u"configPermissionsSection"_s);
+	QVERIFY(permSection);
+	auto* delayMap = findByName(permSection, u"globalDelayMapEditor"_s);
+	auto* globalDelayField = findByName(permSection, u"globalDelayField"_s);
+	QVERIFY(delayMap && globalDelayField);
+	QCOMPARE(permSection->property("delayMode").toString(), u"map"_s);
+	QCOMPARE(delayMap->property("entries").toList().size(), 1);
+
+	QQuickItem* delayRowKeyInput = findItem(delayMap, [](QQuickItem* item) {
+		return QByteArray(item->metaObject()->className()).startsWith("QQuickTextInput")
+		       && item->property("text").toString() == u"bash"_s;
+	});
+	QVERIFY(delayRowKeyInput);
+	scrollIntoView(scroller, delayRowKeyInput);
+	delayRowKeyInput->forceActiveFocus();
+	QTRY_VERIFY(delayRowKeyInput->hasActiveFocus());
+	delayRowKeyInput->setProperty("text", QString());
+	QMetaObject::invokeMethod(delayRowKeyInput, "textEdited");
+	QCoreApplication::processEvents();
+
+	QQuickItem* delayReset = findFormRowReset(delayMap->parentItem());
+	QVERIFY(delayReset);
+	scrollIntoView(scroller, delayReset);
+	QTRY_VERIFY(delayReset->isVisible());
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
+	                  delayReset->mapToScene(QPointF(delayReset->width() / 2.0, delayReset->height() / 2.0)).toPoint());
+	QTRY_COMPARE(permSection->property("delayMode").toString(), u"none"_s);
+	QVERIFY(!f.workspace->configEditor()->contains({u"delay"_s}));
+	QVERIFY(delayMap->property("entries").toList().isEmpty());
+	QTRY_VERIFY(!delayReset->isVisible());
+
+	QQuickItem* delaySegmented = findByTypePrefix(delayMap->parentItem(), "Segmented_QMLTYPE");
+	QVERIFY(delaySegmented);
+	scrollIntoView(scroller, delaySegmented);
+	const auto clickSegment = [&](QQuickItem* segmented, double fractionX) {
+		const QPoint pt = segmented->mapToScene(QPointF(segmented->width() * fractionX, segmented->height() / 2.0)).toPoint();
+		QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, pt);
+	};
+	clickSegment(delaySegmented, 0.5); // "All tools" ("number")
+	QTRY_COMPARE(permSection->property("delayMode").toString(), u"number"_s);
+
+	QQuickItem* globalDelayInput = findByTypePrefix(globalDelayField, "QQuickTextInput");
+	QVERIFY(globalDelayInput);
+	scrollIntoView(scroller, globalDelayField);
+	globalDelayInput->forceActiveFocus();
+	QTRY_VERIFY(globalDelayInput->hasActiveFocus());
+	globalDelayInput->setProperty("text", u"2abc"_s);
+	QMetaObject::invokeMethod(globalDelayInput, "textEdited");
+	QTRY_VERIFY(globalDelayField->property("hasValidationError").toBool());
+	QVERIFY(permSection->property("hasValidationError").toBool());
+
+	clickSegment(delaySegmented, 1.0 / 6.0); // "No delay" ("none")
+	QTRY_COMPARE(permSection->property("delayMode").toString(), u"none"_s);
+	QVERIFY(!globalDelayField->property("hasValidationError").toBool());
+	QVERIFY(!permSection->property("hasValidationError").toBool());
+
+	clickSegment(delaySegmented, 0.5); // back to "All tools" ("number")
+	QTRY_COMPARE(permSection->property("delayMode").toString(), u"number"_s);
+	QVERIFY(!globalDelayField->property("hasValidationError").toBool());
+	QVERIFY(!permSection->property("hasValidationError").toBool());
+	QCOMPARE(globalDelayField->property("inputText").toString(), u"2"_s);
+
+	QMetaObject::invokeMethod(configDialog, "selectCategory", Q_ARG(QVariant, u"agents"_s));
+	QCoreApplication::processEvents();
+	auto* agentsSection = findByName(configDialog, u"configAgentsSection"_s);
+	QVERIFY(agentsSection);
+	QMetaObject::invokeMethod(agentsSection, "setExpanded", Q_ARG(QVariant, u"builtin:build"_s), Q_ARG(QVariant, true));
+	QCoreApplication::processEvents();
+	auto* agentDelayMap = findByName(agentsSection, u"agentDelayMap_build"_s);
+	QVERIFY(agentDelayMap);
+	QCOMPARE(agentDelayMap->property("entries").toList().size(), 1);
+	QQuickItem* agentDelayKeyInput = findItem(agentDelayMap, [](QQuickItem* item) {
+		return QByteArray(item->metaObject()->className()).startsWith("QQuickTextInput")
+		       && item->property("text").toString() == u"bash"_s;
+	});
+	QVERIFY(agentDelayKeyInput);
+	scrollIntoView(scroller, agentDelayKeyInput);
+	agentDelayKeyInput->forceActiveFocus();
+	QTRY_VERIFY(agentDelayKeyInput->hasActiveFocus());
+	agentDelayKeyInput->setProperty("text", QString());
+	QMetaObject::invokeMethod(agentDelayKeyInput, "textEdited");
+	QCoreApplication::processEvents();
+	QQuickItem* agentDelayReset = findFormRowReset(agentDelayMap->parentItem());
+	QVERIFY(agentDelayReset);
+	scrollIntoView(scroller, agentDelayReset);
+	QTRY_VERIFY(agentDelayReset->isVisible());
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
+	                  agentDelayReset->mapToScene(QPointF(agentDelayReset->width() / 2.0, agentDelayReset->height() / 2.0)).toPoint());
+	QTRY_VERIFY(agentDelayMap->property("entries").toList().isEmpty());
+	QVERIFY(!f.workspace->configEditor()->contains({u"agent"_s, u"build"_s, u"delay"_s}));
+	QTRY_VERIFY(!agentDelayReset->isVisible());
+	QVERIFY2(warningSpy.isEmpty(), "Switch hit-padding or config reset test emitted QML warnings");
+}
+
+void TestMainWindow::sidebarRunningRowsReorderByLongPressDragAndPersistAcrossFrames()
+{
+	MainFixture f;
+	f.stub.add(u"ses_c"_s, 3);
+	f.fake.send({{u"kind"_s, u"sessions"_s},
+	             {u"sessions"_s, QJsonArray{sessionInfoJson(u"ses_a"_s, {.title = u"Session ses_a"_s, .createdAt = 1}),
+	                                      sessionInfoJson(u"ses_b"_s, {.title = u"Session ses_b"_s, .createdAt = 2}),
+	                                      sessionInfoJson(u"ses_c"_s, {.title = u"Session ses_c"_s, .createdAt = 3})}}});
+	QTRY_COMPARE(f.workspace->sessions()->count(), 3);
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+	window->requestActivate();
+	QTRY_VERIFY(window->isActive());
+
+	auto* runningList = findItem(window->contentItem(), [](QQuickItem* item) { return item->objectName() == u"runningList"_s; });
+	QVERIFY(runningList);
+	const auto findRow = [&](const QString& sessionId) -> QQuickItem* {
+		return findItem(runningList, [&sessionId](QQuickItem* item) {
+			return QByteArray(item->metaObject()->className()).startsWith("SessionRow_QMLTYPE")
+			       && item->property("sessionId").toString() == sessionId;
+		});
+	};
+	const auto sessionOrder = [&]() {
+		QStringList out;
+		const auto* model = f.workspace->sessions();
+		for(int row = 0; row < model->rowCount(); ++row)
+		{
+			out.append(model->index(row).data(refgui::workspace::SessionListModel::SessionIdRole).toString());
+		}
+		return out;
+	};
+	QCOMPARE(sessionOrder(), (QStringList{u"ses_c"_s, u"ses_b"_s, u"ses_a"_s}));
+
+	QQuickItem* rowA = nullptr;
+	QQuickItem* rowB = nullptr;
+	QQuickItem* rowC = nullptr;
+	QTRY_VERIFY([&] {
+		rowA = findRow(u"ses_a"_s);
+		rowB = findRow(u"ses_b"_s);
+		rowC = findRow(u"ses_c"_s);
+		return rowA != nullptr && rowB != nullptr && rowC != nullptr && rowA->y() > rowC->y();
+	}());
+
+	// Short click still opens and detaches sessions.
+	const QPoint bPos = rowB->mapToScene(QPointF(rowB->width() / 2.0, rowB->height() / 2.0)).toPoint();
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, bPos);
+	QTRY_COMPARE(f.workspace->currentId(), u"ses_b"_s);
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, bPos);
+	QTRY_VERIFY(f.workspace->currentId().isEmpty());
+
+	// Long-press (~320ms) + drag moves ses_c down to the bottom of Running.
+	const QPoint startPt = rowC->mapToScene(QPointF(rowC->width() / 2.0, rowC->height() / 2.0)).toPoint();
+	const QPoint endPt = rowA->mapToScene(QPointF(rowA->width() / 2.0, rowA->height() / 2.0)).toPoint();
+	QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, startPt);
+	QTest::qWait(320);
+	QTRY_VERIFY(rowC->property("dragging").toBool());
+	QTest::mouseMove(window, QPoint(startPt.x(), (startPt.y() + endPt.y()) / 2));
+	QTest::mouseMove(window, endPt);
+	QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, endPt);
+	QTRY_VERIFY(!rowC->property("dragging").toBool());
+	QCOMPARE(sessionOrder(), (QStringList{u"ses_b"_s, u"ses_a"_s, u"ses_c"_s}));
+	QCOMPARE(f.workspace->settings()->sidebarRunningOrder(), (QStringList{u"ses_b"_s, u"ses_a"_s, u"ses_c"_s}));
+	QVERIFY(f.workspace->currentId().isEmpty()); // dragging did not trigger click open
+
+	// New backend `sessions` frame preserves custom order and puts newly created ses_d at the top.
+	f.stub.add(u"ses_d"_s, 4);
+	f.fake.send({{u"kind"_s, u"sessions"_s},
+	             {u"sessions"_s, QJsonArray{sessionInfoJson(u"ses_a"_s, {.title = u"Session ses_a"_s, .createdAt = 1}),
+	                                      sessionInfoJson(u"ses_b"_s, {.title = u"Session ses_b"_s, .createdAt = 2}),
+	                                      sessionInfoJson(u"ses_c"_s, {.title = u"Session ses_c"_s, .createdAt = 3}),
+	                                      sessionInfoJson(u"ses_d"_s, {.title = u"Session ses_d"_s, .createdAt = 4})}}});
+	QTRY_COMPARE(f.workspace->sessions()->count(), 4);
+	QCOMPARE(sessionOrder(), (QStringList{u"ses_d"_s, u"ses_b"_s, u"ses_a"_s, u"ses_c"_s}));
+	QVERIFY2(warningSpy.isEmpty(), "Sidebar running reorder test emitted QML warnings");
+}
+
+void TestMainWindow::uiZoomSettingsShortcutsResizeAndPopupsScaleCleanly()
+{
+	MainFixture f;
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+	window->requestActivate();
+	QTRY_VERIFY(window->isActive());
+
+	const auto findByName = [](QQuickItem* root, const QString& name) {
+		return findItem(root, [&name](QQuickItem* item) { return item->objectName() == name; });
+	};
+	auto* scaledRoot = findByName(window->contentItem(), u"scaledRoot"_s);
+	auto* handle = findByName(window->contentItem(), u"sidebarResizeHandle"_s);
+	QVERIFY(scaledRoot && handle);
+	QVERIFY(qFuzzyCompare(scaledRoot->scale(), 1.0));
+
+	// 1) SettingsDialog zoom buttons update uiScale and scaledRoot.
+	f.workspace->commands()->run(u"settings"_s);
+	QQuickItem* settingsDialog = nullptr;
+	QTRY_VERIFY([&] {
+		settingsDialog = findByTypePrefix(window->contentItem(), "SettingsDialog_QMLTYPE");
+		return settingsDialog != nullptr && settingsDialog->isVisible();
+	}());
+	auto* panel = findByTypePrefix(settingsDialog, "QQuickRectangle");
+	QVERIFY(panel);
+	QTRY_VERIFY(qFuzzyCompare(panel->scale(), 1.0));
+
+	auto* outBtn = findByName(settingsDialog, u"uiScaleOutButton"_s);
+	auto* inBtn = findByName(settingsDialog, u"uiScaleInButton"_s);
+	auto* resetBtn = findByName(settingsDialog, u"uiScaleResetButton"_s);
+	auto* label = findByName(settingsDialog, u"uiScaleLabel"_s);
+	QVERIFY(outBtn && inBtn && resetBtn && label);
+	QCOMPARE(label->property("text").toString(), u"100%"_s);
+	QVERIFY(!resetBtn->isVisible());
+
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
+	                  inBtn->mapToScene(QPointF(inBtn->width() / 2.0, inBtn->height() / 2.0)).toPoint());
+	QTRY_VERIFY(qFuzzyCompare(f.workspace->settings()->uiScale(), 1.1));
+	QCOMPARE(label->property("text").toString(), u"110%"_s);
+	QVERIFY(resetBtn->isVisible());
+	QVERIFY(qFuzzyCompare(scaledRoot->scale(), 1.1));
+	QVERIFY(qFuzzyCompare(scaledRoot->width(), window->width() / 1.1));
+
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
+	                  resetBtn->mapToScene(QPointF(resetBtn->width() / 2.0, resetBtn->height() / 2.0)).toPoint());
+	QTRY_VERIFY(qFuzzyCompare(f.workspace->settings()->uiScale(), 1.0));
+	QCOMPARE(label->property("text").toString(), u"100%"_s);
+	QVERIFY(!resetBtn->isVisible());
+
+	// 2) Shortcuts Ctrl+= / Ctrl+- / Ctrl+0 work in SettingsDialog, and are suppressed in CommandPalette.
+	QTest::keyClick(window, Qt::Key_Equal, Qt::ControlModifier);
+	QTRY_VERIFY(qFuzzyCompare(f.workspace->settings()->uiScale(), 1.1));
+	QTest::keyClick(window, Qt::Key_Minus, Qt::ControlModifier);
+	QTRY_VERIFY(qFuzzyCompare(f.workspace->settings()->uiScale(), 1.0));
+	QTest::keyClick(window, Qt::Key_Equal, Qt::ControlModifier);
+	QTest::keyClick(window, Qt::Key_Equal, Qt::ControlModifier);
+	QTRY_VERIFY(qFuzzyCompare(f.workspace->settings()->uiScale(), 1.2));
+	QTest::keyClick(window, Qt::Key_0, Qt::ControlModifier);
+	QTRY_VERIFY(qFuzzyCompare(f.workspace->settings()->uiScale(), 1.0));
+
+	f.workspace->openDialog(u"palette"_s);
+	QTRY_VERIFY(findByTypePrefix(window->contentItem(), "CommandPalette") != nullptr);
+	QTest::keyClick(window, Qt::Key_Equal, Qt::ControlModifier);
+	QCoreApplication::processEvents();
+	QVERIFY(qFuzzyCompare(f.workspace->settings()->uiScale(), 1.0));
+	f.workspace->closeDialog();
+	QTRY_VERIFY(findByTypePrefix(window->contentItem(), "CommandPalette") == nullptr);
+
+	// 3) Zoom to 1.2 and verify Sidebar resize scales delta by 1 / uiScale.
+	QTest::keyClick(window, Qt::Key_Equal, Qt::ControlModifier);
+	QTest::keyClick(window, Qt::Key_Equal, Qt::ControlModifier);
+	QTRY_VERIFY(qFuzzyCompare(f.workspace->settings()->uiScale(), 1.2));
+	QCOMPARE(f.workspace->settings()->sidebarWidth(), 264);
+	auto* sidebar = findByTypePrefix(window->contentItem(), "Sidebar_QMLTYPE");
+	QVERIFY(sidebar);
+	const QPoint hCenter = handle->mapToScene(QPointF(handle->width() / 2.0, handle->height() / 2.0)).toPoint();
+	QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, hCenter);
+	QTest::mouseMove(window, hCenter + QPoint(20, 0));
+	QTRY_VERIFY(sidebar->property("resizing").toBool());
+	QTest::mouseMove(window, hCenter + QPoint(60, 0));
+	QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, hCenter + QPoint(60, 0));
+	QTRY_VERIFY(std::abs(f.workspace->settings()->sidebarWidth() - 314) <= 1);
+	// 4) SelectField and ContextMenu popups scale cleanly under zoom without QML warnings.
+	f.workspace->commands()->run(u"config"_s);
+	QQuickItem* configDialog = nullptr;
+	QTRY_VERIFY([&] {
+		configDialog = findByName(window->contentItem(), u"configDialog"_s);
+		return configDialog != nullptr && !f.workspace->configEditor()->isLoading();
+	}());
+	QQuickItem* profileSelect = findByName(configDialog, u"configProfileSelect"_s);
+	QVERIFY(profileSelect);
+	QMetaObject::invokeMethod(profileSelect, "openPopup");
+	QObject* selectPopup = nullptr;
+	for(QObject* ch : profileSelect->children())
+	{
+		if(QByteArray(ch->metaObject()->className()).startsWith("QQuickPopup"))
+		{
+			selectPopup = ch;
+			break;
+		}
+	}
+	QVERIFY(selectPopup);
+	QTRY_VERIFY(selectPopup->property("opened").toBool());
+	QQuickItem* selectContent = selectPopup->property("contentItem").value<QQuickItem*>();
+	QVERIFY(selectContent && !selectContent->childItems().isEmpty());
+	QQuickItem* selectInner = selectContent->childItems().first();
+	QVERIFY(qFuzzyCompare(selectInner->scale(), 1.2));
+	QVERIFY(qFuzzyCompare(selectPopup->property("width").toReal(), selectInner->width() * 1.2));
+	QMetaObject::invokeMethod(selectPopup, "close");
+	f.workspace->closeDialog();
+	QTRY_VERIFY(findByName(window->contentItem(), u"configDialog"_s) == nullptr);
+
+	auto* rowA = findItem(window->contentItem(), [](QQuickItem* item) {
+		return QByteArray(item->metaObject()->className()).startsWith("SessionRow_QMLTYPE")
+		       && item->property("sessionId").toString() == u"ses_a"_s;
+	});
+	QVERIFY(rowA);
+	QObject* menuObj = nullptr;
+	for(QObject* ch : rowA->children())
+	{
+		if(QByteArray(ch->metaObject()->className()).startsWith("ContextMenu_QMLTYPE"))
+		{
+			menuObj = ch;
+			break;
+		}
+	}
+	QVERIFY(menuObj);
+	QMetaObject::invokeMethod(menuObj, "openAt", Q_ARG(QPointF, QPointF(12.0, 12.0)));
+	QTRY_VERIFY(menuObj->property("opened").toBool());
+	QQuickItem* menuContent = menuObj->property("contentItem").value<QQuickItem*>();
+	QVERIFY(menuContent && !menuContent->childItems().isEmpty());
+	QQuickItem* menuInner = menuContent->childItems().first();
+	QVERIFY(qFuzzyCompare(menuInner->scale(), 1.2));
+	QVERIFY(qFuzzyCompare(menuObj->property("width").toReal(), menuInner->width() * 1.2));
+	QMetaObject::invokeMethod(menuObj, "close");
+	QTRY_VERIFY(!menuObj->property("opened").toBool());
+
+	QObject* settingsTip = nullptr;
+	QQuickItem* settingsBtn = findItem(window->contentItem(), [&settingsTip](QQuickItem* item) {
+		if(!QByteArray(item->metaObject()->className()).startsWith("IconButton_QMLTYPE"))
+		{
+			return false;
+		}
+		for(QObject* ch : item->children())
+		{
+			if(QByteArray(ch->metaObject()->className()).startsWith("PlainToolTip")
+			   && ch->property("text").toString() == u"Settings"_s)
+			{
+				settingsTip = ch;
+				return true;
+			}
+		}
+		return false;
+	});
+	QVERIFY(settingsBtn && settingsTip);
+	settingsTip->setProperty("delay", 0);
+
+	const auto verifyToolTipGeometry = [&](double scale) {
+		f.workspace->settings()->setUiScale(scale);
+		QTRY_VERIFY(qFuzzyCompare(scaledRoot->scale(), scale));
+		QCoreApplication::processEvents();
+
+		settingsTip->setProperty("visible", true);
+		QTRY_VERIFY(settingsTip->property("opened").toBool());
+		QQuickItem* tipContent = settingsTip->property("contentItem").value<QQuickItem*>();
+		QVERIFY(tipContent && !tipContent->childItems().isEmpty());
+		QQuickItem* tipInner = tipContent->childItems().first();
+		QTRY_VERIFY(qFuzzyCompare(tipInner->scale(), scale));
+		const qreal tipW = settingsTip->property("width").toReal();
+		const qreal tipH = settingsTip->property("height").toReal();
+		QVERIFY(qFuzzyCompare(tipW, tipInner->width() * scale));
+		QVERIFY(qFuzzyCompare(tipH, tipInner->height() * scale));
+
+		const QPointF tipTopLeft = tipContent->mapToScene(QPointF(0.0, 0.0));
+		const QPointF btnTopLeft = settingsBtn->mapToScene(QPointF(0.0, 0.0));
+		const QPointF btnBottomRight = settingsBtn->mapToScene(QPointF(settingsBtn->width(), settingsBtn->height()));
+		const qreal tipCenterX = tipTopLeft.x() + tipW / 2.0;
+		const qreal btnCenterX = (btnTopLeft.x() + btnBottomRight.x()) / 2.0;
+		const qreal tipBottomY = tipTopLeft.y() + tipH;
+		QVERIFY2(std::abs(tipCenterX - btnCenterX) <= 1.5,
+		         qPrintable(u"tipCenterX=%1 btnCenterX=%2 scale=%3"_s.arg(tipCenterX).arg(btnCenterX).arg(scale)));
+		QVERIFY2(tipBottomY < btnTopLeft.y(),
+		         qPrintable(u"tipBottomY=%1 btnTopLeft.y=%2 scale=%3"_s.arg(tipBottomY).arg(btnTopLeft.y()).arg(scale)));
+		QVERIFY2(std::abs((btnTopLeft.y() - tipBottomY) - 3.0 * scale) <= 1.5,
+		         qPrintable(u"gap=%1 expected=%2 scale=%3"_s.arg(btnTopLeft.y() - tipBottomY).arg(3.0 * scale).arg(scale)));
+
+		settingsTip->setProperty("visible", false);
+		QTRY_VERIFY(!settingsTip->property("opened").toBool());
+	};
+	verifyToolTipGeometry(1.5);
+	verifyToolTipGeometry(0.7);
+	QVERIFY2(warningSpy.isEmpty(), "UI zoom test emitted QML warnings");
 }
 
 QTEST_MAIN(TestMainWindow)

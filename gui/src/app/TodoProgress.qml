@@ -90,23 +90,19 @@ Item {
 
 	Popup {
 		id: popup
+		readonly property real uiScale: UiScale.factor
 
 		// Above the item, its right edge on the item's, and inside `bounds`: the status line is at the bottom of the pane.
 		parent: root
-		y: -height - root.popupGap
-		width: Math.min(root.popupWidth, root.bounds.width)
-		height: Math.min(header.height + list.contentHeight + 2 * root.popupPadding, root.popupMaxHeight)
-		padding: root.popupPadding
+		y: -popupInner.height - root.popupGap
+		width: popupInner.width * uiScale
+		height: popupInner.height * uiScale
+		padding: 0
 		focus: true
 		closePolicy: Popup.CloseOnPressOutside
+		background: null
 
-		onAboutToShow: x = Math.max(root.mapFromItem(root.bounds, 0, 0).x, root.width - width)
-
-		background: Rectangle {
-			radius: Theme.radius
-			color: Theme.surface
-			border.color: Theme.border
-		}
+		onAboutToShow: x = Math.max(root.mapFromItem(root.bounds, 0, 0).x, root.width - popupInner.width)
 
 		contentItem: Item {
 			focus: true
@@ -116,32 +112,51 @@ Item {
 				root.dismissed()
 			}
 
-			Text {
-				id: header
-				textFormat: Text.PlainText
-				x: root.headerIndent
-				width: parent.width - 2 * x
-				height: implicitHeight + root.headerPadding
-				verticalAlignment: Text.AlignVCenter
-				text: qsTr("Todo %1").arg(root.counts)
-				color: Theme.textMuted
-				font.pixelSize: Theme.smallFontSize
-				font.bold: true
-			}
+			Item {
+				id: popupInner
+				width: Math.min(root.popupWidth, root.bounds.width)
+				height: Math.min(header.height + list.contentHeight + 2 * root.popupPadding, root.popupMaxHeight)
+				transformOrigin: Item.TopLeft
+				scale: popup.uiScale
 
-			Flickable {
-				id: list
-				anchors { top: header.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
-				contentWidth: width
-				contentHeight: todos.height
-				interactive: contentHeight > height
-				boundsBehavior: Flickable.StopAtBounds
-				clip: true
+				Rectangle {
+					anchors.fill: parent
+					radius: Theme.radius
+					color: Theme.surface
+					border.color: Theme.border
+				}
 
-				TodoList {
-					id: todos
-					width: list.width
-					items: root.session.todoItems
+				Item {
+					anchors { fill: parent; margins: root.popupPadding }
+
+					Text {
+						id: header
+						textFormat: Text.PlainText
+						x: root.headerIndent
+						width: parent.width - 2 * x
+						height: implicitHeight + root.headerPadding
+						verticalAlignment: Text.AlignVCenter
+						text: qsTr("Todo %1").arg(root.counts)
+						color: Theme.textMuted
+						font.pixelSize: Theme.smallFontSize
+						font.bold: true
+					}
+
+					Flickable {
+						id: list
+						anchors { top: header.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
+						contentWidth: width
+						contentHeight: todos.height
+						interactive: contentHeight > height
+						boundsBehavior: Flickable.StopAtBounds
+						clip: true
+
+						TodoList {
+							id: todos
+							width: list.width
+							items: root.session.todoItems
+						}
+					}
 				}
 			}
 		}

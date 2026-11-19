@@ -373,6 +373,9 @@ void Workspace::registerCommands()
 		}
 		unzoom();
 	});
+	on(u"ui-zoom-in"_s, [this](const QString&, const QString&) { m_settings.setUiScale(m_settings.uiScale() + refgui::workspace::Settings::UiScaleStep); });
+	on(u"ui-zoom-out"_s, [this](const QString&, const QString&) { m_settings.setUiScale(m_settings.uiScale() - refgui::workspace::Settings::UiScaleStep); });
+	on(u"ui-zoom-reset"_s, [this](const QString&, const QString&) { m_settings.setUiScale(refgui::workspace::Settings::DefaultUiScale); });
 	on(u"mcp"_s, [this](const QString&, const QString&) {
 		refreshMcp();
 		openDialog(u"mcp"_s);

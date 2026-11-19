@@ -81,6 +81,7 @@ private slots:
 	void watchAllIsSentAgainAfterAReconnect();
 	void connectionKnowsWhetherTheBackendIsLocal();
 	void configLoadsAgentsModelsAndMcp();
+	void liveOrderSortsRunningSessionsAndPlacesNewSessionsFirst();
 };
 
 void TstSessionList::sortsLiveByCreationAndHistoryByUpdate()
@@ -516,6 +517,31 @@ void TstSessionList::configLoadsAgentsModelsAndMcp()
 	QVERIFY(config.variantsOf(u"p"_s, u"unknown"_s).isEmpty());
 	QTRY_COMPARE(config.mcpServers().size(), 1);
 	QCOMPARE(config.mcpServers().first().toMap().value(u"status"_s).toString(), u"connected"_s);
+}
+
+void TstSessionList::liveOrderSortsRunningSessionsAndPlacesNewSessionsFirst()
+{
+	SessionListModel model;
+	model.setSessions({session(u"a"_s, 1), session(u"b"_s, 2), session(u"c"_s, 3), stored(u"old"_s, 10, 99)});
+	QCOMPARE(ids(model), (QStringList{u"c"_s, u"b"_s, u"a"_s, u"old"_s}));
+
+	model.setLiveOrder({u"a"_s, u"c"_s, u"b"_s});
+	QCOMPARE(ids(model), (QStringList{u"a"_s, u"c"_s, u"b"_s, u"old"_s}));
+
+	// Newly created unordered live sessions appear before custom-ordered rows (newest first).
+	model.setSessions({session(u"a"_s, 1), session(u"b"_s, 2), session(u"c"_s, 3), session(u"d"_s, 4), session(u"e"_s, 5), stored(u"old"_s, 10, 99)});
+	QCOMPARE(ids(model), (QStringList{u"e"_s, u"d"_s, u"a"_s, u"c"_s, u"b"_s, u"old"_s}));
+
+	// Unchanged normalized order skips rebuild.
+	QSignalSpy moved(&model, &QAbstractItemModel::rowsMoved);
+	QSignalSpy reset(&model, &QAbstractItemModel::modelReset);
+	model.setLiveOrder({u"a"_s, QString(), u"c"_s, u"b"_s, u"a"_s});
+	QCOMPARE(moved.count(), 0);
+	QCOMPARE(reset.count(), 0);
+	QCOMPARE(ids(model), (QStringList{u"e"_s, u"d"_s, u"a"_s, u"c"_s, u"b"_s, u"old"_s}));
+
+	model.setLiveOrder({});
+	QCOMPARE(ids(model), (QStringList{u"e"_s, u"d"_s, u"c"_s, u"b"_s, u"a"_s, u"old"_s}));
 }
 
 QTEST_MAIN(TstSessionList)

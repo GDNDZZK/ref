@@ -28,7 +28,8 @@ Image {
 			change()
 			return
 		}
-		const size = Qt.size(item.width, item.height) // logical; Qt applies the device pixel ratio
+		const scale = Workspace.settings.uiScale
+		const size = Qt.size(Math.max(1, Math.round(item.width * scale)), Math.max(1, Math.round(item.height * scale)))
 		const grabbing = item.grabToImage(result => {
 			if (token !== shot.serial)
 				return

@@ -52,6 +52,7 @@ public:
 	void forgetPersisted(const QString& sessionId);
 	// Takes `info` in, e.g. the answer to a rename, without waiting for the backend's list frame.
 	void update(const proto::SessionInfo& info);
+	void setLiveOrder(const QStringList& ids);
 
 	// Requests about one session by id, attached here or not. Those that answer with the
 	// session's new info take it in with update().

@@ -9,6 +9,9 @@
 #include <QSaveFile>
 #include <QtMath>
 #include <algorithm>
+#include <QJsonArray>
+#include <QSet>
+#include <cmath>
 using namespace Qt::StringLiterals;
 using namespace std::chrono_literals;
 
@@ -33,9 +36,11 @@ const QString VisibleKey = u"visible"_s;
 const QString TodoExpandedKey = u"todoExpanded"_s;
 const QString RunningExpandedKey = u"runningExpanded"_s;
 const QString HistoryExpandedKey = u"historyExpanded"_s;
+const QString RunningOrderKey = u"runningOrder"_s;
 const QString WindowKey = u"window"_s;
 const QString WidthKey = u"width"_s;
 const QString HeightKey = u"height"_s;
+const QString UiScaleKey = u"uiScale"_s;
 
 using NotifyKind = proto::NotifyFrame::Kind;
 
@@ -131,6 +136,76 @@ void readSidebarWidth(const QJsonObject& root, const QString& sectionKey, const 
 		return;
 	}
 	value = std::clamp(read, Settings::MinSidebarWidth, Settings::MaxSidebarWidth);
+}
+
+QStringList deduplicateIds(const QStringList& ids)
+{
+	QStringList cleaned;
+	QSet<QString> seen;
+	for(const QString& id : ids)
+	{
+		if(!id.isEmpty() && !seen.contains(id))
+		{
+			seen.insert(id);
+			cleaned.append(id);
+		}
+	}
+	return cleaned;
+}
+
+void readRunningOrder(const QJsonObject& root, const QString& sectionKey, const QString& key, QStringList& value, Problems& problems)
+{
+	const QJsonObject fields = section(root, sectionKey);
+	if(!fields.contains(key))
+	{
+		return;
+	}
+	const QJsonValue raw = fields.value(key);
+	if(!raw.isArray())
+	{
+		problems.add(u"%1: expected an array of session ids"_s.arg(fieldPath(sectionKey, key)));
+		return;
+	}
+	QStringList ids;
+	const QJsonArray arr = raw.toArray();
+	ids.reserve(arr.size());
+	for(const QJsonValue& item : arr)
+	{
+		if(!item.isString() || item.toString().isEmpty())
+		{
+			problems.add(u"%1: expected session ids"_s.arg(fieldPath(sectionKey, key)));
+			return;
+		}
+		ids.append(item.toString());
+	}
+	value = deduplicateIds(ids);
+}
+
+double normalizeUiScale(double scale)
+{
+	const double rounded = static_cast<double>(qRound(scale * 100.0)) / 100.0;
+	return std::clamp(rounded, Settings::MinUiScale, Settings::MaxUiScale);
+}
+
+void readUiScale(const QJsonObject& root, const QString& key, double& value, Problems& problems)
+{
+	if(!root.contains(key))
+	{
+		return;
+	}
+	const QJsonValue raw = root.value(key);
+	if(!raw.isDouble())
+	{
+		problems.add(u"%1: expected a positive number"_s.arg(key));
+		return;
+	}
+	const double read = raw.toDouble();
+	if(!std::isfinite(read) || read <= 0.0)
+	{
+		problems.add(u"%1: expected a positive number"_s.arg(key));
+		return;
+	}
+	value = normalizeUiScale(read);
 }
 } // namespace
 
@@ -249,6 +324,11 @@ void Settings::setSidebarWidth(int width)
 	set(m_sidebarWidth, std::clamp(width, MinSidebarWidth, MaxSidebarWidth), &Settings::sidebarWidthChanged);
 }
 
+void Settings::setSidebarRunningOrder(const QStringList& order)
+{
+	set(m_sidebarRunningOrder, deduplicateIds(order), &Settings::sidebarRunningOrderChanged);
+}
+
 void Settings::setWindowWidth(int width)
 {
 	set(m_windowWidth, width, &Settings::windowSizeChanged);
@@ -257,6 +337,22 @@ void Settings::setWindowWidth(int width)
 void Settings::setWindowHeight(int height)
 {
 	set(m_windowHeight, height, &Settings::windowSizeChanged);
+}
+
+void Settings::setUiScale(double scale)
+{
+	if(!std::isfinite(scale) || scale <= 0.0)
+	{
+		return;
+	}
+	const double normalized = normalizeUiScale(scale);
+	if(qAbs(m_uiScale - normalized) < 1e-9)
+	{
+		return;
+	}
+	m_uiScale = normalized;
+	scheduleSave();
+	emit uiScaleChanged();
 }
 
 void Settings::scheduleSave()
@@ -312,8 +408,10 @@ void Settings::readFields(const QJsonObject& root)
 	readFlag(root, SidebarKey, RunningExpandedKey, m_sidebarRunningExpanded, problems);
 	readFlag(root, SidebarKey, HistoryExpandedKey, m_sidebarHistoryExpanded, problems);
 	readSidebarWidth(root, SidebarKey, WidthKey, m_sidebarWidth, problems);
+	readRunningOrder(root, SidebarKey, RunningOrderKey, m_sidebarRunningOrder, problems);
 	readEdge(root, WindowKey, WidthKey, m_windowWidth, problems);
 	readEdge(root, WindowKey, HeightKey, m_windowHeight, problems);
+	readUiScale(root, UiScaleKey, m_uiScale, problems);
 
 	if(problems.any())
 	{
@@ -340,12 +438,14 @@ QJsonObject Settings::toJson() const
 	sidebar.insert(RunningExpandedKey, m_sidebarRunningExpanded);
 	sidebar.insert(HistoryExpandedKey, m_sidebarHistoryExpanded);
 	sidebar.insert(WidthKey, m_sidebarWidth);
+	sidebar.insert(RunningOrderKey, QJsonArray::fromStringList(m_sidebarRunningOrder));
 	root.insert(SidebarKey, sidebar);
 
 	QJsonObject window = section(root, WindowKey);
 	window.insert(WidthKey, m_windowWidth);
 	window.insert(HeightKey, m_windowHeight);
 	root.insert(WindowKey, window);
+	root.insert(UiScaleKey, m_uiScale);
 	return root;
 }
 

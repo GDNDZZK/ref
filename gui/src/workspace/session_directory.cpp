@@ -75,6 +75,12 @@ void SessionDirectory::update(const proto::SessionInfo& info)
 	setLive(std::move(sessions));
 }
 
+void SessionDirectory::setLiveOrder(const QStringList& ids)
+{
+	m_live.setLiveOrder(ids);
+	m_choices.setLiveOrder(ids);
+}
+
 void SessionDirectory::forgetPersisted(const QString& sessionId)
 {
 	m_persisted.removeIf([&sessionId](const proto::SessionInfo& info) { return info.id == sessionId; });

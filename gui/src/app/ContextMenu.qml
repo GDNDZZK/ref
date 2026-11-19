@@ -9,6 +9,8 @@ Popup {
 
 	property var entries: []
 	readonly property int textInset: 14
+	readonly property int menuPadding: 4
+	readonly property real uiScale: Workspace.settings.uiScale
 
 	signal triggered(int index)
 
@@ -19,8 +21,11 @@ Popup {
 		open()
 	}
 
-	padding: 4
+	width: menuInner.width * uiScale
+	height: menuInner.height * uiScale
+	padding: 0
 	closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+	background: null
 
 	enter: Transition {
 		NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Motion.quick; easing.type: Motion.ease }
@@ -30,50 +35,64 @@ Popup {
 		NumberAnimation { property: "opacity"; to: 0; duration: Motion.quick; easing.type: Motion.ease }
 	}
 
-	background: Rectangle {
-		radius: Theme.radius
-		color: Theme.surface
-		border.color: Theme.border
-	}
+	contentItem: Item {
+		Item {
+			id: menuInner
+			width: menuList.implicitWidth + 2 * menu.menuPadding
+			height: menuList.implicitHeight + 2 * menu.menuPadding
+			transformOrigin: Item.TopLeft
+			scale: menu.uiScale
 
-	contentItem: Column {
-		spacing: 2
+			Rectangle {
+				anchors.fill: parent
+				radius: Theme.radius
+				color: Theme.surface
+				border.color: Theme.border
+			}
 
-		Repeater {
-			model: menu.entries
+			Column {
+				id: menuList
+				x: menu.menuPadding
+				y: menu.menuPadding
+				spacing: 2
 
-			Item {
-				id: entry
+				Repeater {
+					model: menu.entries
 
-				required property var modelData
-				required property int index
+					Item {
+						id: entry
 
-				width: Math.max(150, label.implicitWidth + 2 * menu.textInset)
-				height: 32
+						required property var modelData
+						required property int index
 
-				Rectangle {
-					anchors.fill: parent
-					radius: Theme.radiusSmall + 2
-					color: hover.hovered ? Theme.surfaceHover : "transparent"
+						width: Math.max(150, label.implicitWidth + 2 * menu.textInset)
+						height: 32
 
-					Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
-				}
-				Text {
-					textFormat: Text.PlainText
-					id: label
-					anchors { left: parent.left; leftMargin: menu.textInset; verticalCenter: parent.verticalCenter }
-					text: entry.modelData.text
-					color: entry.modelData.danger ? Theme.dangerText : Theme.text
-					font.pixelSize: Theme.secondaryFontSize
-				}
-				HoverHandler {
-					id: hover
-					cursorShape: Qt.PointingHandCursor
-				}
-				TapHandler {
-					onTapped: {
-						menu.close()
-						menu.triggered(entry.index)
+						Rectangle {
+							anchors.fill: parent
+							radius: Theme.radiusSmall + 2
+							color: hover.hovered ? Theme.surfaceHover : "transparent"
+
+							Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+						}
+						Text {
+							textFormat: Text.PlainText
+							id: label
+							anchors { left: parent.left; leftMargin: menu.textInset; verticalCenter: parent.verticalCenter }
+							text: entry.modelData.text
+							color: entry.modelData.danger ? Theme.dangerText : Theme.text
+							font.pixelSize: Theme.secondaryFontSize
+						}
+						HoverHandler {
+							id: hover
+							cursorShape: Qt.PointingHandCursor
+						}
+						TapHandler {
+							onTapped: {
+								menu.close()
+								menu.triggered(entry.index)
+							}
+						}
 					}
 				}
 			}

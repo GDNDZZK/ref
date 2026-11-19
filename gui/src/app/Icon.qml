@@ -21,5 +21,5 @@ Image {
 	sourceSize: Qt.size(size, size)
 	source: name === "" ? "" : "image://icons/" + name + "-" + size + "?color=" + colorHex
 	fillMode: Image.Pad
-	smooth: false
+	smooth: UiScale.factor !== 1
 }

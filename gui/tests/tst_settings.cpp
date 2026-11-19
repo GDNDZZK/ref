@@ -6,6 +6,7 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
+#include <limits>
 
 using namespace Qt::StringLiterals;
 using refgui::workspace::Settings;
@@ -43,6 +44,7 @@ private slots:
 	void unknownValuesAreIgnoredAndReported();
 	void notifyKindsFollowTheSwitches();
 	void unwritableLocationIsReported();
+	void runningOrderAndUiScaleValidationAndPersistence();
 };
 
 void TestSettings::defaultsWithoutAFile()
@@ -59,6 +61,8 @@ void TestSettings::defaultsWithoutAFile()
 	QVERIFY(settings.sidebarHistoryExpanded());
 	QCOMPARE(settings.sidebarWidth(), Settings::DefaultSidebarWidth);
 	QCOMPARE(settings.windowWidth(), Settings::DefaultWindowWidth);
+	QVERIFY(settings.sidebarRunningOrder().isEmpty());
+	QCOMPARE(settings.uiScale(), Settings::DefaultUiScale);
 	QVERIFY(settings.loadProblem().isEmpty());
 	QVERIFY(!QFile::exists(dir.filePath(u"gui.json"_s))); // nothing is written until something changes
 }
@@ -79,6 +83,8 @@ void TestSettings::savedChangesComeBack()
 		settings.setSidebarWidth(340);
 		settings.setWindowWidth(1200);
 		settings.setWindowHeight(800);
+		settings.setSidebarRunningOrder({u"ses_b"_s, u"ses_a"_s, u"ses_b"_s, QString()});
+		settings.setUiScale(1.254);
 		settings.save();
 	}
 	const Settings again(path);
@@ -93,6 +99,8 @@ void TestSettings::savedChangesComeBack()
 	QCOMPARE(again.sidebarWidth(), 340);
 	QCOMPARE(again.windowWidth(), 1200);
 	QCOMPARE(again.windowHeight(), 800);
+	QCOMPARE(again.sidebarRunningOrder(), (QStringList{u"ses_b"_s, u"ses_a"_s}));
+	QCOMPARE(again.uiScale(), 1.25);
 	// Clamping works for setter and loaded values.
 	Settings clamped(path);
 	clamped.setSidebarWidth(100);
@@ -211,6 +219,66 @@ void TestSettings::unwritableLocationIsReported()
 	settings.save();
 
 	QCOMPARE(failed.count(), 1);
+}
+
+void TestSettings::runningOrderAndUiScaleValidationAndPersistence()
+{
+	{
+		QTemporaryDir dir;
+		const QString path = dir.filePath(u"gui.json"_s);
+		Settings settings(path);
+		QSignalSpy orderChanged(&settings, &Settings::sidebarRunningOrderChanged);
+		QSignalSpy scaleChanged(&settings, &Settings::uiScaleChanged);
+
+		settings.setSidebarRunningOrder({u"s1"_s, QString(), u"s2"_s, u"s1"_s});
+		QCOMPARE(settings.sidebarRunningOrder(), (QStringList{u"s1"_s, u"s2"_s}));
+		settings.setSidebarRunningOrder({u"s1"_s, u"s2"_s, u"s2"_s});
+		QCOMPARE(orderChanged.count(), 1);
+
+		settings.setUiScale(0.2);
+		QCOMPARE(settings.uiScale(), Settings::MinUiScale);
+		settings.setUiScale(3.0);
+		QCOMPARE(settings.uiScale(), Settings::MaxUiScale);
+		settings.setUiScale(0.0);
+		settings.setUiScale(-1.0);
+		settings.setUiScale(std::numeric_limits<double>::quiet_NaN());
+		settings.setUiScale(std::numeric_limits<double>::infinity());
+		QCOMPARE(settings.uiScale(), Settings::MaxUiScale);
+		QCOMPARE(scaleChanged.count(), 2);
+		settings.save();
+		QCOMPARE(readJson(path).value(u"uiScale"_s).toDouble(), Settings::MaxUiScale);
+		QCOMPARE(readJson(path).value(u"sidebar"_s).toObject().value(u"runningOrder"_s).toArray().toVariantList(),
+		         (QVariantList{u"s1"_s, u"s2"_s}));
+	}
+	{
+		QTemporaryDir dir;
+		const QString path = dir.filePath(u"gui.json"_s);
+		writeFile(path, R"({"sidebar":{"runningOrder":"bad"},"uiScale":"big"})");
+		const Settings settings(path);
+		QVERIFY(settings.sidebarRunningOrder().isEmpty());
+		QCOMPARE(settings.uiScale(), Settings::DefaultUiScale);
+		QVERIFY(settings.loadProblem().contains(u"sidebar.runningOrder: expected an array of session ids"_s));
+		QVERIFY(settings.loadProblem().contains(u"uiScale: expected a positive number"_s));
+	}
+	{
+		QTemporaryDir dir;
+		const QString path = dir.filePath(u"gui.json"_s);
+		writeFile(path, R"({"sidebar":{"runningOrder":["ses_1",""]},"uiScale":-0.5})");
+		const Settings settings(path);
+		QVERIFY(settings.sidebarRunningOrder().isEmpty());
+		QCOMPARE(settings.uiScale(), Settings::DefaultUiScale);
+		QVERIFY(settings.loadProblem().contains(u"sidebar.runningOrder: expected session ids"_s));
+		QVERIFY(settings.loadProblem().contains(u"uiScale: expected a positive number"_s));
+	}
+	{
+		QTemporaryDir dir;
+		const QString path = dir.filePath(u"gui.json"_s);
+		writeFile(path, R"({"sidebar":{"runningOrder":["ses_2","ses_1","ses_2"]},"uiScale":1.236})");
+		const Settings settings(path);
+		QVERIFY(settings.loadProblem().isEmpty());
+		QCOMPARE(settings.sidebarRunningOrder(), (QStringList{u"ses_2"_s, u"ses_1"_s}));
+		QCOMPARE(settings.uiScale(), 1.24);
+	}
 }
 
 QTEST_GUILESS_MAIN(TestSettings)

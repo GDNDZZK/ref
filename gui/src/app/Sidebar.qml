@@ -13,6 +13,8 @@ Rectangle {
 	property real maxAllowed: Theme.sidebarMaxWidth
 	readonly property int contentWidth: Math.max(Theme.sidebarMinWidth, Math.min(maxAllowed, preferredWidth))
 	readonly property alias resizing: resizeDrag.active
+	property string draggingSessionId: ""
+	readonly property bool reorderingRunning: draggingSessionId !== ""
 	readonly property int newRowHeight: 44
 	readonly property int searchHeight: 32
 	readonly property int historyGap: 8 // between the search field and the history rows
@@ -159,7 +161,7 @@ Rectangle {
 		property real startSceneX: 0
 
 		function updateWidth(sceneX) {
-			const nextWidth = resizeHandle.startWidth + (sceneX - resizeHandle.startSceneX)
+			const nextWidth = resizeHandle.startWidth + (sceneX - resizeHandle.startSceneX) / Workspace.settings.uiScale
 			Workspace.settings.sidebarWidth = Math.round(Math.max(Theme.sidebarMinWidth, Math.min(sidebar.maxAllowed, nextWidth)))
 		}
 
@@ -225,6 +227,7 @@ Rectangle {
 				height: sidebar.lockupHeight
 				sourceSize: Qt.size(width, height)
 				source: "qrc:/app/ref-lockup-small-" + (Theme.dark ? ThemeName.dark : ThemeName.light) + ".svg"
+				smooth: Workspace.settings.uiScale !== 1
 				Accessible.role: Accessible.Graphic
 				Accessible.name: "ref"
 			}
@@ -378,12 +381,22 @@ Rectangle {
 			// The rows' own height; scrolls only when the history would get less than its minimum.
 			height: openProgress === 1 ? sidebar.runningTargetHeight : Math.round(sidebar.runningTargetHeight * openProgress)
 			visible: height > 0
-			enabled: sidebar.runningExpanded
+			enabled: sidebar.runningExpanded && Workspace.settings.sidebarVisible
 			model: Workspace.sessions
 			spacing: sidebar.runningRowSpacing
 			clip: true
 			boundsBehavior: Flickable.StopAtBounds
-			delegate: SessionRow {}
+			interactive: !sidebar.reorderingRunning
+			delegate: SessionRow {
+				anyDragging: sidebar.reorderingRunning
+				onDragActiveChanged: (sessionId, active) => {
+					if (active)
+						sidebar.draggingSessionId = sessionId
+					else if (sidebar.draggingSessionId === sessionId)
+						sidebar.draggingSessionId = ""
+				}
+				onReorderRequested: (sessionId, toIndex) => Workspace.moveRunningSession(sessionId, toIndex)
+			}
 
 			Behavior on openProgress {
 				enabled: sidebar.ready
@@ -407,6 +420,12 @@ Rectangle {
 				NumberAnimation { property: "y"; duration: Motion.standard; easing.type: Motion.ease }
 				NumberAnimation { property: "opacity"; to: 1; duration: Motion.standard; easing.type: Motion.ease }
 				NumberAnimation { property: "scale"; to: 1; duration: Motion.standard; easing.type: Motion.ease }
+			}
+			move: Transition {
+				NumberAnimation { property: "y"; duration: Motion.standard; easing.type: Motion.ease }
+			}
+			moveDisplaced: Transition {
+				NumberAnimation { property: "y"; duration: Motion.standard; easing.type: Motion.ease }
 			}
 
 			ScrollBar.vertical: ThemedScrollBar {}
