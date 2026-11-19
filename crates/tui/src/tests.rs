@@ -6812,3 +6812,662 @@ fn autocomplete_cursor_moves_export_tilde_typing_reset_and_shell_ctrl_v() {
     app.close_session(TEST_SESSION);
     assert!(!app.watch.inputs.contains_key(TEST_SESSION));
 }
+
+#[test]
+fn standalone_slash_command_completion_tab_and_enter() {
+    use crate::ui::dialog::{Dialog, Kind};
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let (mut app, mut rx) = test_app_with_requests(false);
+    app.config.as_mut().unwrap().commands.push(CommandInfo {
+        name: "deploy".into(),
+        description: "Deploy app".into(),
+        source: "config".into(),
+    });
+    let _ = drain_requests(&mut rx);
+
+    // 1. Tab on a standalone command completes WITHOUT trailing space and closes popup.
+    type_text(&mut app, "/ses");
+    let ac = app.ac.as_ref().expect("slash popup for /ses");
+    assert_eq!(ac.items[0].0, "/sessions");
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.editor.text, "/sessions");
+    assert!(app.ac.is_none());
+    assert!(app.dialog.is_none());
+    press(&mut app, KeyCode::Enter);
+    assert!(matches!(
+        &app.dialog,
+        Some(Dialog::List(d)) if d.kind == Kind::Sessions
+    ));
+    app.dialog = None;
+
+    // 2. Enter on partial standalone optional-arg commands executes directly!
+    for (prefix, check) in [
+        ("/ses", "sessions"),
+        ("/mod", "models"),
+        ("/ag", "agents"),
+        ("/var", "variant"),
+        ("/cd", "cd"),
+        ("/close-s", "close-session"),
+        ("/mcp", "mcp"),
+    ] {
+        type_text(&mut app, prefix);
+        assert!(app.ac.is_some(), "popup for {prefix}");
+        assert!(
+            !app.ac.as_ref().unwrap().items[0].0.ends_with(' '),
+            "no trailing space for {prefix}"
+        );
+        press(&mut app, KeyCode::Enter);
+        assert!(app.editor.text.is_empty(), "{prefix} cleared editor");
+        assert!(app.ac.is_none(), "{prefix} closed ac");
+        assert!(
+            app.dialog.is_some(),
+            "{check} opened picker directly on Enter"
+        );
+        app.dialog = None;
+    }
+
+    // `/exp`, `/peers-n`, and custom `/dep` also execute directly on Enter!
+    type_text(&mut app, "/exp");
+    press(&mut app, KeyCode::Enter);
+    assert!(app.editor.text.is_empty());
+    let frames = drain_requests(&mut rx);
+    assert!(frames.iter().any(|f| matches!(
+        &f.req,
+        Request::Export { path, .. } if path.ends_with(&format!("ref-session-{TEST_SESSION}.md"))
+    )));
+
+    type_text(&mut app, "/peers-n");
+    press(&mut app, KeyCode::Enter);
+    assert!(app.editor.text.is_empty());
+    let frames = drain_requests(&mut rx);
+    assert!(frames.iter().any(|f| matches!(
+        &f.req,
+        Request::PeerCommand { command, args, .. } if command == "peers-name" && args.is_empty()
+    )));
+
+    type_text(&mut app, "/dep");
+    assert_eq!(app.ac.as_ref().unwrap().items[0].0, "/deploy");
+    press(&mut app, KeyCode::Enter);
+    assert!(app.editor.text.is_empty());
+    let frames = drain_requests(&mut rx);
+    assert!(frames.iter().any(|f| matches!(
+        &f.req,
+        Request::ExpandCommand { name, args, .. } if name == "deploy" && args.is_empty()
+    )));
+
+    // 3. `/rename` still requires an argument: keeps trailing space on both Tab and Enter.
+    type_text(&mut app, "/ren");
+    assert_eq!(app.ac.as_ref().unwrap().items[0].0, "/rename ");
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.editor.text, "/rename ");
+    assert!(app.ac.is_none());
+    app.editor.clear();
+    type_text(&mut app, "/ren");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.editor.text, "/rename ");
+    assert!(app.ac.is_none());
+    assert!(drain_requests(&mut rx).is_empty());
+    app.editor.clear();
+
+    // 4. Mouse click on `/sessions` in autocomplete popup executes directly.
+    type_text(&mut app, "/ses");
+    render(&mut app, 100, 28);
+    let r = app.ac.as_ref().unwrap().rect;
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Down(MouseButton::Left), r.x + 3, r.y + 1),
+    );
+    assert!(matches!(
+        &app.dialog,
+        Some(Dialog::List(d)) if d.kind == Kind::Sessions
+    ));
+}
+
+#[test]
+fn watch_mode_autocomplete_and_shell_mode() {
+    use crate::ui::dialog::{Dialog, Kind};
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let (mut app, mut rx) = test_app_with_requests(false);
+    app.config.as_mut().unwrap().agents.push(AgentInfo {
+        name: "plan".into(),
+        description: "Planner".into(),
+        model: None,
+        creatable: true,
+        can_spawn: false,
+        color: None,
+    });
+    app.mode = Mode::Watch;
+    let mut bg1 = bg_session("ses_t1", "worker-1", SessionStatus::Idle, 0);
+    bg1.cwd = "/repo/worker1".into();
+    let mut bg2 = bg_session("ses_t2", "worker-2", SessionStatus::Idle, 0);
+    bg2.cwd = "/repo/worker2".into();
+    for inf in [&bg1, &bg2] {
+        let mut v = SessionView::new(inf.clone(), false);
+        v.load_snapshot(SessionSnapshot {
+            info: inf.clone(),
+            messages: transcript(false),
+            more_before: false,
+            pending_permissions: vec![],
+            pending_questions: vec![],
+            queued: vec![],
+        });
+        app.views.insert(inf.id.clone(), v);
+    }
+    app.live = vec![bg1, bg2];
+    render(&mut app, 120, 30);
+    let _ = drain_requests(&mut rx);
+
+    // Focus first tile with Tab.
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.watch.focus.as_deref(), Some("ses_t1"));
+
+    // 1. Slash completion in Watch mode renders popup and Tab / Enter work.
+    type_text(&mut app, "/");
+    let ac = app.ac.as_ref().expect("slash ac in watch mode");
+    assert_eq!(ac.kind, crate::app::AcKind::Slash);
+    let (_, scr) = render(&mut app, 120, 30);
+    assert!(scr.contains("commands") && scr.contains("/new"), "{scr}");
+    assert!(app.ac.as_ref().unwrap().rect.width > 0);
+    // Home moves cursor away from end -> closes Slash ac.
+    press(&mut app, KeyCode::Home);
+    assert!(app.ac.is_none());
+    press(&mut app, KeyCode::End);
+    type_text(&mut app, "ses");
+    assert_eq!(app.ac.as_ref().unwrap().items[0].0, "/sessions");
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.watch.inputs["ses_t1"].text, "/sessions");
+    assert!(app.ac.is_none());
+
+    // Focus change clears ac / suppress_ac; `/ag` + Enter opens Agents targeting focused tile.
+    app.watch.inputs.get_mut("ses_t1").unwrap().clear();
+    type_text(&mut app, "/ag");
+    assert!(app.ac.is_some());
+    press_with(&mut app, KeyCode::Right, KeyModifiers::CONTROL);
+    assert_eq!(app.watch.focus.as_deref(), Some("ses_t2"));
+    assert!(app.ac.is_none(), "focus change clears ac");
+    type_text(&mut app, "/export ");
+    assert!(
+        app.ac
+            .as_ref()
+            .unwrap()
+            .items
+            .iter()
+            .any(|(v, _, _)| v == "ref-session-ses_t2.md"),
+        "export completion uses focused tile session id"
+    );
+    app.watch.inputs.get_mut("ses_t2").unwrap().clear();
+    app.clear_autocomplete();
+
+    // 2. `@file` mention in Watch mode uses focused tile cwd and renders popup.
+    type_text(&mut app, "check @src/ma");
+    assert!(app.files_due.is_some());
+    app.files_due = Some((
+        std::time::Instant::now() - std::time::Duration::from_millis(1),
+        "src/ma".into(),
+    ));
+    app.housekeeping();
+    let file_req = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(&f.req, Request::ListFiles { cwd, .. } if cwd == "/repo/worker2"))
+        .expect("ListFiles uses focused tile cwd");
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: file_req.id.unwrap(),
+        ok: true,
+        result: json!({ "files": ["src/main.rs"] }),
+        error: None,
+        code: None,
+    }));
+    assert_eq!(
+        app.ac.as_ref().map(|a| &a.kind),
+        Some(&crate::app::AcKind::File)
+    );
+    render(&mut app, 120, 30);
+    let r = app.ac.as_ref().unwrap().rect;
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Down(MouseButton::Left), r.x + 3, r.y + 1),
+    );
+    assert_eq!(app.watch.inputs["ses_t2"].text, "check @src/main.rs ");
+    app.watch.inputs.get_mut("ses_t2").unwrap().clear();
+
+    // Mid-text `/` does not trigger slash autocomplete.
+    type_text(&mut app, "hi /ses");
+    assert!(app.ac.is_none());
+    app.watch.inputs.get_mut("ses_t2").unwrap().clear();
+
+    // Paste updates autocomplete in Watch mode.
+    crate::input::handle(&mut app, crossterm::event::Event::Paste("/ag".into()));
+    assert_eq!(
+        app.ac.as_ref().map(|a| &a.kind),
+        Some(&crate::app::AcKind::Slash)
+    );
+    press(&mut app, KeyCode::Enter);
+    assert!(matches!(
+        &app.dialog,
+        Some(Dialog::List(d)) if d.kind == Kind::Agents && d.target_sid.as_deref() == Some("ses_t2")
+    ));
+    app.dialog = None;
+
+    // 3. Per-tile `!` shell mode, badge, status line, Tab binary trigger, Esc layering, Backspace exit.
+    type_text(&mut app, "!");
+    assert!(app.watch.shell_modes.contains("ses_t2"));
+    assert!(app.watch.inputs["ses_t2"].text.is_empty());
+    let (_, scr) = render(&mut app, 120, 30);
+    assert!(scr.contains("esc exit shell mode"), "{scr}");
+    assert!(scr.contains("! Run a shell command"), "{scr}");
+
+    // Tab in empty tile shell mode triggers ListBinaries instead of switching tiles.
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.watch.focus.as_deref(), Some("ses_t2"));
+    let bin_empty = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(&f.req, Request::ListBinaries { query, .. } if query.is_empty()))
+        .expect("Tab in tile shell mode requests ListBinaries");
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: bin_empty.id.unwrap(),
+        ok: true,
+        result: json!({ "binaries": ["cargo", "cat"] }),
+        error: None,
+        code: None,
+    }));
+    assert_eq!(
+        app.ac.as_ref().map(|a| &a.kind),
+        Some(&crate::app::AcKind::ShellCmd)
+    );
+
+    // Esc layering: 1) closes ac, 2) exits shell mode, 3) clears text, 4) unfocuses.
+    type_text(&mut app, "ca");
+    assert!(app.ac.is_some());
+    press(&mut app, KeyCode::Esc);
+    assert!(app.ac.is_none());
+    assert!(app.watch.shell_modes.contains("ses_t2"));
+    assert_eq!(app.watch.inputs["ses_t2"].text, "ca");
+    press(&mut app, KeyCode::Esc);
+    assert!(!app.watch.shell_modes.contains("ses_t2"));
+    assert_eq!(app.watch.inputs["ses_t2"].text, "ca");
+    press(&mut app, KeyCode::Esc);
+    assert!(app.watch.inputs["ses_t2"].text.is_empty());
+    press(&mut app, KeyCode::Esc);
+    assert!(app.watch.focus.is_none());
+
+    // Backspace on empty tile shell input exits shell mode; Down + Enter accepts completion and runs.
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.watch.focus.as_deref(), Some("ses_t1"));
+    app.watch.inputs.get_mut("ses_t1").unwrap().clear();
+    type_text(&mut app, "!");
+    assert!(app.watch.shell_modes.contains("ses_t1"));
+    press(&mut app, KeyCode::Backspace);
+    assert!(!app.watch.shell_modes.contains("ses_t1"));
+
+    type_text(&mut app, "!ca");
+    let _ = drain_requests(&mut rx);
+    assert_eq!(
+        app.ac.as_ref().map(|a| &a.kind),
+        Some(&crate::app::AcKind::ShellCmd)
+    );
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.watch.inputs["ses_t1"].text, "cat ");
+    type_text(&mut app, "README.md");
+    press(&mut app, KeyCode::Enter);
+    assert!(!app.watch.shell_modes.contains("ses_t1"));
+    let frames = drain_requests(&mut rx);
+    assert!(frames.iter().any(|f| matches!(
+        &f.req,
+        Request::Shell { session_id, command } if session_id == "ses_t1" && command == "cat README.md"
+    )));
+}
+
+#[test]
+fn watch_mode_text_selection_drag_copy_and_double_click() {
+    use crossterm::event::{Event, KeyCode, KeyModifiers, MouseButton, MouseEventKind};
+    let mut app = watch_app();
+    app.sync_watch();
+    let (_, s) = render(&mut app, 120, 30);
+    let line_y = s
+        .lines()
+        .position(|l| l.contains("alpha answer 29"))
+        .expect("visible tile message line") as u16;
+    let r1 = tile_rect(&app, "ses_w1");
+    let r2 = tile_rect(&app, "ses_w2");
+
+    // 1. Drag inside tile 1 transcript (ending slightly outside tile border) creates active selection.
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Down(MouseButton::Left), r1.x + 3, line_y),
+    );
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Drag(MouseButton::Left), r1.x + 15, line_y),
+    );
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Up(MouseButton::Left), r2.x + 2, line_y),
+    );
+    assert!(app.has_selection());
+    assert_eq!(app.sel_owner.as_deref(), Some("ses_w1"));
+    assert_eq!(app.watch.focus.as_deref(), Some("ses_w1"));
+    assert!(app.watch.drag_tile.is_none());
+
+    // Render paints SELECTION background on selected cells in draw_tile.
+    // Note: focusing tile 1 shrinks its viewport by 2 rows for the input bar, shifting the line up.
+    let (term, s_focused) = render(&mut app, 120, 30);
+    let focused_line_y = s_focused
+        .lines()
+        .position(|l| l.contains("alpha answer 29"))
+        .expect("focused tile message line") as u16;
+    let buf = term.backend().buffer();
+    assert!(
+        (r1.x + 1..r1.x + r1.width - 1)
+            .any(|x| buf[(x, focused_line_y)].bg == crate::ui::theme::SELECTION),
+        "draw_tile must paint selection background"
+    );
+
+    // Right-click copies selection and clears it.
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Down(MouseButton::Right), r1.x + 5, line_y),
+    );
+    assert!(!app.has_selection());
+    assert!(
+        app.toasts
+            .items
+            .iter()
+            .any(|t| t.text.contains("Copied selection")),
+        "{:?}",
+        app.toasts.items.iter().map(|t| &t.text).collect::<Vec<_>>()
+    );
+    app.toasts.items.clear();
+
+    // 2. Drag selection + Ctrl+C copies selection without clearing input or arming exit.
+    type_text(&mut app, "draft");
+    render(&mut app, 120, 30);
+    crate::input::handle(
+        &mut app,
+        mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            r1.x + 3,
+            focused_line_y,
+        ),
+    );
+    crate::input::handle(
+        &mut app,
+        mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            r1.x + 12,
+            focused_line_y,
+        ),
+    );
+    crate::input::handle(
+        &mut app,
+        mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            r1.x + 12,
+            focused_line_y,
+        ),
+    );
+    assert!(app.has_selection());
+    crate::input::handle(
+        &mut app,
+        Event::Key(crossterm::event::KeyEvent::new(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL,
+        )),
+    );
+    assert!(!app.has_selection());
+    assert_eq!(app.watch.inputs["ses_w1"].text, "draft");
+    assert!(app.ctrlc_armed.is_none());
+    assert!(
+        app.toasts
+            .items
+            .iter()
+            .any(|t| t.text.contains("Copied selection"))
+    );
+
+    // 3. Esc clears chat selection first without unfocusing tile.
+    app.watch.inputs.get_mut("ses_w1").unwrap().clear();
+    crate::input::handle(
+        &mut app,
+        mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            r1.x + 4,
+            focused_line_y,
+        ),
+    );
+    crate::input::handle(
+        &mut app,
+        mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            r1.x + 12,
+            focused_line_y,
+        ),
+    );
+    crate::input::handle(
+        &mut app,
+        mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            r1.x + 12,
+            focused_line_y,
+        ),
+    );
+    assert!(app.has_selection());
+    press(&mut app, KeyCode::Esc);
+    assert!(!app.has_selection());
+    assert_eq!(app.watch.focus.as_deref(), Some("ses_w1"));
+
+    // 4. Double-clicking tile 2 zooms into tile 2.
+    let click = |app: &mut App, x, y| {
+        crate::input::handle(app, mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+    };
+    click(&mut app, r2.x + 3, r2.y + 3);
+    click(&mut app, r2.x + 3, r2.y + 3);
+    assert_eq!(app.mode, Mode::Chat);
+    assert_eq!(app.current.as_deref(), Some("ses_w2"));
+}
+
+#[test]
+fn shell_wrapper_completion_end_to_end() {
+    let (mut app, mut rx) = test_app_with_requests(false);
+    app.history = crate::ui::editor::History::default();
+    app.push_history("!cargo check --workspace");
+    let _ = drain_requests(&mut rx);
+
+    // Typing `sudo -u ` (wrapper flag arg) must NOT send ListBinaries for command completion.
+    type_text(&mut app, "!sudo ");
+    let _ = drain_requests(&mut rx);
+    type_text(&mut app, "-u ro");
+    assert!(
+        drain_requests(&mut rx)
+            .iter()
+            .all(|f| !matches!(&f.req, Request::ListBinaries { .. })),
+        "sudo -u ro must not prematurely request binaries"
+    );
+    type_text(&mut app, "root ");
+    app.editor.clear();
+    let _ = drain_requests(&mut rx);
+
+    // Typing `!timeout 5s car` sends ListBinaries for `car` without history items, and completes `cargo `.
+    type_text(&mut app, "timeout 5s car");
+    let bin_req = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(&f.req, Request::ListBinaries { query, .. } if query == "car"))
+        .expect("wrapped command requests ListBinaries");
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: bin_req.id.unwrap(),
+        ok: true,
+        result: json!({ "binaries": ["cargo"] }),
+        error: None,
+        code: None,
+    }));
+    let ac = app.ac.as_ref().expect("ShellCmd popup for wrapped command");
+    assert_eq!(ac.kind, crate::app::AcKind::ShellCmd);
+    assert!(
+        ac.items.iter().all(|(_, _, d)| d != "history"),
+        "wrapped commands must not suggest whole-line history items"
+    );
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.editor.text, "timeout 5s cargo ");
+}
+
+#[test]
+fn review_fixes_watch_selection_cleanup_drag_edge_and_shell_tab_reset() {
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEventKind};
+
+    // 1. Watch selection, drag_edge, drag_tile, and editor anchor cleanup across transitions.
+    let mut app = watch_app();
+    app.sync_watch();
+    let (_, s) = render(&mut app, 120, 30);
+    let _ = s;
+    let r1 = tile_rect(&app, "ses_w1");
+    let line_y = r1.y + 5;
+
+    // Dragging above tile top sets `drag_edge = -1`, `sel_owner`, `watch.drag_tile`.
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Down(MouseButton::Left), r1.x + 3, line_y),
+    );
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Drag(MouseButton::Left), r1.x + 8, 0),
+    );
+    assert_eq!(app.views["ses_w1"].chat.drag_edge, -1);
+    assert!(app.has_selection());
+    assert!(app.watch.drag_tile.is_some());
+
+    // `Esc` clears selection, resets `drag_edge = 0`, and clears `watch.drag_tile`.
+    press(&mut app, KeyCode::Esc);
+    assert!(!app.has_selection());
+    assert!(app.watch.drag_tile.is_none());
+    assert_eq!(app.views["ses_w1"].chat.drag_edge, 0);
+
+    // Clicking inside `v.chat` clears focused tile editor `anchor` (Shift+Left selection).
+    app.watch
+        .inputs
+        .entry("ses_w1".into())
+        .or_default()
+        .set_text("hello");
+    press_with(&mut app, KeyCode::Left, KeyModifiers::SHIFT);
+    assert!(app.watch.inputs["ses_w1"].anchor.is_some());
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Down(MouseButton::Left), r1.x + 6, line_y),
+    );
+    assert!(app.watch.inputs["ses_w1"].anchor.is_none());
+
+    // Drag + `Ctrl+N` page switch clears selection, `drag_edge`, and `watch.drag_tile`.
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Drag(MouseButton::Left), r1.x + 12, line_y),
+    );
+    app.views.get_mut("ses_w1").unwrap().chat.drag_edge = 1;
+    assert!(app.has_selection());
+    press_with(&mut app, KeyCode::Char('n'), KeyModifiers::CONTROL);
+    assert!(!app.has_selection());
+    assert!(app.watch.drag_tile.is_none());
+    assert_eq!(app.views["ses_w1"].chat.drag_edge, 0);
+
+    // Drag + `resume_current()` (`ctrl+x w` back to chat) clears selection & `drag_edge`.
+    app.connected = false;
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Down(MouseButton::Left), r1.x + 4, line_y),
+    );
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Drag(MouseButton::Left), r1.x + 12, line_y),
+    );
+    app.views.get_mut("ses_w1").unwrap().chat.drag_edge = -1;
+    app.toggle_watch();
+    assert_eq!(app.mode, Mode::Chat);
+    assert!(!app.has_selection());
+    assert!(app.watch.drag_tile.is_none());
+    assert_eq!(app.views["ses_w1"].chat.drag_edge, 0);
+    assert!(app.views["ses_w1"].chat.sel.is_none());
+
+    // Drag + `zoom` clears selection & `drag_edge`.
+    app.toggle_watch();
+    render(&mut app, 120, 30);
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Down(MouseButton::Left), r1.x + 5, line_y),
+    );
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Drag(MouseButton::Left), r1.x + 14, line_y),
+    );
+    app.views.get_mut("ses_w1").unwrap().chat.drag_edge = 1;
+    app.zoom("ses_w2");
+    assert_eq!(app.mode, Mode::Chat);
+    assert_eq!(app.current.as_deref(), Some("ses_w2"));
+    assert!(!app.has_selection());
+    assert!(app.watch.drag_tile.is_none());
+    assert_eq!(app.views["ses_w1"].chat.drag_edge, 0);
+    assert!(app.views["ses_w1"].chat.sel.is_none());
+
+    // 2. `shell_tab_requested` resets on accept_completion and Esc so delayed binaries don't reopen popup.
+    let (mut app, mut rx) = test_app_with_requests(false);
+    let _ = drain_requests(&mut rx);
+    type_text(&mut app, "!");
+    press(&mut app, KeyCode::Tab);
+    let bin_req = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(&f.req, Request::ListBinaries { query, .. } if query.is_empty()))
+        .expect("ListBinaries empty");
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: bin_req.id.unwrap(),
+        ok: true,
+        result: json!({ "binaries": ["sudo"] }),
+        error: None,
+        code: None,
+    }));
+    assert!(app.ac.is_some());
+    // Accept `"sudo "` via Tab -> `shell_tab_requested` must be cleared.
+    app.pending.insert(
+        9999,
+        crate::app::Pending::Binaries {
+            query: String::new(),
+        },
+    );
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.editor.text, "sudo ");
+    assert!(app.ac.is_none());
+    // Simulate a late `ListBinaries` response for `""` arriving after acceptance: must NOT reopen popup!
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: 9999,
+        ok: true,
+        result: json!({ "binaries": ["sudo", "ls"] }),
+        error: None,
+        code: None,
+    }));
+    assert!(
+        app.ac.is_none(),
+        "stale binary response must not reopen popup after accept_completion"
+    );
+
+    // Also verify `Esc` dismissal + leaving/re-entering `!` resets `shell_tab_requested`.
+    app.editor.clear();
+    press(&mut app, KeyCode::Tab);
+    assert!(app.ac.is_some());
+    press(&mut app, KeyCode::Esc); // dismisses ac
+    assert!(app.ac.is_none());
+    press(&mut app, KeyCode::Esc); // leaves shell mode
+    app.pending.insert(
+        9998,
+        crate::app::Pending::Binaries {
+            query: String::new(),
+        },
+    );
+    assert!(!app.shell_mode);
+    type_text(&mut app, "!");
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: 9998,
+        ok: true,
+        result: json!({ "binaries": ["cargo"] }),
+        error: None,
+        code: None,
+    }));
+    assert!(
+        app.ac.is_none(),
+        "stale binary response must not reopen popup after Esc reset"
+    );
+}
