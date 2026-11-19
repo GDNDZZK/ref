@@ -217,3 +217,60 @@ async fn truncated_error_body_surfaces_read_error() {
         assert!(err.message.contains("network error"), "{}", err.message);
     }
 }
+
+#[tokio::test]
+async fn json_body_2xx_error_honors_body_and_header_retry_after() {
+    let body = r#"{"error":{"message":"Rate limit reached. Please try again in 4s","type":"rate_limit_error","retry_after":7}}"#;
+    let head = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nretry-after: 11\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let (url, _server) = serve(head, vec![], Duration::ZERO, Duration::ZERO).await;
+    let p = provider(ApiKind::OpenAIChat, url, Duration::from_secs(5));
+    let mut sink = |_e: StreamEvent| {};
+    let err = run_stream(&p, &mut sink).await.unwrap_err();
+    assert!(err.retryable);
+    assert_eq!(err.retry_after, Some(Duration::from_secs(11)));
+
+    let body_only = r#"{"error":{"message":"Please try again in 7s","retry_after_ms":12500}}"#;
+    let head_only = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body_only}",
+        body_only.len()
+    );
+    let (url, _server) = serve(head_only, vec![], Duration::ZERO, Duration::ZERO).await;
+    let p = provider(ApiKind::OpenAIChat, url, Duration::from_secs(5));
+    let err = run_stream(&p, &mut sink).await.unwrap_err();
+    assert!(err.retryable);
+    assert_eq!(err.retry_after, Some(Duration::from_millis(12500)));
+}
+
+#[tokio::test]
+async fn sse_error_events_honor_retry_after_across_apis() {
+    let chat_chunks = vec![
+        "data: {\"error\":{\"message\":\"Rate limited. Please try again in 7s\",\"code\":\"rate_limit_exceeded\"}}\n\n".to_string(),
+    ];
+    let (url, _server) = serve(sse_head(), chat_chunks, Duration::ZERO, Duration::ZERO).await;
+    let p = provider(ApiKind::OpenAIChat, url, Duration::from_secs(5));
+    let mut sink = |_e: StreamEvent| {};
+    let err = run_stream(&p, &mut sink).await.unwrap_err();
+    assert!(err.retryable);
+    assert_eq!(err.retry_after, Some(Duration::from_secs(7)));
+
+    let anthropic_chunks = vec![
+        "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"Overloaded\",\"retry_after\":9}}\n\n".to_string(),
+    ];
+    let (url, _server) = serve(sse_head(), anthropic_chunks, Duration::ZERO, Duration::ZERO).await;
+    let p = provider(ApiKind::Anthropic, url, Duration::from_secs(5));
+    let err = run_stream(&p, &mut sink).await.unwrap_err();
+    assert!(err.retryable);
+    assert_eq!(err.retry_after, Some(Duration::from_secs(9)));
+
+    let responses_chunks = vec![
+        "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"Please retry after 14 seconds\"}}}\n\n".to_string(),
+    ];
+    let (url, _server) = serve(sse_head(), responses_chunks, Duration::ZERO, Duration::ZERO).await;
+    let p = provider(ApiKind::OpenAIResponses, url, Duration::from_secs(5));
+    let err = run_stream(&p, &mut sink).await.unwrap_err();
+    assert!(err.retryable);
+    assert_eq!(err.retry_after, Some(Duration::from_secs(14)));
+}
