@@ -3,9 +3,9 @@ import { CompletionController, FILE_QUERY_DELAY_MS, parseShellContext, slashItem
 import type { CompletionDeps, SlashCommand } from './completion.ts'
 
 const COMMANDS: SlashCommand[] = [
-  { name: 'undo', aliases: [], title: 'Undo the last prompt', takesArgs: false, custom: false },
-  { name: 'new', aliases: ['clear'], title: 'New session', takesArgs: false, custom: false },
-  { name: 'review', aliases: [], title: 'Review the diff', takesArgs: true, custom: true },
+  { name: 'undo', aliases: [], title: 'Undo the last prompt', requiresArgs: false, custom: false },
+  { name: 'new', aliases: ['clear'], title: 'New session', requiresArgs: false, custom: false },
+  { name: 'review', aliases: [], title: 'Review the diff', requiresArgs: false, custom: true },
 ]
 
 describe('slashItems', () => {
@@ -20,8 +20,17 @@ describe('slashItems', () => {
 
   it('shows an alias that matched as pointing at its command', () => {
     expect(slashItems(COMMANDS, 'cle')).toEqual([
-      { value: '/new ', label: '/clear → /new', description: 'New session' },
+      { value: '/new', label: '/clear → /new', description: 'New session' },
     ])
+  })
+
+  it('appends a trailing space only when a command requires arguments', () => {
+    const commands: SlashCommand[] = [
+      { name: 'rename', aliases: [], title: 'Rename', requiresArgs: true, custom: false },
+      { name: 'sessions', aliases: [], title: 'Sessions', requiresArgs: false, custom: false },
+      { name: 'review', aliases: [], title: 'Review', requiresArgs: false, custom: true },
+    ]
+    expect(slashItems(commands, '').map((item) => item.value)).toEqual(['/rename ', '/sessions', '/review'])
   })
 
   it('finds nothing for text that matches nothing', () => {
@@ -48,9 +57,8 @@ describe('CompletionController', () => {
     const { controller } = setup()
     controller.update('/u', 2, false, true)
     expect(controller.completion?.kind).toBe('slash')
-    expect(controller.selectedItem?.value).toBe('/undo ')
+    expect(controller.selectedItem?.value).toBe('/undo')
   })
-
   it('closes once the command has arguments or the text is not a command', () => {
     const { controller } = setup()
     controller.update('/', 1, false, true)
@@ -61,6 +69,63 @@ describe('CompletionController', () => {
     expect(controller.completion).toBeUndefined()
   })
 
+  it('triggers mid-text slash completion and skips path-like slashes', async () => {
+    const listDirs = vi.fn(async (path: string) => ({ path, dirs: ['src', 'tmp'], files: [] }))
+    const controller = new CompletionController({
+      commands: () => [
+        ...COMMANDS,
+        { name: 'cd', aliases: [], title: 'cd', requiresArgs: false, custom: false },
+      ],
+      listFiles: async () => [],
+      listDirs,
+      reportError: () => {},
+    })
+
+    controller.update('please run /un', 14, false, true)
+    expect(controller.completion).toMatchObject({ kind: 'slash', start: 11, end: 14 })
+    expect(controller.selectedItem?.value).toBe('/undo')
+
+    controller.update('hello /un world', 8, false, true)
+    expect(controller.completion).toMatchObject({ kind: 'slash', start: 6, end: 9 })
+    expect(controller.selectedItem?.value).toBe('/undo')
+
+    controller.update('line 1\n/re', 10, false, true)
+    expect(controller.completion).toMatchObject({ kind: 'slash', start: 7, end: 10 })
+    expect(controller.selectedItem?.value).toBe('/review')
+
+    controller.update('check src/main.rs', 17, false, true)
+    expect(controller.completion).toBeUndefined()
+
+    controller.update('visit https://example.com', 25, false, true)
+    expect(controller.completion).toBeUndefined()
+
+    controller.update('check /usr/bin', 14, false, true)
+    expect(controller.completion).toBeUndefined()
+
+    controller.update('check /usr/bin', 8, false, true)
+    expect(controller.completion).toBeUndefined()
+
+    controller.update('/usr/bin', 2, false, true)
+    expect(controller.completion).toBeUndefined()
+
+    controller.update('// comment', 1, false, true)
+    expect(controller.completion).toBeUndefined()
+
+    controller.update('/', 0, false, true)
+    expect(controller.completion).toBeUndefined()
+
+    controller.update('check /foo\\bar', 8, false, true)
+    expect(controller.completion).toBeUndefined()
+    controller.update('/cd src', 7, false, true)
+    await settle()
+    expect(controller.completion?.kind).toBe('path')
+    expect(listDirs).toHaveBeenCalledWith('.', { cwd: undefined, includeFiles: false })
+
+    controller.update('/cd /tmp', 8, false, true)
+    await settle()
+    expect(controller.completion?.kind).toBe('path')
+    expect(listDirs).toHaveBeenCalledWith('/', { cwd: undefined, includeFiles: false })
+  })
   it('stays closed in shell mode', () => {
     const { controller } = setup()
     controller.update('/u', 2, true, true)
@@ -170,8 +235,8 @@ describe('CompletionController', () => {
       cwd: () => '/repo',
       commands: () => [
         ...COMMANDS,
-        { name: 'cd', aliases: ['cwd'], title: 'cd', takesArgs: true, custom: false },
-        { name: 'export', aliases: [], title: 'export', takesArgs: true, custom: false },
+        { name: 'cd', aliases: ['cwd'], title: 'cd', requiresArgs: false, custom: false },
+        { name: 'export', aliases: [], title: 'export', requiresArgs: false, custom: false },
       ],
       listFiles: async () => [],
       listDirs,
@@ -209,11 +274,11 @@ describe('CompletionController', () => {
     const controller = new CompletionController({
       commands: () => [
         ...COMMANDS,
-        { name: 'models', aliases: ['model'], title: 'Models', takesArgs: true, custom: false },
-        { name: 'agents', aliases: ['agent'], title: 'Agents', takesArgs: true, custom: false },
-        { name: 'variant', aliases: [], title: 'Variant', takesArgs: true, custom: false },
-        { name: 'sessions', aliases: [], title: 'Sessions', takesArgs: true, custom: false },
-        { name: 'close-session', aliases: [], title: 'Close', takesArgs: true, custom: false },
+        { name: 'models', aliases: ['model'], title: 'Models', requiresArgs: false, custom: false },
+        { name: 'agents', aliases: ['agent'], title: 'Agents', requiresArgs: false, custom: false },
+        { name: 'variant', aliases: [], title: 'Variant', requiresArgs: false, custom: false },
+        { name: 'sessions', aliases: [], title: 'Sessions', requiresArgs: false, custom: false },
+        { name: 'close-session', aliases: [], title: 'Close', requiresArgs: false, custom: false },
       ],
       listFiles,
       models: () => [
@@ -296,5 +361,163 @@ describe('CompletionController', () => {
     await settle()
     expect(listDirs).toHaveBeenCalledWith('./src/', { cwd: '/repo', includeFiles: true })
     expect(controller.completion?.items.map((i) => i.value)).toEqual(['./src/stores/', './src/main.ts '])
+  })
+
+  it('skips shell wrappers, wrapper flags, durations, and env assignments with accurate atLineStart', async () => {
+    expect(parseShellContext('car', 3)).toMatchObject({ role: 'command', token: 'car', atLineStart: true })
+    expect(parseShellContext('FOO=1 car', 9)).toMatchObject({
+      role: 'command',
+      token: 'car',
+      atLineStart: false,
+    })
+    expect(parseShellContext('sudo ap', 7)).toMatchObject({
+      role: 'command',
+      token: 'ap',
+      atLineStart: false,
+    })
+    expect(parseShellContext('sudo -u root ap', 15)).toMatchObject({
+      role: 'command',
+      token: 'ap',
+      atLineStart: false,
+    })
+    expect(parseShellContext('nice -n 10 car', 14)).toMatchObject({
+      role: 'command',
+      token: 'car',
+      atLineStart: false,
+    })
+    expect(parseShellContext('timeout 5s car', 14)).toMatchObject({
+      role: 'command',
+      token: 'car',
+      atLineStart: false,
+    })
+    expect(parseShellContext('timeout -k 2s 5s car', 20)).toMatchObject({
+      role: 'command',
+      token: 'car',
+      atLineStart: false,
+    })
+    expect(parseShellContext('taskset 0x1 car', 15)).toMatchObject({
+      role: 'command',
+      token: 'car',
+      atLineStart: false,
+    })
+    expect(parseShellContext('taskset -c 0-3 car', 18)).toMatchObject({
+      role: 'command',
+      token: 'car',
+      atLineStart: false,
+    })
+    expect(parseShellContext('env -i FOO=1 sudo -E BAR=2 car', 30)).toMatchObject({
+      role: 'command',
+      token: 'car',
+      atLineStart: false,
+    })
+    expect(parseShellContext('sudo -- car', 11)).toMatchObject({
+      role: 'command',
+      token: 'car',
+      atLineStart: false,
+    })
+    expect(parseShellContext('/usr/bin/env py', 15)).toMatchObject({
+      role: 'command',
+      token: 'py',
+      atLineStart: false,
+    })
+    expect(parseShellContext('/usr/bin/sudo car', 17)).toMatchObject({
+      role: 'command',
+      token: 'car',
+      atLineStart: false,
+    })
+    expect(parseShellContext('/usr/bin/sudo -u root car', 25)).toMatchObject({
+      role: 'command',
+      token: 'car',
+      atLineStart: false,
+    })
+    expect(parseShellContext('sudo -Euroot car', 16)).toMatchObject({
+      role: 'command',
+      token: 'car',
+      atLineStart: false,
+    })
+    expect(parseShellContext('sudo -Eu root car', 17)).toMatchObject({
+      role: 'command',
+      token: 'car',
+      atLineStart: false,
+    })
+    expect(parseShellContext('timeout -vk5s 5s car', 20)).toMatchObject({
+      role: 'command',
+      token: 'car',
+      atLineStart: false,
+    })
+
+    const wrappers = [
+      'sudo',
+      'doas',
+      'env',
+      'nohup',
+      'time',
+      'nice',
+      'ionice',
+      'setsid',
+      'strace',
+      'ltrace',
+      'stdbuf',
+      'watch',
+      'command',
+      'exec',
+      'builtin',
+      'xargs',
+      'caffeinate',
+      'pkexec',
+    ]
+    for (const wrapper of wrappers) {
+      expect(parseShellContext(`${wrapper} ap`, wrapper.length + 3)).toMatchObject({
+        role: 'command',
+        token: 'ap',
+        atLineStart: false,
+      })
+    }
+    expect(parseShellContext('chrt 50 ap', 10)).toMatchObject({
+      role: 'command',
+      token: 'ap',
+      atLineStart: false,
+    })
+
+    // Wrapper flags, flag arguments, and wrapper positional args stay closed.
+    expect(parseShellContext('sudo -', 6)).toBeUndefined()
+    expect(parseShellContext('sudo -u', 7)).toBeUndefined()
+    expect(parseShellContext('sudo -u ', 8)).toBeUndefined()
+    expect(parseShellContext('sudo -u ro', 10)).toBeUndefined()
+    expect(parseShellContext('timeout ', 8)).toBeUndefined()
+    expect(parseShellContext('timeout 5', 9)).toBeUndefined()
+
+    // Arguments after the wrapped command resolve as shell args.
+    expect(parseShellContext('sudo apt install ./foo', 22)).toMatchObject({
+      role: 'arg',
+      token: './foo',
+      isPath: true,
+      atLineStart: false,
+    })
+
+    const listBinaries = vi.fn(async () => ['apt', 'apt-get'])
+    const listDirs = vi.fn(async () => ({ path: '/repo/src', dirs: [], files: ['foo.ts'] }))
+    const controller = new CompletionController({
+      cwd: () => '/repo',
+      commands: () => COMMANDS,
+      listFiles: async () => [],
+      listBinaries,
+      listDirs,
+      shellHistory: () => ['!apt update', '!sudo apt upgrade'],
+      reportError: () => {},
+    })
+
+    // `!sudo ap` completes binaries without matching full-line `!` history from offset 0.
+    controller.update('sudo ap', 7, true, true)
+    expect(controller.completion).toBeUndefined()
+    await settle()
+    expect(listBinaries).toHaveBeenCalledWith('ap', 50)
+    expect(controller.completion?.items.map((i) => i.value)).toEqual(['apt ', 'apt-get '])
+    expect(controller.completion?.start).toBe(5)
+
+    controller.update('sudo apt install ./src/', 23, true, true)
+    await settle()
+    expect(controller.completion?.kind).toBe('path')
+    expect(controller.completion?.items.map((i) => i.value)).toEqual(['./src/foo.ts '])
   })
 })

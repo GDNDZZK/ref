@@ -120,6 +120,8 @@ export const metrics = {
   windowMinWidth: 640,
   windowMinHeight: 420,
   sidebarWidth: 264,
+  sidebarMinWidth: 210,
+  sidebarMaxWidth: 480,
   sidebarPadding: 8,
   sidebarHeaderHeight: 52,
   sidebarRowHeight: 56,

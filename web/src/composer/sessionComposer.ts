@@ -237,7 +237,7 @@ export class SessionComposer {
     this.completionController.close()
 
     if (completion.kind === 'slash') {
-      return this.acceptCommand(item.value, run)
+      return this.acceptCommand(item.value, completion.start, completion.end ?? this.cursor, run)
     }
 
     const text = this.draft.text
@@ -255,29 +255,38 @@ export class SessionComposer {
     return this.cursor
   }
 
-  private acceptCommand(value: string, run: boolean): number | undefined {
+  private acceptCommand(value: string, start: number, end: number, run: boolean): number | undefined {
+    const text = this.draft.text
+    const hasSurroundingText = text.slice(0, start).trim() !== '' || text.slice(end).trim() !== ''
+    if (hasSurroundingText) {
+      const restStart = value.endsWith(' ') && text[end] === ' ' ? end + 1 : end
+      const replaced = text.slice(0, start) + value + text.slice(restStart)
+      this.draft.text = replaced
+      this.cursor = start + value.length
+      this.completionController.update(replaced, this.cursor, this.draft.shell, true)
+      if (!value.endsWith(' ')) this.completionController.dismiss()
+      return this.cursor
+    }
+
     const name = value.trim().slice(SLASH_PREFIX.length)
     const commands = this.host.slashCommands()
-    const takesArgs = commands.find((command) => command.name === name)?.takesArgs ?? true
+    const command = commands.find((candidate) => candidate.name === name)
+    const requiresArgs = command?.requiresArgs ?? false
 
-    const typed = this.draft.text.trim().replace(/^\/+/, '').toLowerCase()
+    const typed = text.slice(start, end).trim().replace(/^\/+/, '').toLowerCase()
     const typedCommand = commands.find(
       (c) => c.name.toLowerCase() === typed || c.aliases.some((alias) => alias.toLowerCase() === typed),
     )
     const typedFully = (typedCommand?.name ?? typed).toLowerCase() === name.toLowerCase()
-    if (run && takesArgs && typedFully) {
+    if (run && (!requiresArgs || typedFully)) {
       this.draft.text = `${SLASH_PREFIX}${name}`
       void this.submit()
       return undefined
     }
-    const command = commands.find((candidate) => candidate.name === name)
-    if (run && !takesArgs && command) {
-      this.host.history.push(`${SLASH_PREFIX}${name}`)
-      clearDraft(this.draft)
-      void this.runCommand(command, `${SLASH_PREFIX}${name}`)
-      return undefined
-    }
-    return this.setText(value)
+
+    const caret = this.setText(value)
+    if (!value.endsWith(' ')) this.completionController.dismiss()
+    return caret
   }
 
   // The command a line such as "/rename Work" names, if there is one.

@@ -1,7 +1,8 @@
 // The settings the user can change and how they are stored (the browser counterpart of gui.json).
 
+import { clamp } from '../clamp.ts'
 import type { NotifyKind } from '../proto/generated'
-
+import { metrics } from '../theme/generated/theme.ts'
 export type ThemeChoice = 'system' | 'light' | 'dark'
 export type LanguageChoice = 'system' | 'en' | 'zh-CN'
 
@@ -17,6 +18,7 @@ export interface Settings {
   language: LanguageChoice
   notifications: NotificationSettings
   sidebarOpen: boolean
+  sidebarWidth: number
 }
 
 export const STORAGE_KEY = 'ref.settings'
@@ -30,6 +32,7 @@ export function defaultSettings(): Settings {
     language: 'system',
     notifications: { enabled: true, permission: true, turnDone: true, turnError: true },
     sidebarOpen: true,
+    sidebarWidth: metrics.sidebarWidth,
   }
 }
 
@@ -41,6 +44,10 @@ function flag(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback
 }
 
+function width(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
+  return clamp(Math.round(value), metrics.sidebarMinWidth, metrics.sidebarMaxWidth)
+}
 function record(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {}
 }
@@ -70,6 +77,7 @@ export function parseSettings(raw: string | null): { settings: Settings; corrupt
       turnError: flag(notifications['turnError'], defaults.notifications.turnError),
     },
     sidebarOpen: flag(stored['sidebarOpen'], defaults.sidebarOpen),
+    sidebarWidth: width(stored['sidebarWidth'], defaults.sidebarWidth),
   }
   return { settings, corrupt: false }
 }

@@ -239,7 +239,8 @@
     "sessions": "Sessions",
     "needsAnswer": "Waiting for your answer",
     "config": "Configuration (ref.json)",
-    "reloadConfig": "Reload configuration"
+    "reloadConfig": "Reload configuration",
+    "resize": "Resize sidebar"
   },
   "workspace": {
     "empty": "No session open"
