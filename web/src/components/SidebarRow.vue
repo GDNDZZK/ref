@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // A live session in the sidebar (SessionRow.qml): state dot, title, todo progress, where it runs
 // and for how long. A session that needs the user (permission, question, error) is drawn apart.
-import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useNow } from '../composables/useNow.ts'
 import type { SessionInfo } from '../proto/generated'
@@ -22,13 +22,30 @@ import SessionDot from './SessionDot.vue'
 import { ALERT_RING_REACH } from './sharedMetrics.ts'
 
 const props = withDefaults(
-  defineProps<{ info: SessionInfo; current: boolean; tile: boolean; canDetach?: boolean }>(),
-  { canDetach: false },
+  defineProps<{
+    info: SessionInfo
+    current: boolean
+    tile: boolean
+    canDetach?: boolean
+    reorderable?: boolean
+    dragging?: boolean
+    dragOffset?: number
+  }>(),
+  { canDetach: false, reorderable: false, dragging: false, dragOffset: 0 },
 )
-const emit = defineEmits<{ open: []; detach: []; close: []; rename: [name: string] }>()
+const emit = defineEmits<{
+  open: []
+  detach: []
+  close: []
+  rename: [name: string]
+  dragStart: [clientY: number]
+  dragMove: [clientY: number]
+  dragEnd: []
+}>()
 
 const BADGE_SIZE = 14
-
+const HOLD_DELAY_MS = 280
+const MOVE_CANCEL_PX = 6
 const { t } = useI18n()
 const now = useNow()
 
@@ -80,6 +97,7 @@ const draft = ref('')
 const field = useTemplateRef<HTMLInputElement>('field')
 
 async function startRename(): Promise<void> {
+  cancelPendingHold()
   draft.value = props.info.name
   editing.value = true
   await nextTick()
@@ -112,17 +130,164 @@ function openMenu(event: MouseEvent): void {
   menuMounted.value = true
   menuOpen.value = true
 }
+
+// --- Long-press + drag to reorder.
+const rowEl = useTemplateRef<HTMLElement>('row')
+let holdTimer: ReturnType<typeof setTimeout> | undefined
+let suppressTimer: ReturnType<typeof setTimeout> | undefined
+let activePointerId: number | undefined
+let startX = 0
+let startY = 0
+let latestClientY = 0
+let suppressNextClick = false
+
+function clearHoldTimer(): void {
+  if (holdTimer === undefined) return
+  clearTimeout(holdTimer)
+  holdTimer = undefined
+}
+
+function clearSuppressTimer(): void {
+  if (suppressTimer === undefined) return
+  clearTimeout(suppressTimer)
+  suppressTimer = undefined
+}
+
+function scheduleSuppressReset(): void {
+  clearSuppressTimer()
+  suppressTimer = setTimeout(() => {
+    suppressTimer = undefined
+    suppressNextClick = false
+  }, 0)
+}
+
+function trySetPointerCapture(pointerId: number): void {
+  const element = rowEl.value
+  if (!element?.setPointerCapture) return
+  try {
+    element.setPointerCapture(pointerId)
+  } catch (error) {
+    // Synthetic test events or pointers ended before the hold timer can raise NotFoundError.
+    if (!(error instanceof DOMException && error.name === 'NotFoundError')) throw error
+  }
+}
+
+function releaseCapture(pointerId: number): void {
+  const element = rowEl.value
+  if (element?.hasPointerCapture?.(pointerId)) {
+    element.releasePointerCapture(pointerId)
+  }
+}
+
+function cancelPendingHold(): void {
+  clearHoldTimer()
+  if (!props.dragging) activePointerId = undefined
+}
+
+function onPointerDown(event: PointerEvent): void {
+  if (!props.reorderable || editing.value || event.button !== 0 || activePointerId !== undefined) return
+  const target = event.target instanceof Element ? event.target : null
+  if (target?.closest('button.close, input.edit')) return
+  clearSuppressTimer()
+  suppressNextClick = false
+  activePointerId = event.pointerId
+  startX = event.clientX
+  startY = event.clientY
+  latestClientY = event.clientY
+  const pointerId = event.pointerId
+  holdTimer = setTimeout(() => {
+    holdTimer = undefined
+    if (!props.reorderable || editing.value || activePointerId !== pointerId) return
+    suppressNextClick = true
+    trySetPointerCapture(pointerId)
+    emit('dragStart', latestClientY)
+  }, HOLD_DELAY_MS)
+}
+
+function onPointerMove(event: PointerEvent): void {
+  if (activePointerId === undefined || event.pointerId !== activePointerId) return
+  latestClientY = event.clientY
+  if (props.dragging) {
+    emit('dragMove', event.clientY)
+    return
+  }
+  if (
+    holdTimer !== undefined &&
+    Math.hypot(event.clientX - startX, event.clientY - startY) > MOVE_CANCEL_PX
+  ) {
+    cancelPendingHold()
+  }
+}
+
+function finishPointer(event: PointerEvent): void {
+  if (activePointerId === undefined || event.pointerId !== activePointerId) return
+  const wasDragging = props.dragging
+  clearHoldTimer()
+  activePointerId = undefined
+  releaseCapture(event.pointerId)
+  if (wasDragging) {
+    scheduleSuppressReset()
+    emit('dragEnd')
+  }
+}
+
+function onPointerLeave(event: PointerEvent): void {
+  if (!props.dragging && activePointerId === event.pointerId && holdTimer !== undefined) {
+    cancelPendingHold()
+  }
+}
+
+function onClick(): void {
+  if (suppressNextClick) {
+    clearSuppressTimer()
+    suppressNextClick = false
+    return
+  }
+  if (!editing.value && !props.dragging) emit('open')
+}
+
+watch(
+  () => props.dragging,
+  (isDragging, wasDragging) => {
+    if (wasDragging && !isDragging && activePointerId !== undefined) {
+      const pointerId = activePointerId
+      clearHoldTimer()
+      activePointerId = undefined
+      releaseCapture(pointerId)
+      scheduleSuppressReset()
+    }
+  },
+)
+
+onBeforeUnmount(() => {
+  clearHoldTimer()
+  clearSuppressTimer()
+  if (activePointerId !== undefined) {
+    const pointerId = activePointerId
+    activePointerId = undefined
+    releaseCapture(pointerId)
+  }
+  if (props.dragging) emit('dragEnd')
+})
 </script>
 
 <template>
   <div
+    ref="row"
     class="row"
-    :class="{ current, attention, [state]: true, tile }"
+    :class="{ current, attention, [state]: true, tile, dragging }"
+    :style="dragging ? { translate: `0 ${dragOffset}px` } : undefined"
     role="button"
     tabindex="0"
-    @click="editing || emit('open')"
+    @click="onClick"
     @keydown.enter.self="emit('open')"
     @contextmenu.prevent="openMenu"
+    @pointerdown="onPointerDown"
+    @pointermove="onPointerMove"
+    @pointerup="finishPointer"
+    @pointercancel="finishPointer"
+    @pointerleave="onPointerLeave"
+    @lostpointercapture="finishPointer"
   >
     <span v-if="tile" class="tile-bar" />
     <SessionDot class="state" :state="state" />
@@ -183,17 +348,28 @@ function openMenu(event: MouseEvent): void {
   transition:
     background-color var(--motion-quick) var(--motion-ease),
     box-shadow var(--motion-quick) var(--motion-ease),
-    scale var(--motion-quick) var(--motion-ease);
+    scale var(--motion-quick) var(--motion-ease),
+    translate var(--motion-quick) var(--motion-ease);
 }
 
 .row:hover {
   background: var(--surface-hover);
 }
 
-.row:active {
+.row:active:not(.dragging) {
   scale: 0.98;
 }
 
+.row.dragging {
+  z-index: 2;
+  cursor: grabbing;
+  user-select: none;
+  touch-action: none;
+  box-shadow: inset 0 0 0 1px var(--accent-text);
+  transition:
+    background-color var(--motion-quick) var(--motion-ease),
+    box-shadow var(--motion-quick) var(--motion-ease);
+}
 .row.current {
   background: var(--user-bubble);
   box-shadow: inset 0 0 0 1px var(--user-bubble-border);

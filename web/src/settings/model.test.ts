@@ -25,6 +25,7 @@ describe('parseSettings', () => {
       sidebarTodoExpanded: false,
       sidebarRunningExpanded: false,
       sidebarHistoryExpanded: false,
+      sidebarRunningOrder: ['s2', 's1'],
     }
     expect(parseSettings(JSON.stringify(stored))).toEqual({ settings: stored, corrupt: false })
   })
@@ -56,6 +57,16 @@ describe('parseSettings', () => {
     expect(parseSettings(JSON.stringify({ sidebarWidth: null })).settings.sidebarWidth).toBe(
       metrics.sidebarWidth,
     )
+  })
+
+  it('deduplicates sidebarRunningOrder and drops invalid entries', () => {
+    expect(parseSettings(JSON.stringify({ sidebarRunningOrder: 's1' })).settings.sidebarRunningOrder).toEqual(
+      [],
+    )
+    expect(
+      parseSettings(JSON.stringify({ sidebarRunningOrder: ['s2', '', 42, null, 's1', 's2', 's3', false] }))
+        .settings.sidebarRunningOrder,
+    ).toEqual(['s2', 's1', 's3'])
   })
 })
 

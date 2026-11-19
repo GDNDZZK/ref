@@ -1,12 +1,15 @@
 <script setup lang="ts">
 // The sidebar (Sidebar.qml): running sessions, searchable history, MCP status and settings.
 // The content keeps its width and is clipped by the frame, so collapsing slides it out to the left.
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
+import type { ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
 import lockupDark from '../../../assets/app/ref-lockup-small-dark.svg'
 import lockupLight from '../../../assets/app/ref-lockup-small-light.svg'
+import { clamp } from '../clamp.ts'
 import { useTheme } from '../composables/useTheme.ts'
 import { isWorkingSession, matchesQuery } from '../shell/sessionRow.ts'
+import { metrics } from '../theme/generated/theme.ts'
 import { useCommandsStore } from '../stores/commands.ts'
 import { useConnectionStore } from '../stores/connection.ts'
 import { useDialogsStore } from '../stores/dialogs.ts'
@@ -22,7 +25,9 @@ import SidebarRow from './SidebarRow.vue'
 import SidebarTodo from './SidebarTodo.vue'
 const LOCKUP_WIDTH = 60
 const LOCKUP_HEIGHT = 24
-
+const RUNNING_ROW_GAP = 2
+const AUTO_SCROLL_EDGE_PX = 24
+const AUTO_SCROLL_MAX_STEP_PX = 8
 const { t } = useI18n()
 const { isDark } = useTheme()
 const workspace = useWorkspaceStore()
@@ -117,6 +122,156 @@ function stopResize(event: PointerEvent): void {
   }
   resetDragState()
 }
+
+// --- Running session long-press reorder.
+const runningRef = useTemplateRef<ComponentPublicInstance>('running')
+const draggingId = ref<string>()
+const dragOffset = ref(0)
+let dragStartClientY = 0
+let dragLastClientY = 0
+let dragStartScrollTop = 0
+let dragStartIndex = -1
+let dragStride = metrics.sidebarRowHeight + RUNNING_ROW_GAP
+let scrollFrameId: number | undefined
+
+function runningListElement(): HTMLElement | undefined {
+  const el = runningRef.value?.$el
+  return el instanceof HTMLElement ? el : undefined
+}
+
+function stopAutoScroll(): void {
+  if (scrollFrameId === undefined) return
+  cancelAnimationFrame(scrollFrameId)
+  scrollFrameId = undefined
+}
+
+function measureRowStride(): number {
+  const fallback = metrics.sidebarRowHeight + RUNNING_ROW_GAP
+  const list = runningListElement()
+  if (!list) return fallback
+  const rows = list.querySelectorAll<HTMLElement>(':scope > .row')
+  const first = rows[0]
+  if (!first) return fallback
+  const firstRect = first.getBoundingClientRect()
+  if (firstRect.height <= 0) return fallback
+  const second = rows[1]
+  if (second) {
+    const stride = second.getBoundingClientRect().top - firstRect.top
+    if (stride > 0) return stride
+  }
+  const gap = Number.parseFloat(getComputedStyle(list).rowGap || getComputedStyle(list).gap)
+  return firstRect.height + (Number.isFinite(gap) ? gap : RUNNING_ROW_GAP)
+}
+
+function startSessionDrag(id: string, clientY: number): void {
+  if (workspace.live.length <= 1) return
+  const index = workspace.live.findIndex((session) => session.id === id)
+  if (index < 0) return
+  draggingId.value = id
+  dragOffset.value = 0
+  dragStartClientY = clientY
+  dragLastClientY = clientY
+  dragStartScrollTop = runningListElement()?.scrollTop ?? 0
+  dragStartIndex = index
+  dragStride = measureRowStride()
+}
+
+function applyDragPosition(clientY: number): void {
+  const id = draggingId.value
+  if (!id) return
+  const count = workspace.live.length
+  if (count <= 1) {
+    endSessionDrag()
+    return
+  }
+  const scrollTop = runningListElement()?.scrollTop ?? 0
+  const totalDelta = clientY - dragStartClientY + (scrollTop - dragStartScrollTop)
+  const minDelta = -dragStartIndex * dragStride
+  const maxDelta = (count - 1 - dragStartIndex) * dragStride
+  const clampedDelta = clamp(totalDelta, minDelta, maxDelta)
+  const targetIndex = clamp(dragStartIndex + Math.round(clampedDelta / dragStride), 0, count - 1)
+  workspace.moveRunningSession(id, targetIndex)
+  const currentIndex = workspace.live.findIndex((session) => session.id === id)
+  if (currentIndex < 0) {
+    endSessionDrag()
+    return
+  }
+  dragOffset.value = clampedDelta - (currentIndex - dragStartIndex) * dragStride
+}
+
+function autoScrollStep(clientY: number): number {
+  const list = runningListElement()
+  if (!list || list.scrollHeight <= list.clientHeight) return 0
+  const rect = list.getBoundingClientRect()
+  if (rect.height <= 0) return 0
+  if (clientY < rect.top + AUTO_SCROLL_EDGE_PX && list.scrollTop > 0) {
+    const ratio = clamp((rect.top + AUTO_SCROLL_EDGE_PX - clientY) / AUTO_SCROLL_EDGE_PX, 0, 1)
+    return -Math.max(1, Math.round(ratio * AUTO_SCROLL_MAX_STEP_PX))
+  }
+  if (clientY > rect.bottom - AUTO_SCROLL_EDGE_PX && list.scrollTop + list.clientHeight < list.scrollHeight) {
+    const ratio = clamp((clientY - (rect.bottom - AUTO_SCROLL_EDGE_PX)) / AUTO_SCROLL_EDGE_PX, 0, 1)
+    return Math.max(1, Math.round(ratio * AUTO_SCROLL_MAX_STEP_PX))
+  }
+  return 0
+}
+
+function scheduleAutoScroll(): void {
+  if (scrollFrameId !== undefined) return
+  const tick = () => {
+    scrollFrameId = undefined
+    if (!draggingId.value) return
+    const step = autoScrollStep(dragLastClientY)
+    if (step === 0) return
+    const list = runningListElement()
+    if (!list) return
+    list.scrollTop += step
+    applyDragPosition(dragLastClientY)
+    if (autoScrollStep(dragLastClientY) !== 0) {
+      scrollFrameId = requestAnimationFrame(tick)
+    }
+  }
+  scrollFrameId = requestAnimationFrame(tick)
+}
+
+function moveSessionDrag(clientY: number): void {
+  if (!draggingId.value) return
+  dragLastClientY = clientY
+  applyDragPosition(clientY)
+  if (autoScrollStep(clientY) !== 0) scheduleAutoScroll()
+  else stopAutoScroll()
+}
+
+function endSessionDrag(): void {
+  stopAutoScroll()
+  const list = runningListElement()
+  if (list?.querySelector('.row.dragging.session-move')) {
+    for (const row of list.querySelectorAll('.row.session-move')) {
+      const event =
+        typeof TransitionEvent === 'function'
+          ? new TransitionEvent('transitionend', { propertyName: 'transform' })
+          : new Event('transitionend')
+      if (!(event as TransitionEvent).propertyName) {
+        Object.defineProperty(event, 'propertyName', { value: 'transform' })
+      }
+      row.dispatchEvent(event)
+    }
+  }
+  draggingId.value = undefined
+  dragOffset.value = 0
+  dragStartIndex = -1
+}
+
+watch(
+  [() => layout.sidebarRunningExpanded, () => layout.sidebarVisible, () => workspace.live.length],
+  ([expanded, visible, count]) => {
+    if (!draggingId.value) return
+    if (!expanded || !visible || count <= 1 || !workspace.live.some((s) => s.id === draggingId.value)) {
+      endSessionDrag()
+    }
+  },
+)
+
+onBeforeUnmount(endSessionDrag)
 </script>
 
 <template>
@@ -185,7 +340,7 @@ function stopResize(event: PointerEvent): void {
             :inert="!layout.sidebarRunningExpanded || undefined"
           >
             <div class="fold">
-              <TransitionGroup tag="div" name="session" class="running" role="list">
+              <TransitionGroup ref="running" tag="div" name="session" class="running" role="list">
                 <SidebarRow
                   v-for="info in workspace.live"
                   :key="info.id"
@@ -193,10 +348,16 @@ function stopResize(event: PointerEvent): void {
                   :current="info.id === workspace.focusedId"
                   :tile="workspace.mode === 'split' && workspace.tileIds.includes(info.id)"
                   :can-detach="workspace.mode === 'single' && info.id === workspace.currentId"
+                  :reorderable="workspace.live.length > 1"
+                  :dragging="draggingId === info.id"
+                  :drag-offset="draggingId === info.id ? dragOffset : 0"
                   @open="open(info.id)"
                   @detach="report(workspace.detachCurrent())"
                   @close="close(info.id)"
                   @rename="(name) => report(workspace.renameSession(info.id, name))"
+                  @drag-start="(y) => startSessionDrag(info.id, y)"
+                  @drag-move="moveSessionDrag"
+                  @drag-end="endSessionDrag"
                 />
               </TransitionGroup>
             </div>
@@ -597,8 +758,8 @@ function stopResize(event: PointerEvent): void {
   scale: 0.96;
 }
 
-.session-move {
-  transition: translate var(--motion-standard) var(--motion-ease);
+:deep(.row.row.session-move) {
+  transition: transform var(--motion-standard) var(--motion-ease);
 }
 
 .search {
