@@ -61,7 +61,7 @@ Without `-c` or `-s`, `ref-gui` opens in the empty workspace state (*No session 
 
 The window has a sidebar on the left and the content on the right: one session, the empty workspace (*No session open*, with *New session in folder…* and *New session*), or the [split view](#split-view).
 
-- **Running** lists the live sessions of this window, the newest first. **History** lists the sessions the backend has saved, by time of the last change; the search box filters the 200 most recent ones. A click opens a session; clicking the already-open session again in single view, choosing *Move to background* from its right-click menu, or running `/detach` (`/background`, `/leave`, or Command Palette → *Move session to background*) detaches it to the background without stopping it and returns to *No session open*. Double-click a running session, or use the right-click menu, to rename or close it. The right-click menu of a history entry deletes it.
+- **Running** lists the live sessions of this window (newest first by default). Long-press (~280 ms) and drag a row vertically to reorder live sessions (auto-scrolling when needed); newly created sessions appear at the top, and the custom order is remembered (`sidebar.runningOrder` in `gui.json`). **History** lists the sessions the backend has saved, by time of the last change; the search box filters the 200 most recent ones. A click opens a session; clicking the already-open session again in single view, choosing *Move to background* from its right-click menu, or running `/detach` (`/background`, `/leave`, or Command Palette → *Move session to background*) detaches it to the background without stopping it and returns to *No session open*. Double-click a running session, or use the right-click menu, to rename or close it. The right-click menu of a history entry deletes it.
 - A running session is labelled with the name you gave it, else its title, else the name of its directory. A session in the history is labelled with its title (on one line), else its name, else the name of its directory, as in the terminal UI. The *Running* list is as tall as its rows and scrolls only when *History* would get fewer than three rows.
 - The *New session* button creates a session in the workspace's default directory. The folder button next to it, or *New session in folder…* / *New session in another folder…*, asks for a directory first and updates the workspace's default directory to that folder.
 - Closing a session that is still working asks for confirmation first (including from the sidebar and the *Sessions* dialog); its conversation stays in history. Closing the last open session returns to *No session open* instead of starting a new one (and in split view, closing the held foreground session clears it without pulling a background tile out of the grid).
@@ -177,6 +177,9 @@ On macOS, Ctrl in the table is Cmd. The letters are the same in the [Web UI](web
 | Split view | Ctrl+Shift+W | `/watch` |
 | Toggle sidebar | Ctrl+Shift+B | `/sidebar` |
 | Zoom the focused tile (split view) | Ctrl+Shift+Z | |
+| Zoom in interface | Ctrl+= (Ctrl++, Ctrl+Shift+=) | |
+| Zoom out interface | Ctrl+- | |
+| Reset interface zoom | Ctrl+0 | |
 | Keybindings and commands | Ctrl+Shift+H | `/help` |
 | Settings | Ctrl+Shift+S | |
 | Move the tile focus (split view) | Alt+arrow keys | |
@@ -189,21 +192,23 @@ Open them with Ctrl+Shift+S or the settings button at the bottom of the sidebar.
 
 - **Theme:** System, Light or Dark.
 - **Language:** System, English or 简体中文. The conversation area and the dialogs are translated.
+- **Interface zoom:** `70%`–`150%` in `10%` steps (`−` / `+` / *Reset* buttons, Command Palette, or `Ctrl+=` / `Ctrl+-` / `Ctrl+0`; `Cmd` on macOS).
 - **Notifications:** the master switch and the three kinds described [above](#notifications).
 - **Configuration:** *Reload configuration* and *Edit ref.json…* (see [Graphical editor and profiles](configuration.md#graphical-editor-and-profiles)).
 
-They are saved in `gui.json` in the state directory ([Files and directories](cli.md#files-and-directories)), together with whether the sidebar is shown, its width and section fold states, and the size of the window:
+They are saved in `gui.json` in the state directory ([Files and directories](cli.md#files-and-directories)), together with `uiScale` (interface zoom factor), whether the sidebar is shown, its width, section fold states, running session order (`sidebar.runningOrder`), and the size of the window:
 
 ```json
 {
   "theme": "system",
   "language": "system",
+  "uiScale": 1,
   "notifications": { "enabled": true, "permission": true, "turnDone": true, "turnError": true },
-  "sidebar": { "visible": true, "todoExpanded": true, "runningExpanded": true, "historyExpanded": true, "width": 264 },
+  "sidebar": { "visible": true, "todoExpanded": true, "runningExpanded": true, "historyExpanded": true, "width": 264, "runningOrder": [] }
 }
 ```
 
-`theme` is `system`, `light` or `dark`; `language` is `system`, `en` or `zh_CN`. The file is written on every change. If it cannot be read, it is renamed to `gui.json.bad`, the defaults are used, and the settings dialog and a message in the corner say so. Values that are wrong are ignored one by one and keep their defaults.
+`theme` is `system`, `light` or `dark`; `language` is `system`, `en` or `zh_CN`; `uiScale` is `0.7`–`1.5` (default `1`). The file is written on every change. If it cannot be read, it is renamed to `gui.json.bad`, the defaults are used, and the settings dialog and a message in the corner say so. Values that are wrong are ignored one by one and keep their defaults.
 
 ## Known limits
 
