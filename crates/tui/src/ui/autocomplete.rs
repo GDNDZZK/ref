@@ -497,14 +497,314 @@ pub fn parent_dir_input(current: &str) -> Option<String> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShellTokenPos {
-    /// First command token (at start of line or after `|`, `||`, `&&`, `;`).
+    /// First command token (at start of line or after `|`, `||`, `&&`, `;`, or a wrapper).
     Command {
         start: usize,
         raw: String,
         at_line_start: bool,
     },
-    /// Subsequent argument token after a command word.
+    /// Subsequent argument token after a command word, or a wrapper flag / flag-arg.
     Arg { start: usize, raw: String },
+}
+
+struct WrapperSpec {
+    name: &'static str,
+    arg_flags: &'static [&'static str],
+    positional_args: usize,
+}
+
+const WRAPPERS: &[WrapperSpec] = &[
+    WrapperSpec {
+        name: "sudo",
+        arg_flags: &[
+            "-C",
+            "--close-from",
+            "-c",
+            "--login-class",
+            "-D",
+            "--chdir",
+            "-g",
+            "--group",
+            "-h",
+            "--host",
+            "-p",
+            "--prompt",
+            "-R",
+            "--chroot",
+            "-r",
+            "--role",
+            "-t",
+            "--type",
+            "-T",
+            "--command-timeout",
+            "-U",
+            "--other-user",
+            "-u",
+            "--user",
+        ],
+        positional_args: 0,
+    },
+    WrapperSpec {
+        name: "doas",
+        arg_flags: &["-a", "-C", "-u"],
+        positional_args: 0,
+    },
+    WrapperSpec {
+        name: "env",
+        arg_flags: &[
+            "-C",
+            "--chdir",
+            "-P",
+            "-S",
+            "--split-string",
+            "-u",
+            "--unset",
+            "--default-signal",
+            "--ignore-signal",
+            "--block-signal",
+        ],
+        positional_args: 0,
+    },
+    WrapperSpec {
+        name: "nohup",
+        arg_flags: &[],
+        positional_args: 0,
+    },
+    WrapperSpec {
+        name: "time",
+        arg_flags: &["-f", "--format", "-o", "--output"],
+        positional_args: 0,
+    },
+    WrapperSpec {
+        name: "nice",
+        arg_flags: &["-n", "--adjustment"],
+        positional_args: 0,
+    },
+    WrapperSpec {
+        name: "ionice",
+        arg_flags: &[
+            "-c",
+            "--class",
+            "-n",
+            "--classdata",
+            "-P",
+            "--pgid",
+            "-p",
+            "--pid",
+            "-u",
+            "--uid",
+        ],
+        positional_args: 0,
+    },
+    WrapperSpec {
+        name: "timeout",
+        arg_flags: &["-k", "--kill-after", "-s", "--signal"],
+        positional_args: 1,
+    },
+    WrapperSpec {
+        name: "setsid",
+        arg_flags: &[],
+        positional_args: 0,
+    },
+    WrapperSpec {
+        name: "strace",
+        arg_flags: &[
+            "-A", "-b", "-E", "-e", "-I", "-o", "-P", "-p", "-S", "-s", "-U", "-u",
+        ],
+        positional_args: 0,
+    },
+    WrapperSpec {
+        name: "ltrace",
+        arg_flags: &[
+            "-A", "-a", "-e", "-F", "-l", "-n", "-o", "-p", "-s", "-u", "-x",
+        ],
+        positional_args: 0,
+    },
+    WrapperSpec {
+        name: "chrt",
+        arg_flags: &["-D", "-P", "-T"],
+        positional_args: 1,
+    },
+    WrapperSpec {
+        name: "taskset",
+        arg_flags: &[],
+        positional_args: 1,
+    },
+    WrapperSpec {
+        name: "stdbuf",
+        arg_flags: &["-e", "--error", "-i", "--input", "-o", "--output"],
+        positional_args: 0,
+    },
+    WrapperSpec {
+        name: "watch",
+        arg_flags: &["-n", "--interval"],
+        positional_args: 0,
+    },
+    WrapperSpec {
+        name: "command",
+        arg_flags: &[],
+        positional_args: 0,
+    },
+    WrapperSpec {
+        name: "exec",
+        arg_flags: &["-a"],
+        positional_args: 0,
+    },
+    WrapperSpec {
+        name: "builtin",
+        arg_flags: &[],
+        positional_args: 0,
+    },
+    WrapperSpec {
+        name: "xargs",
+        arg_flags: &[
+            "-a",
+            "--arg-file",
+            "-d",
+            "--delimiter",
+            "-E",
+            "-e",
+            "-I",
+            "-L",
+            "-l",
+            "-n",
+            "--max-args",
+            "-P",
+            "--max-procs",
+            "-s",
+            "--max-chars",
+        ],
+        positional_args: 0,
+    },
+    WrapperSpec {
+        name: "caffeinate",
+        arg_flags: &["-t", "-w"],
+        positional_args: 0,
+    },
+    WrapperSpec {
+        name: "pkexec",
+        arg_flags: &["--user"],
+        positional_args: 0,
+    },
+];
+
+fn find_wrapper(tok: &str) -> Option<&'static WrapperSpec> {
+    let base = tok.rsplit(['/', '\\']).next().unwrap_or(tok);
+    WRAPPERS.iter().find(|w| w.name == base)
+}
+
+/// True when a wrapper option token consumes the following whitespace-separated token as its value.
+fn wrapper_flag_takes_next_arg(w: &WrapperSpec, tok: &str) -> bool {
+    if tok.contains('=') {
+        return false;
+    }
+    if tok.starts_with("--") {
+        return w.arg_flags.contains(&tok);
+    }
+    let Some(short) = tok.strip_prefix('-') else {
+        return false;
+    };
+    for (idx, ch) in short.char_indices() {
+        let is_arg_flag = w
+            .arg_flags
+            .iter()
+            .any(|f| f.len() == 2 && f.starts_with('-') && f.as_bytes()[1] as char == ch);
+        if is_arg_flag {
+            // Remaining characters in the same token are an attached value (e.g. `-Euroot`, `-vk5s`).
+            return idx + ch.len_utf8() >= short.len();
+        }
+    }
+    false
+}
+
+fn is_env_assign(tok: &str) -> bool {
+    tok.split_once('=').is_some_and(|(k, _)| {
+        !k.is_empty()
+            && k.bytes().enumerate().all(|(idx, b)| {
+                b == b'_' || b.is_ascii_alphabetic() || (idx > 0 && b.is_ascii_digit())
+            })
+    })
+}
+
+#[derive(Default)]
+struct SegScan {
+    in_args: bool,
+    wrapped: bool,
+    wrapper: Option<&'static WrapperSpec>,
+    expect_flag_arg: bool,
+    end_of_opts: bool,
+    positional_left: usize,
+}
+
+impl SegScan {
+    fn enter_wrapper(&mut self, w: &'static WrapperSpec) {
+        self.wrapped = true;
+        self.wrapper = Some(w);
+        self.expect_flag_arg = false;
+        self.end_of_opts = false;
+        self.positional_left = w.positional_args;
+    }
+
+    /// Updates segment state after a completed whitespace-terminated token `tok`.
+    fn advance(&mut self, tok: &str) {
+        if self.in_args {
+            return;
+        }
+        if self.expect_flag_arg {
+            self.expect_flag_arg = false;
+            return;
+        }
+        let Some(w) = self.wrapper else {
+            if is_env_assign(tok) {
+                return;
+            }
+            if let Some(w) = find_wrapper(tok) {
+                self.enter_wrapper(w);
+            } else {
+                self.in_args = true;
+            }
+            return;
+        };
+        if !self.end_of_opts && tok == "--" {
+            self.end_of_opts = true;
+            return;
+        }
+        if !self.end_of_opts && tok.starts_with('-') {
+            if wrapper_flag_takes_next_arg(w, tok) {
+                self.expect_flag_arg = true;
+            }
+            return;
+        }
+        if self.positional_left > 0 {
+            self.positional_left -= 1;
+            return;
+        }
+        if is_env_assign(tok) {
+            return;
+        }
+        if let Some(next_w) = find_wrapper(tok) {
+            self.enter_wrapper(next_w);
+            return;
+        }
+        self.in_args = true;
+    }
+
+    /// Classifies the current (possibly empty) token being typed at the cursor.
+    fn classify(&self, start: usize, raw: String, at_line_start: bool) -> ShellTokenPos {
+        let typing_wrapper_flag =
+            self.wrapper.is_some() && !self.end_of_opts && raw.starts_with('-');
+        let is_arg =
+            self.in_args || self.expect_flag_arg || self.positional_left > 0 || typing_wrapper_flag;
+        if is_arg {
+            ShellTokenPos::Arg { start, raw }
+        } else {
+            ShellTokenPos::Command {
+                start,
+                raw,
+                at_line_start: at_line_start && !self.wrapped,
+            }
+        }
+    }
 }
 
 /// Parses the current line before `cursor` in `!` shell mode to identify the token being completed.
@@ -554,10 +854,10 @@ pub fn shell_token_context(before_cursor: &str) -> ShellTokenPos {
         }
     }
 
-    // Within `line[seg_start..]`, scan words (skipping leading `VAR=val` assignments).
+    // Within `line[seg_start..]`, scan words (skipping `VAR=val` assignments and command wrappers).
     let seg = &line[seg_start..];
     let mut pos = 0usize;
-    let mut word_index = 0usize;
+    let mut scan = SegScan::default();
     loop {
         while let Some(c) = seg[pos..].chars().next() {
             if c.is_whitespace() {
@@ -568,18 +868,7 @@ pub fn shell_token_context(before_cursor: &str) -> ShellTokenPos {
         }
         if pos >= seg.len() {
             let abs = line_offset + seg_start + pos;
-            return if word_index == 0 {
-                ShellTokenPos::Command {
-                    start: abs,
-                    raw: String::new(),
-                    at_line_start,
-                }
-            } else {
-                ShellTokenPos::Arg {
-                    start: abs,
-                    raw: String::new(),
-                }
-            };
+            return scan.classify(abs, String::new(), at_line_start);
         }
         let tok_start = pos;
         let mut tq: Option<char> = None;
@@ -612,30 +901,9 @@ pub fn shell_token_context(before_cursor: &str) -> ShellTokenPos {
         let tok = &seg[tok_start..pos];
         if pos >= seg.len() {
             let abs = line_offset + seg_start + tok_start;
-            return if word_index == 0 {
-                ShellTokenPos::Command {
-                    start: abs,
-                    raw: tok.to_string(),
-                    at_line_start,
-                }
-            } else {
-                ShellTokenPos::Arg {
-                    start: abs,
-                    raw: tok.to_string(),
-                }
-            };
+            return scan.classify(abs, tok.to_string(), at_line_start);
         }
-        // Env assignment before command (`FOO=bar cmd`) leaves `word_index` at 0.
-        let is_env_assign = word_index == 0
-            && tok.split_once('=').is_some_and(|(k, _)| {
-                !k.is_empty()
-                    && k.bytes().enumerate().all(|(idx, b)| {
-                        b == b'_' || b.is_ascii_alphabetic() || (idx > 0 && b.is_ascii_digit())
-                    })
-            });
-        if !is_env_assign {
-            word_index += 1;
-        }
+        scan.advance(tok);
     }
 }
 
@@ -892,5 +1160,225 @@ mod tests {
             );
             assert_eq!(buf[(2, prompt_rect.y)].symbol(), "P");
         }
+    }
+
+    #[test]
+    fn shell_token_context_wrappers_flags_durations_and_chains() {
+        assert_eq!(
+            shell_token_context("sudo car"),
+            ShellTokenPos::Command {
+                start: 5,
+                raw: "car".into(),
+                at_line_start: false,
+            }
+        );
+        assert_eq!(
+            shell_token_context("sudo -u root car"),
+            ShellTokenPos::Command {
+                start: "sudo -u root ".len(),
+                raw: "car".into(),
+                at_line_start: false,
+            }
+        );
+        // Typing wrapper `-` flag or flag argument stays in `Arg` (no premature binary list).
+        assert_eq!(
+            shell_token_context("sudo -"),
+            ShellTokenPos::Arg {
+                start: 5,
+                raw: "-".into(),
+            }
+        );
+        assert_eq!(
+            shell_token_context("sudo -u "),
+            ShellTokenPos::Arg {
+                start: 8,
+                raw: String::new(),
+            }
+        );
+        assert_eq!(
+            shell_token_context("sudo -u ro"),
+            ShellTokenPos::Arg {
+                start: 8,
+                raw: "ro".into(),
+            }
+        );
+        assert_eq!(
+            shell_token_context("sudo --user=root car"),
+            ShellTokenPos::Command {
+                start: "sudo --user=root ".len(),
+                raw: "car".into(),
+                at_line_start: false,
+            }
+        );
+        assert_eq!(
+            shell_token_context("sudo -- car"),
+            ShellTokenPos::Command {
+                start: "sudo -- ".len(),
+                raw: "car".into(),
+                at_line_start: false,
+            }
+        );
+
+        // `timeout` consumes 1 positional duration before the command.
+        assert_eq!(
+            shell_token_context("timeout "),
+            ShellTokenPos::Arg {
+                start: 8,
+                raw: String::new(),
+            }
+        );
+        assert_eq!(
+            shell_token_context("timeout 5s"),
+            ShellTokenPos::Arg {
+                start: 8,
+                raw: "5s".into(),
+            }
+        );
+        assert_eq!(
+            shell_token_context("timeout 5s "),
+            ShellTokenPos::Command {
+                start: 11,
+                raw: String::new(),
+                at_line_start: false,
+            }
+        );
+        assert_eq!(
+            shell_token_context("timeout -s TERM 5s car"),
+            ShellTokenPos::Command {
+                start: "timeout -s TERM 5s ".len(),
+                raw: "car".into(),
+                at_line_start: false,
+            }
+        );
+
+        // Chained wrappers + `VAR=val` assignments + arguments after wrapped command.
+        assert_eq!(
+            shell_token_context("sudo env -u PATH RUST_LOG=debug car"),
+            ShellTokenPos::Command {
+                start: "sudo env -u PATH RUST_LOG=debug ".len(),
+                raw: "car".into(),
+                at_line_start: false,
+            }
+        );
+        assert_eq!(
+            shell_token_context("sudo cargo test src/"),
+            ShellTokenPos::Arg {
+                start: "sudo cargo test ".len(),
+                raw: "src/".into(),
+            }
+        );
+        assert_eq!(
+            shell_token_context("echo hi | sudo gr"),
+            ShellTokenPos::Command {
+                start: "echo hi | sudo ".len(),
+                raw: "gr".into(),
+                at_line_start: false,
+            }
+        );
+
+        // Remaining wrappers.
+        for prefix in [
+            "doas -u admin ",
+            "env -i FOO=bar ",
+            "nohup ",
+            "time -p ",
+            "nice -n 10 ",
+            "nice -10 ",
+            "ionice -c 2 -n 0 ",
+            "setsid -w ",
+            "strace -e trace=file ",
+            "ltrace -o out.log ",
+            "chrt -f 99 ",
+            "taskset -c 0-3 ",
+            "stdbuf -o L ",
+            "watch -n 1 ",
+            "command -p ",
+            "exec -a name ",
+            "builtin ",
+            "xargs -I {} ",
+            "caffeinate -t 5 ",
+            "pkexec --user root ",
+        ] {
+            let line = format!("{prefix}car");
+            assert_eq!(
+                shell_token_context(&line),
+                ShellTokenPos::Command {
+                    start: prefix.len(),
+                    raw: "car".into(),
+                    at_line_start: false,
+                },
+                "line={line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn shell_token_context_path_prefixed_and_clustered_short_flags() {
+        // Path-prefixed wrappers match by basename.
+        for prefix in [
+            "/usr/bin/sudo ",
+            "/bin/env FOO=bar ",
+            "/usr/bin/timeout 5s ",
+            "/usr/bin/time -f '%e' ",
+            r"C:\tools\sudo -u root ",
+        ] {
+            let line = format!("{prefix}car");
+            assert_eq!(
+                shell_token_context(&line),
+                ShellTokenPos::Command {
+                    start: prefix.len(),
+                    raw: "car".into(),
+                    at_line_start: false,
+                },
+                "line={line:?}"
+            );
+        }
+
+        // Clustered short flags ending in an arg-taking flag consume the next token.
+        for prefix in [
+            "sudo -Eu root ",
+            "sudo -iu postgres ",
+            "env -iC /tmp ",
+            "xargs -0n 1 ",
+            "xargs -0I {} ",
+            // Attached values within the same token do NOT consume the next token.
+            "sudo -Euroot ",
+            "timeout -vk5s 10s ",
+            "stdbuf -oL ",
+        ] {
+            let line = format!("{prefix}car");
+            assert_eq!(
+                shell_token_context(&line),
+                ShellTokenPos::Command {
+                    start: prefix.len(),
+                    raw: "car".into(),
+                    at_line_start: false,
+                },
+                "line={line:?}"
+            );
+        }
+
+        // Mid-argument while typing after a clustered arg-taking short flag stays in `Arg`.
+        assert_eq!(
+            shell_token_context("sudo -Eu "),
+            ShellTokenPos::Arg {
+                start: "sudo -Eu ".len(),
+                raw: String::new(),
+            }
+        );
+        assert_eq!(
+            shell_token_context("sudo -Eu ro"),
+            ShellTokenPos::Arg {
+                start: "sudo -Eu ".len(),
+                raw: "ro".into(),
+            }
+        );
+        assert_eq!(
+            shell_token_context("env -iC "),
+            ShellTokenPos::Arg {
+                start: "env -iC ".len(),
+                raw: String::new(),
+            }
+        );
     }
 }

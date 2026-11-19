@@ -88,8 +88,9 @@ fn ctrl_char(k: &KeyEvent, c: char) -> bool {
 
 fn key(app: &mut App, k: KeyEvent) {
     // Copy selection: ctrl+c / ctrl+shift+c / y (when a transcript selection exists).
-    let copy_key = ctrl_char(&k, 'c')
-        || (is(&k, KeyCode::Char('y'), KeyModifiers::NONE) && app.editor.is_empty());
+    let editor_empty = app.active_editor().is_none_or(Editor::is_empty);
+    let copy_key =
+        ctrl_char(&k, 'c') || (is(&k, KeyCode::Char('y'), KeyModifiers::NONE) && editor_empty);
     if app.has_selection() && copy_key {
         app.copy_selection();
         return;
@@ -468,7 +469,7 @@ fn chat_key(app: &mut App, k: KeyEvent) {
             }
             app.editor.clear();
             app.shell_mode = false;
-            app.ac = None;
+            app.clear_autocomplete();
         } else {
             exit_or_arm(app);
         }
@@ -491,63 +492,8 @@ fn chat_key(app: &mut App, k: KeyEvent) {
         return;
     }
     // Autocomplete navigation.
-    if app.ac.is_some() {
-        match k.code {
-            KeyCode::Up => return ac_move(app, -1),
-            KeyCode::Down => return ac_move(app, 1),
-            KeyCode::Char('p') if m == CTRL => return ac_move(app, -1),
-            KeyCode::Char('n') if m == CTRL => return ac_move(app, 1),
-            KeyCode::Tab => {
-                let keep_open = app
-                    .ac
-                    .as_ref()
-                    .and_then(|ac| ac.items.get(ac.sel))
-                    .is_some_and(|(v, _, _)| {
-                        ac_keeps_open_on_tab(app.ac.as_ref().map(|a| &a.kind), v)
-                    });
-                app.accept_completion(false);
-                if keep_open {
-                    refresh_autocomplete_after_accept(app);
-                } else {
-                    app.ac = None;
-                }
-                return;
-            }
-            KeyCode::Enter if m.is_empty() => {
-                let freeform_submit = app
-                    .ac
-                    .as_ref()
-                    .is_some_and(|ac| ac.freeform_enter && !ac.explicitly_selected);
-                if freeform_submit {
-                    app.ac = None;
-                    app.submit();
-                    return;
-                }
-                let keep_open = app
-                    .ac
-                    .as_ref()
-                    .and_then(|ac| ac.items.get(ac.sel))
-                    .is_some_and(|(v, _, _)| {
-                        ac_keeps_open_on_tab(app.ac.as_ref().map(|a| &a.kind), v)
-                    });
-                let executed = app.accept_completion(true);
-                if executed {
-                    return;
-                }
-                if keep_open {
-                    refresh_autocomplete_after_accept(app);
-                } else {
-                    app.ac = None;
-                }
-                return;
-            }
-            KeyCode::Esc => {
-                app.ac = None;
-                app.suppress_ac = true;
-                return;
-            }
-            _ => {}
-        }
+    if app.ac.is_some() && handle_ac_key(app, &k) {
+        return;
     }
     let before = app.editor.text.clone();
     let before_cursor = app.editor.cursor;
@@ -559,7 +505,7 @@ fn chat_key(app: &mut App, k: KeyEvent) {
                 app.editor.select_mode(false);
             } else if app.shell_mode {
                 app.shell_mode = false;
-                app.ac = None;
+                app.clear_autocomplete();
             } else if app.cur().is_some_and(has_delayed_tool) {
                 // "runs in Ns · esc to cancel": a single esc stops the turn before the tool runs.
                 if let Some(sid) = app.current.clone() {
@@ -629,10 +575,11 @@ fn chat_key(app: &mut App, k: KeyEvent) {
         }
         KeyCode::Char('!') if can_enter_shell_mode(app, m) => {
             app.shell_mode = true;
-            app.ac = None;
+            app.clear_autocomplete();
         }
         KeyCode::Backspace if app.shell_mode && app.editor.text.is_empty() => {
             app.shell_mode = false;
+            app.clear_autocomplete();
         }
         _ => edit_chat_input(app, &k, &before),
     }
@@ -663,9 +610,81 @@ fn set_from_history(app: &mut App, h: &str) {
         app.shell_mode = false;
         app.editor.set_text(h);
     }
-    app.ac = None;
+    app.clear_autocomplete();
 }
 
+fn handle_ac_key(app: &mut App, k: &KeyEvent) -> bool {
+    let m = k.modifiers;
+    match k.code {
+        KeyCode::Up => ac_move(app, -1),
+        KeyCode::Down => ac_move(app, 1),
+        KeyCode::Char('p') if m == CTRL => ac_move(app, -1),
+        KeyCode::Char('n') if m == CTRL => ac_move(app, 1),
+        KeyCode::Tab => accept_completion_step(app, false),
+        KeyCode::Enter if m.is_empty() => {
+            let freeform_submit = app
+                .ac
+                .as_ref()
+                .is_some_and(|ac| ac.freeform_enter && !ac.explicitly_selected);
+            if freeform_submit {
+                app.ac = None;
+                submit_active(app);
+            } else {
+                accept_completion_step(app, true);
+            }
+        }
+        KeyCode::Esc => {
+            app.dismiss_autocomplete();
+        }
+        _ => return false,
+    }
+    true
+}
+
+fn accept_completion_step(app: &mut App, run: bool) {
+    let keep_open = app
+        .ac
+        .as_ref()
+        .and_then(|ac| ac.items.get(ac.sel))
+        .is_some_and(|(v, _, _)| ac_keeps_open_on_tab(app.ac.as_ref().map(|a| &a.kind), v));
+    let executed = app.accept_completion(run);
+    if executed {
+        return;
+    }
+    if keep_open {
+        refresh_autocomplete_after_accept(app);
+    } else {
+        app.ac = None;
+    }
+}
+
+fn submit_active(app: &mut App) {
+    match app.mode {
+        Mode::Chat => app.submit(),
+        Mode::Watch => {
+            if let Some(f) = app.watch.focus.clone() {
+                submit_watch_tile(app, &f);
+            }
+        }
+    }
+}
+
+fn submit_watch_tile(app: &mut App, f: &str) {
+    let in_shell = app.watch.shell_modes.contains(f);
+    let empty = app.watch.inputs.get(f).is_none_or(Editor::is_empty);
+    if empty {
+        if !in_shell {
+            app.zoom(f);
+        }
+        return;
+    }
+    if app.submit_tile_command(f) {
+        return;
+    }
+    let sub = app.watch.inputs.entry(f.to_string()).or_default().submit();
+    let images = sub.images.into_iter().map(|(i, _)| i).collect();
+    app.send_prompt(f, sub.text, images);
+}
 fn ac_move(app: &mut App, d: i32) {
     if let Some(ac) = app.ac.as_mut() {
         ac.move_sel(d);
@@ -675,10 +694,9 @@ fn ac_move(app: &mut App, d: i32) {
 fn ac_keeps_open_on_tab(kind: Option<&crate::app::AcKind>, value: &str) -> bool {
     use crate::app::AcKind;
     match kind {
-        Some(AcKind::Slash) => true,
         Some(AcKind::SlashArg) => value.ends_with(['/', '\\']) || value.ends_with(' '),
         Some(AcKind::ShellPath) => value.ends_with(['/', '\\']),
-        Some(AcKind::File | AcKind::ShellCmd) | None => false,
+        Some(AcKind::Slash | AcKind::File | AcKind::ShellCmd) | None => false,
     }
 }
 
@@ -719,7 +737,7 @@ pub(crate) fn clipboard_paste_with(
     read_image: impl FnOnce() -> Result<Option<ImageData>, String>,
     read_text: impl FnOnce() -> Result<Option<String>, String>,
 ) {
-    let in_shell = app.mode == Mode::Chat && app.shell_mode;
+    let in_shell = app.active_shell_mode();
     let img_err = if in_shell {
         None
     } else {
@@ -834,7 +852,7 @@ fn paste(app: &mut App, s: String) {
         }
         return;
     }
-    let in_shell = app.mode == Mode::Chat && app.shell_mode;
+    let in_shell = app.active_shell_mode();
     if s.trim().is_empty() {
         if !in_shell {
             // Empty bracketed paste: often an image-only clipboard.
@@ -876,6 +894,9 @@ fn paste(app: &mut App, s: String) {
     if app.mode == Mode::Watch {
         let one = crate::text::one_line(&s);
         target_editor(app).insert(&one);
+        app.history.reset();
+        app.suppress_ac = false;
+        app.update_autocomplete_on_edit();
         return;
     }
     app.editor.paste(&s);
@@ -887,6 +908,44 @@ fn paste(app: &mut App, s: String) {
 // ---------------------------------------------------------------------------
 // Watch mode
 // ---------------------------------------------------------------------------
+
+fn can_enter_watch_shell_mode(app: &App, m: KeyModifiers) -> bool {
+    let Some(f) = &app.watch.focus else {
+        return false;
+    };
+    !app.watch.shell_modes.contains(f)
+        && m.difference(SHIFT).is_empty()
+        && app.watch.inputs.get(f).is_none_or(|ed| ed.text.is_empty())
+}
+
+fn can_leave_watch_shell_mode(app: &App) -> bool {
+    let Some(f) = &app.watch.focus else {
+        return false;
+    };
+    app.watch.shell_modes.contains(f) && app.watch.inputs.get(f).is_none_or(|ed| ed.text.is_empty())
+}
+
+fn edit_watch_input(app: &mut App, f: String, k: &KeyEvent) {
+    let (changed, cursor_moved) = {
+        let ed = app.watch.inputs.entry(f).or_default();
+        let before = ed.text.clone();
+        let before_cursor = ed.cursor;
+        if !edit_key(ed, k, false) {
+            return;
+        }
+        (ed.text != before, ed.cursor != before_cursor)
+    };
+    if changed {
+        app.history.reset();
+        app.suppress_ac = false;
+        app.update_autocomplete_on_edit();
+        if app.has_selection() {
+            app.clear_selection();
+        }
+    } else if cursor_moved && app.ac.is_some() {
+        app.update_autocomplete();
+    }
+}
 
 fn watch_key(app: &mut App, k: KeyEvent) {
     let m = k.modifiers;
@@ -907,26 +966,36 @@ fn watch_key(app: &mut App, k: KeyEvent) {
     if let Some((dx, dy)) = dir {
         let rects: Vec<_> = app.watch.tiles.iter().map(|t| t.1).collect();
         if let Some(i) = focus_idx.and_then(|i| split::neighbor(&rects, i, dx, dy)) {
-            app.watch.focus = Some(tiles[i].clone());
+            app.set_watch_focus(Some(tiles[i].clone()));
         } else if focus_idx.is_none() && !tiles.is_empty() {
-            app.watch.focus = Some(tiles[0].clone());
+            app.set_watch_focus(Some(tiles[0].clone()));
         } else {
             app.dirty = false;
         }
         return;
     }
     if ctrl_char(&k, 'c') {
-        let empty = app
-            .watch
-            .focus
-            .as_ref()
-            .and_then(|f| app.watch.inputs.get(f))
-            .is_none_or(|e| e.is_empty());
-        if empty {
-            exit_or_arm(app);
-        } else if let Some(f) = app.watch.focus.clone() {
-            app.watch.inputs.entry(f).or_default().clear();
+        if let Some(f) = app.watch.focus.clone() {
+            let sel = app.watch.inputs.get(&f).and_then(|e| e.selected_text());
+            if let Some(t) = sel {
+                app.copy_text(&t, "selection");
+                if let Some(e) = app.watch.inputs.get_mut(&f) {
+                    e.select_mode(false);
+                }
+                return;
+            }
+            let has_input = app.watch.inputs.get(&f).is_some_and(|e| !e.is_empty())
+                || app.watch.shell_modes.contains(&f);
+            if has_input {
+                if let Some(e) = app.watch.inputs.get_mut(&f) {
+                    e.clear();
+                }
+                app.watch.shell_modes.remove(&f);
+                app.clear_autocomplete();
+                return;
+            }
         }
+        exit_or_arm(app);
         return;
     }
     if ctrl_char(&k, 'd') {
@@ -954,9 +1023,10 @@ fn watch_key(app: &mut App, k: KeyEvent) {
             (app.watch.page + pages - 1) % pages
         };
         app.watch.page = p;
+        app.clear_selection();
         // The focused tile pins its page: move focus along (if any) instead of clearing it.
         if app.watch.focus.is_some() {
-            app.watch.focus = all.get(p * per).cloned();
+            app.set_watch_focus(all.get(p * per).cloned());
         }
         return;
     }
@@ -966,7 +1036,13 @@ fn watch_key(app: &mut App, k: KeyEvent) {
         }
         return;
     }
+    if app.ac.is_some() && handle_ac_key(app, &k) {
+        return;
+    }
     match k.code {
+        KeyCode::Tab if m.is_empty() && app.active_shell_mode() => {
+            app.trigger_tab_completion();
+        }
         KeyCode::Tab | KeyCode::BackTab => {
             if all.is_empty() {
                 return;
@@ -993,18 +1069,36 @@ fn watch_key(app: &mut App, k: KeyEvent) {
                 }
             };
 
-            app.watch.focus = Some(all[i as usize].clone());
+            app.set_watch_focus(Some(all[i as usize].clone()));
         }
         // Scroll the focused tile's transcript.
         KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End
             if tile_scroll_key(app, &k) => {}
         KeyCode::Up | KeyCode::Down if m == SHIFT && tile_scroll_key(app, &k) => {}
         KeyCode::Esc => {
+            if app.has_selection() {
+                app.clear_selection();
+                return;
+            }
             let Some(f) = app.watch.focus.clone() else {
                 app.dirty = false;
                 return;
             };
-
+            if app
+                .watch
+                .inputs
+                .get(&f)
+                .is_some_and(|e| e.selection().is_some())
+            {
+                if let Some(e) = app.watch.inputs.get_mut(&f) {
+                    e.select_mode(false);
+                }
+                return;
+            }
+            if app.watch.shell_modes.remove(&f) {
+                app.clear_autocomplete();
+                return;
+            }
             let busy = app.views.get(&f).is_some_and(|v| v.is_busy());
             let has_text = app.watch.inputs.get(&f).is_some_and(|e| !e.is_empty());
             if has_text {
@@ -1012,6 +1106,7 @@ fn watch_key(app: &mut App, k: KeyEvent) {
                 if let Some(e) = app.watch.inputs.get_mut(&f) {
                     e.clear();
                 }
+                app.clear_autocomplete();
             } else if busy {
                 let name = app
                     .views
@@ -1027,31 +1122,27 @@ fn watch_key(app: &mut App, k: KeyEvent) {
                     app.set_hint(format!("esc again to interrupt \"{name}\""), theme::WARNING);
                 }
             } else {
-                app.watch.focus = None;
+                app.set_watch_focus(None);
             }
         }
         KeyCode::Enter if m.is_empty() && app.watch.focus.is_some() => {
             let f = app.watch.focus.clone().expect("guarded by arm condition");
-            let ed = app.watch.inputs.entry(f.clone()).or_default();
-            if ed.is_empty() {
-                app.zoom(&f);
-                return;
+            submit_watch_tile(app, &f);
+        }
+        KeyCode::Char('!') if can_enter_watch_shell_mode(app, m) => {
+            if let Some(f) = app.watch.focus.clone() {
+                app.watch.shell_modes.insert(f);
+                app.clear_autocomplete();
             }
-
-            // Slash commands, `!` shell commands, and single-token typo guard act on that tile's session.
-            if app.submit_tile_command(&f) {
-                return;
+        }
+        KeyCode::Backspace if can_leave_watch_shell_mode(app) => {
+            if let Some(f) = app.watch.focus.clone() {
+                app.watch.shell_modes.remove(&f);
+                app.clear_autocomplete();
             }
-
-            let sub = app.watch.inputs.entry(f.clone()).or_default().submit();
-            let images = sub.images.into_iter().map(|(i, _)| i).collect();
-            app.send_prompt(&f, sub.text, images);
         }
         _ => match app.watch.focus.clone() {
-            Some(f) => {
-                let ed = app.watch.inputs.entry(f).or_default();
-                edit_key(ed, &k, false);
-            }
+            Some(f) => edit_watch_input(app, f, &k),
             None => {
                 if matches!(
                     k.code,
@@ -1418,6 +1509,9 @@ fn autocomplete_mouse(app: &mut App, me: MouseEvent) -> bool {
 }
 
 fn watch_mouse(app: &mut App, me: MouseEvent) {
+    if autocomplete_mouse(app, me) {
+        return;
+    }
     let (x, y) = (me.column, me.row);
     let pos = Position::new(x, y);
     let inside = |r: &Rect| r.contains(pos);
@@ -1434,15 +1528,47 @@ fn watch_mouse(app: &mut App, me: MouseEvent) {
     {
         match me.kind {
             MouseEventKind::Drag(MouseButton::Left) => {
-                if let Some(ed) = app.watch.inputs.get_mut(&f) {
+                let cursor_moved = if let Some(ed) = app.watch.inputs.get_mut(&f) {
+                    let before = ed.cursor;
                     let off = ed.offset_at_single_line(ir, x);
                     ed.mouse_drag(off);
+                    ed.cursor != before
+                } else {
+                    false
+                };
+                if cursor_moved && app.ac.is_some() {
+                    app.update_autocomplete();
                 }
                 return;
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 if let Some(ed) = app.watch.inputs.get_mut(&f) {
                     ed.mouse_up();
+                }
+                return;
+            }
+            _ => {}
+        }
+    }
+    // Handle active drag/release of a tile's transcript text selection.
+    if let Some(sid) = app.watch.drag_tile.clone() {
+        match me.kind {
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let Some(v) = app.views.get_mut(&sid) {
+                    v.chat.mouse_drag(x, y);
+                    if v.chat.has_selection() {
+                        app.sel_owner = Some(sid);
+                    }
+                }
+                return;
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                app.watch.drag_tile = None;
+                if let Some(v) = app.views.get_mut(&sid) {
+                    v.chat.mouse_up(x, y);
+                    if v.chat.has_selection() {
+                        app.sel_owner = Some(sid);
+                    }
                 }
                 return;
             }
@@ -1463,80 +1589,121 @@ fn watch_mouse(app: &mut App, me: MouseEvent) {
                 None => app.dirty = false,
             }
         }
-        MouseEventKind::Down(MouseButton::Left) => {
-            let Some((sid, tr)) = tile else {
-                // Empty space / footer: unfocus.
-                app.watch.focus = None;
-                return;
-            };
-            let already_focused = app.watch.focus.as_deref() == Some(sid.as_str());
-            // Clicking inside a focused tile's input bar positions cursor and keeps focus.
-            if already_focused
-                && tr.height >= 5
-                && y == tr.y + tr.height - 2
-                && x > tr.x
-                && x + 1 < tr.x + tr.width
-            {
-                if let Some(ir) = split::input_rect(tr) {
-                    let n = click_count(app, x, y);
-                    let ed = app.watch.inputs.entry(sid).or_default();
-                    let off = ed.offset_at_single_line(ir, x);
-                    ed.mouse_down(off, n);
-                }
-                return;
-            }
-            if let Some(v) = app.views.get_mut(&sid)
-                && chat::pill_hit(&v.chat, x, y)
-            {
-                v.chat.scroll_to_bottom(true);
-                return;
-            }
-            // Click targets: expand a tool call, show all output, withdraw a queued prompt.
-            let hit = app.views.get(&sid).and_then(|v| v.chat.hit_at(x, y));
-            let is_tool = |app: &App, msg: &str, part: usize| {
-                app.views
-                    .get(&sid)
-                    .and_then(|v| v.find(msg).and_then(|i| v.messages[i].parts.get(part)))
-                    .is_some_and(|p| matches!(p, ref_proto::Part::Tool { .. }))
-            };
-            let handled = match hit {
-                Some(Hit::Toggle { msg, part }) if is_tool(app, &msg, part) => {
-                    if let Some(v) = app.views.get_mut(&sid) {
-                        v.chat.toggle(&msg, part);
-                    }
-                    true
-                }
-                Some(Hit::ShowAll { msg, part }) => {
-                    if let Some(v) = app.views.get_mut(&sid) {
-                        v.chat.show_all(&msg, part);
-                    }
-                    true
-                }
-                Some(Hit::Unqueue { key }) => {
-                    app.unqueue(&sid, key);
-                    true
-                }
-                _ => false,
-            };
-            if handled {
-                app.watch.focus = Some(sid);
-                return;
-            }
-            let clicks = click_count(app, x, y);
-            if clicks == 2 {
-                app.zoom(&sid);
-            } else if already_focused {
-                // Only clicking the tile border/header (or outside) unfocuses; body clicks keep focus.
-                let on_border =
-                    x == tr.x || x + 1 == tr.x + tr.width || y == tr.y || y + 1 == tr.y + tr.height;
-                if on_border {
-                    app.watch.focus = None;
-                }
-            } else {
-                app.watch.focus = Some(sid);
+        MouseEventKind::Down(MouseButton::Right) => {
+            if !app.copy_selection() {
+                app.dirty = false;
             }
         }
+        MouseEventKind::Down(MouseButton::Left) => watch_mouse_down(app, tile, x, y),
         _ => app.dirty = false,
+    }
+}
+
+fn click_watch_input(app: &mut App, sid: &str, tr: Rect, x: u16, y: u16) {
+    app.clear_selection();
+    let Some(ir) = split::input_rect(tr) else {
+        return;
+    };
+    let n = click_count(app, x, y);
+    let cursor_moved = {
+        let ed = app.watch.inputs.entry(sid.to_string()).or_default();
+        let before = ed.cursor;
+        let off = ed.offset_at_single_line(ir, x);
+        ed.mouse_down(off, n);
+        ed.cursor != before
+    };
+    if cursor_moved && app.ac.is_some() {
+        app.update_autocomplete();
+    }
+}
+
+fn watch_mouse_down(app: &mut App, tile: Option<(String, Rect)>, x: u16, y: u16) {
+    let Some((sid, tr)) = tile else {
+        // Empty space / footer: clear selection and unfocus.
+        app.clear_selection();
+        app.set_watch_focus(None);
+        return;
+    };
+    let already_focused = app.watch.focus.as_deref() == Some(sid.as_str());
+    let in_focused_input = already_focused
+        && tr.height >= 5
+        && y == tr.y + tr.height - 2
+        && x > tr.x
+        && x + 1 < tr.x + tr.width;
+    if in_focused_input {
+        click_watch_input(app, &sid, tr, x, y);
+        return;
+    }
+    if let Some(v) = app.views.get_mut(&sid)
+        && chat::pill_hit(&v.chat, x, y)
+    {
+        v.chat.scroll_to_bottom(true);
+        return;
+    }
+    // Click targets: expand a tool call, show all output, withdraw a queued prompt.
+    let hit = app.views.get(&sid).and_then(|v| v.chat.hit_at(x, y));
+    let is_tool = |app: &App, msg: &str, part: usize| {
+        app.views
+            .get(&sid)
+            .and_then(|v| v.find(msg).and_then(|i| v.messages[i].parts.get(part)))
+            .is_some_and(|p| matches!(p, ref_proto::Part::Tool { .. }))
+    };
+    let handled = match hit {
+        Some(Hit::Toggle { msg, part }) if is_tool(app, &msg, part) => {
+            if let Some(v) = app.views.get_mut(&sid) {
+                v.chat.toggle(&msg, part);
+            }
+            true
+        }
+        Some(Hit::ShowAll { msg, part }) => {
+            if let Some(v) = app.views.get_mut(&sid) {
+                v.chat.show_all(&msg, part);
+            }
+            true
+        }
+        Some(Hit::Unqueue { key }) => {
+            app.unqueue(&sid, key);
+            true
+        }
+        _ => false,
+    };
+    if handled {
+        app.clear_selection();
+        app.set_watch_focus(Some(sid));
+        return;
+    }
+    app.clear_selection();
+    let clicks = click_count(app, x, y);
+    if clicks == 2 {
+        app.zoom(&sid);
+        return;
+    }
+    let in_chat = app.views.get(&sid).is_some_and(|v| v.chat.contains(x, y));
+    if in_chat {
+        if let Some(f) = app.watch.focus.as_ref()
+            && let Some(ed) = app.watch.inputs.get_mut(f)
+        {
+            ed.anchor = None;
+        }
+        if let Some(ed) = app.watch.inputs.get_mut(&sid) {
+            ed.anchor = None;
+        }
+        app.set_watch_focus(Some(sid.clone()));
+        if let Some(v) = app.views.get_mut(&sid) {
+            v.chat.mouse_down(x, y, 1);
+            app.watch.drag_tile = Some(sid);
+        }
+        return;
+    }
+    if already_focused {
+        // Only clicking the tile border/header (or outside) unfocuses; body clicks keep focus.
+        let on_border =
+            x == tr.x || x + 1 == tr.x + tr.width || y == tr.y || y + 1 == tr.y + tr.height;
+        if on_border {
+            app.set_watch_focus(None);
+        }
+    } else {
+        app.set_watch_focus(Some(sid));
     }
 }
 
