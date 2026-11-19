@@ -25,8 +25,8 @@ Rectangle {
 	readonly property bool todoExpanded: Workspace.settings.sidebarTodoExpanded
 	readonly property bool runningExpanded: Workspace.settings.sidebarRunningExpanded
 	readonly property bool historyExpanded: Workspace.settings.sidebarHistoryExpanded
-	readonly property real reservedRunning: runningExpanded ? minRunningHeight : 0
-	readonly property real reservedHistory: historyExpanded ? (historyOverhead + minHistoryHeight) : 0
+	readonly property real reservedRunning: running.openProgress * minRunningHeight
+	readonly property real reservedHistory: historyBody.openProgress * (historyOverhead + minHistoryHeight)
 	property bool ready: false
 
 	// The to-do list of the session in front: the current one, or the focused tile in split view. One value, {items,
@@ -37,9 +37,10 @@ Rectangle {
 	property var shownTodo: ({ items: [], done: 0, total: 0 })
 	// Up to a third of the column, and never so much that expanded lists below lose their minimum.
 	readonly property real todoCap: Math.max(0, Math.min(height / 3, bodySpace - reservedRunning - reservedHistory))
-	readonly property bool todoFits: todo.items.length > 0 && todoCap >= Theme.sidebarSectionHeight + (todoExpanded ? todoList.rowHeight : 0)
+	readonly property bool todoFits: todo.items.length > 0 && todoCap >= Theme.sidebarSectionHeight + todoList.rowHeight
 	readonly property real minTodoBodyHeight: todoList.rowHeight + 2 * todoList.verticalPadding
-	readonly property real todoHeight: !todoFits ? 0 : (todoExpanded ? Math.max(0, Math.min(Theme.sidebarSectionHeight + Math.max(todoList.height, minTodoBodyHeight), todoCap)) : Theme.sidebarSectionHeight)
+	readonly property real todoExpandedHeight: Math.min(Theme.sidebarSectionHeight + Math.max(todoList.height, minTodoBodyHeight), todoCap)
+	readonly property real todoHeight: !todoFits ? 0 : (todoExpanded ? todoExpandedHeight : Theme.sidebarSectionHeight)
 	readonly property real remainingAfterTodo: Math.max(0, bodySpace - todoSection.height)
 	readonly property real runningMaxHeight: Math.min(remainingAfterTodo, Math.max(remainingAfterTodo - reservedHistory, minRunningHeight))
 	readonly property real runningTargetHeight: Math.max(0, Math.min(running.contentHeight, runningMaxHeight))
@@ -92,6 +93,10 @@ Rectangle {
 			toggled()
 			event.accepted = true
 		}
+		Keys.onEnterPressed: event => {
+			toggled()
+			event.accepted = true
+		}
 		Keys.onSpacePressed: event => {
 			toggled()
 			event.accepted = true
@@ -101,10 +106,12 @@ Rectangle {
 			anchors { fill: parent; leftMargin: Theme.sidebarPadding; rightMargin: Theme.sidebarPadding }
 			radius: Theme.radiusSmall
 			color: headerHover.hovered ? Theme.surfaceHover : "transparent"
+			border.width: 1
+			border.color: sectionHeader.activeFocus ? Theme.accentText : "transparent"
 
 			Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+			Behavior on border.color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 		}
-
 		Text {
 			textFormat: Text.PlainText
 			anchors { left: parent.left; leftMargin: Theme.listLabelInset; right: chevron.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
@@ -180,6 +187,7 @@ Rectangle {
 			}
 		}
 		TapHandler {
+			enabled: sidebar.dragEnabled && Workspace.settings.sidebarVisible
 			gesturePolicy: TapHandler.ReleaseWithinBounds
 			grabPermissions: PointerHandler.CanTakeOverFromAnything | PointerHandler.ApprovesTakeOverByHandlersOfDifferentType
 			onDoubleTapped: Workspace.settings.sidebarWidth = Theme.sidebarWidth
