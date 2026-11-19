@@ -46,7 +46,7 @@ export const useComposerStore = defineStore('composer', () => {
       name: entry.name,
       aliases: entry.aliases,
       title: labelText(entry.title),
-      takesArgs: entry.usage !== undefined,
+      requiresArgs: entry.usage !== undefined && !entry.usage.startsWith('['),
       custom: entry.source !== 'builtin',
     }))
   }

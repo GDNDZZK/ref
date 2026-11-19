@@ -8,15 +8,24 @@ import type { Todo } from '../proto/generated'
 import { useDialogsStore } from '../stores/dialogs.ts'
 import { useLayoutStore } from '../stores/layout.ts'
 import { useWorkspaceStore } from '../stores/workspace.ts'
+import { STORAGE_KEY } from '../settings/model.ts'
+import { metrics } from '../theme/generated/theme.ts'
 import Sidebar from './Sidebar.vue'
 
 let pinia = createPinia()
+const originalInnerWidth = window.innerWidth
 
 beforeEach(() => {
+  localStorage.clear()
   pinia = createPinia()
   setActivePinia(pinia)
 })
 afterEach(() => {
+  Object.defineProperty(window, 'innerWidth', {
+    configurable: true,
+    writable: true,
+    value: originalInnerWidth,
+  })
   document.body.innerHTML = ''
 })
 
@@ -194,6 +203,85 @@ describe('Sidebar', () => {
     layout.toggleSidebar()
     await nextTick()
     expect(wrapper.get('.content').attributes('inert')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('resizes the sidebar by dragging, clamps to viewport/bounds, persists, and resets on double-click', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1000 })
+    const { wrapper } = mountSidebar()
+    const layout = useLayoutStore()
+    if (!layout.sidebarVisible) layout.toggleSidebar()
+    await nextTick()
+
+    const aside = wrapper.get('aside.sidebar')
+    expect(aside.attributes('style')).toContain(`--sidebar-width: ${metrics.sidebarWidth}px`)
+    const handle = wrapper.get('.resize-handle')
+
+    await handle.trigger('pointerdown', { button: 0, pointerId: 1, clientX: metrics.sidebarWidth })
+    expect(aside.classes()).toContain('resizing')
+    await handle.trigger('pointermove', { pointerId: 1, clientX: 350 })
+    await nextTick()
+    expect(layout.sidebarWidth).toBe(350)
+    expect(aside.attributes('style')).toContain('--sidebar-width: 350px')
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({ sidebarWidth: 350 })
+
+    // Clamped to min (210) and max (min(480, 1000 * 0.45) = 450).
+    await handle.trigger('pointermove', { pointerId: 1, clientX: 800 })
+    await nextTick()
+    expect(layout.sidebarWidth).toBe(450)
+    await handle.trigger('pointermove', { pointerId: 1, clientX: 50 })
+    await nextTick()
+    expect(layout.sidebarWidth).toBe(metrics.sidebarMinWidth)
+
+    await handle.trigger('pointerup', { pointerId: 1 })
+    expect(aside.classes()).not.toContain('resizing')
+
+    // Double-click resets back to default sidebarWidth.
+    await handle.trigger('dblclick')
+    await nextTick()
+    expect(layout.sidebarWidth).toBe(metrics.sidebarWidth)
+    expect(aside.attributes('style')).toContain(`--sidebar-width: ${metrics.sidebarWidth}px`)
+
+    // Collapsed or narrow drawer hides the resize handle and omits inline wide width.
+    layout.toggleSidebar()
+    await nextTick()
+    expect(wrapper.find('.resize-handle').exists()).toBe(false)
+
+    layout.narrow = true
+    layout.toggleSidebar()
+    await nextTick()
+    expect(wrapper.find('.resize-handle').exists()).toBe(false)
+    expect(aside.attributes('style')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('resets resizing state on lostpointercapture and when hidden or switched to narrow mid-drag', async () => {
+    const { wrapper } = mountSidebar()
+    const layout = useLayoutStore()
+    if (!layout.sidebarVisible) layout.toggleSidebar()
+    await nextTick()
+
+    const aside = wrapper.get('aside.sidebar')
+    await wrapper.get('.resize-handle').trigger('pointerdown', { button: 0, pointerId: 1, clientX: 264 })
+    expect(aside.classes()).toContain('resizing')
+    await wrapper.get('.resize-handle').trigger('lostpointercapture', { pointerId: 1 })
+    expect(aside.classes()).not.toContain('resizing')
+
+    // Unmounting the handle mid-drag (collapsing or narrow mode) clears resizing immediately.
+    await wrapper.get('.resize-handle').trigger('pointerdown', { button: 0, pointerId: 2, clientX: 264 })
+    expect(aside.classes()).toContain('resizing')
+    layout.toggleSidebar()
+    await nextTick()
+    expect(aside.classes()).not.toContain('resizing')
+    layout.toggleSidebar()
+    await nextTick()
+    expect(aside.classes()).not.toContain('resizing')
+
+    await wrapper.get('.resize-handle').trigger('pointerdown', { button: 0, pointerId: 3, clientX: 264 })
+    expect(aside.classes()).toContain('resizing')
+    layout.narrow = true
+    await nextTick()
+    expect(aside.classes()).not.toContain('resizing')
     wrapper.unmount()
   })
 })

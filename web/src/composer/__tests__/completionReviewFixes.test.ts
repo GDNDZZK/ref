@@ -5,7 +5,7 @@ import { CompletionController, FILE_QUERY_DELAY_MS } from '../completion.ts'
 import type { Completion, SlashCommand } from '../completion.ts'
 
 const COMMANDS: SlashCommand[] = [
-  { name: 'sessions', aliases: ['resume'], title: 'Switch session', takesArgs: true, custom: false },
+  { name: 'sessions', aliases: ['resume'], title: 'Switch session', requiresArgs: false, custom: false },
 ]
 
 describe('CompletionPopup Windows paths and duplicate item values', () => {

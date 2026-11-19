@@ -67,6 +67,8 @@
   --window-min-width: 640px;
   --window-min-height: 420px;
   --sidebar-width: 264px;
+  --sidebar-min-width: 210px;
+  --sidebar-max-width: 480px;
   --sidebar-padding: 8px;
   --sidebar-header-height: 52px;
   --sidebar-row-height: 56px;
