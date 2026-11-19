@@ -65,7 +65,7 @@ The window has a sidebar on the left and the content on the right: one session, 
 - A running session is labelled with the name you gave it, else its title, else the name of its directory. A session in the history is labelled with its title (on one line), else its name, else the name of its directory, as in the terminal UI. The *Running* list is as tall as its rows and scrolls only when *History* would get fewer than three rows.
 - The *New session* button creates a session in the workspace's default directory. The folder button next to it, or *New session in folder…* / *New session in another folder…*, asks for a directory first and updates the workspace's default directory to that folder.
 - Closing a session that is still working asks for confirmation first (including from the sidebar and the *Sessions* dialog); its conversation stays in history. Closing the last open session returns to *No session open* instead of starting a new one (and in split view, closing the held foreground session clears it without pulling a background tile out of the grid).
-- The sidebar can be hidden and shown again (Ctrl+Shift+B). Its state is remembered.
+- The sidebar can be hidden and shown again (Ctrl+Shift+B) and resized by dragging its right border (210–480 px; double-click the edge to reset to 264 px). Both its visibility and width are remembered.
 - At the top of the sidebar, above *Running*, the *Todo* section shows the to-do list of the session you are looking at (in the split view, of the focused tile) with the number of items done, like *Todo 2/5*; cancelled items count in neither number. Long items wrap, the list scrolls when it takes more than a third of the sidebar, and the section is hidden while the session has no to-do list.
 - The command palette (Ctrl+P) lists every command and filters as you type. Commands that take no argument run at once; choosing *Rename the session*, *Change this session's working directory*, *Export transcript as markdown*, *Set or cycle model variant* or *Close live sessions* opens its dedicated dialog directly, and pressing Esc while entering custom-command arguments returns to the command list. It holds the same commands as the `/` list in the input box, including your [custom commands](configuration.md) (group *Custom*). Without a shortcut: *New session in another folder…*, *Move session to background* (`/detach`), *Rename the session*, *Change this session's working directory*, *Close live sessions*, the `peers` commands, *MCP servers*, *Configuration* (`/config`) and *Reload configuration* (`/reload`). There are no `/editor` and `/exit` commands.
 - *Configuration* (`/config` or `/configuration`, the configuration button in the sidebar footer, or *Settings* → *Edit ref.json…*) opens the 860 px six-section visual and raw JSONC editor for global `ref.json`, with multi-profile switching (`ref.json.<n>.bak`) and Ctrl+S to save; `/reload` (`/reload-config`, or the reload button) hot-reloads configuration across live sessions and MCP servers. See [Graphical editor and profiles](configuration.md#graphical-editor-and-profiles).
@@ -77,9 +77,12 @@ The window has a sidebar on the left and the content on the right: one session, 
 
 The split view (Ctrl+Shift+W, the button at the top right, or `ref-gui -w`) shows one tile per background session: the live sessions that no other client has open, excluding the current foreground session (which stays hidden until you leave split view). Split view starts with no tile focused; click a tile or press Alt+arrow keys to focus it, and click the focused tile's header or empty background to deselect. Tiles spawned by another session show a `⟲ <root>` chip in the header and tint unfocused borders and status dots by their root task; user-created tiles stay unmarked. Only the focused tile shows its input box (as in the terminal UI), so the others have room for the conversation; they keep the status line and the queue of waiting messages, and a draft, attachments and shell mode survive while the box is hidden. The sidebar selects the session of the focused tile, and marks all tiles with a bar; commands act on the focused tile. Double-click a tile's title bar, or use its zoom button (Ctrl+Shift+Z), to enlarge it. Leave the zoom with Ctrl+Shift+Z or the *Leave zoom* button at the top right. Esc does not leave it, because Esc belongs to the input box, to permission questions and to the model's questions. With no background sessions the view says so.
 
+Clicking the *Jump to latest* button on an unfocused tile scrolls it to the bottom without focusing the tile or opening its input box. While resizing split tiles or dragging the sidebar, tile content smoothly blurs and fades out before reflowing at the new width.
+
 ## The conversation
 
 - Your prompts, the model's replies, its reasoning and its tool calls appear in one column. Under every message a small line shows who wrote it (agent, model, variant), how long it took and the tokens used (input including cache reads and writes, and output). Interrupted and failed messages are marked. The line shows *Copy* on hover, and *Undo* on your own messages.
+- Markdown tables render as styled bordered cards with header shading, horizontal scrolling when wide, a hover *Copy* button, and independent cell text selection.
 - The view follows the end of the conversation while the model writes. Scroll up (wheel, touchpad, scroll bar) to stop following; a *Jump to latest* button appears. Scrolling to the end follows again.
 - Only the newest messages are loaded when a session opens. Scroll near the top and earlier ones load by themselves; the *Load older messages* row at the top does the same by click, and shows the error with a retry when loading fails.
 - After a compaction a divider marks where the model's context starts. Messages above it are dimmed: you can still read them, but the model no longer sees them. The divider's summary folds and unfolds.
@@ -122,20 +125,20 @@ The split view (Ctrl+Shift+W, the button at the top right, or `ref-gui -w`) show
 
 | Key | Action |
 |---|---|
-| Enter | Send (or in `/cd`, `/export` and `!` shell mode, run the typed text unless a completion was explicitly selected with ↑/↓). While the session is busy the prompt waits in a queue above the input box. |
+| Enter | Send (or in `/cd`, `/export` and `!` shell mode, run the typed text unless a completion was explicitly selected with ↑/↓). On a standalone `/` completion list, Enter executes the selected command directly. While the session is busy the prompt waits in a queue above the input box. |
 | Shift+Enter, Ctrl+J | New line. |
-| Tab, Shift+Tab | Next or previous agent (outside shell mode). In `/`, `@` and `!` shell mode, Tab completes (and drills into subdirectories on paths). |
+| Tab, Shift+Tab | Next or previous agent (outside shell mode). In `/`, `@` and `!` shell mode, Tab completes (without adding a trailing space on standalone slash commands, and drilling into subdirectories on paths). |
+| Ctrl+T | Cycle the model's variants. |
 | Esc, Esc | Interrupt the running turn (the second press within 1.5 seconds). A first Esc closes an open list or leaves shell mode (keeping any typed text) instead. |
 | ↑, ↓ | Walk through the prompt history (filtered to `!` entries in shell mode): ↑ from an empty box or from the start of the text, and while browsing from the first line; ↓ from the last line while browsing. |
 | Ctrl+C | Without a selection, empties the input box (text of 20 characters or more goes to the history first). With a selection it copies. |
-| `!` at the start | Shell mode: the line runs as a shell command, with `!` history + `$PATH` binary completion for commands and file/directory completion for arguments. Backspace on an empty box or Esc leaves it. |
+| `!` at the start | Shell mode: the line runs as a shell command, with `!` history + `$PATH` binary completion for commands (including after `VAR=val` assignments and command wrappers such as `sudo`, `env`, `nice`, and `timeout`) and file/directory completion for arguments. Backspace on an empty box or Esc leaves it. |
 
 On macOS, Ctrl in this table is Cmd.
 
-- The tags under the box show the agent, the model and the variant. Click one to choose; a tag changes only after the backend has confirmed. There is no Ctrl+T for the variant: use Ctrl+Shift+T or click the variant tag.
-- `/` lists commands case-insensitively (including singular aliases `/model` and `/agent`, `/models <m>`, `/agents <a>`, `/variant <v|default>`, `/sessions <s>`, `/close-session <s…>`) and completes arguments for `/cd`, `/export`, `/models`, `/agents`, `/variant`, `/sessions` and `/close-session` (plus `@file` inside custom command arguments). An unknown single-word `/foo` is blocked with a warning toast and fuzzy suggestion instead of being sent as a prompt. `@` lists files under the session's directory (`.gitignore` is respected) and inserts `@path `.
-- Images and files: paste an image from the clipboard (Ctrl+V), paste a file path or `file://` address, or drop any file on the box. Supported images (PNG, JPEG, GIF and WebP, up to 20 MiB each) attach as a thumbnail above the text with a remove button and an `[Image N]` token in the text, as in the terminal UI; other existing local files insert their path at the cursor.
-- A prompt sent while the session is busy waits in the queue strip above the box. *Remove* on your own prompt takes it back into the box with its pictures; if the backend has already taken it, the GUI says so.
+- The tags under the box show the agent, the model and the variant. Click one to choose; a tag changes only after the backend has confirmed. Press Ctrl+T to cycle the variant directly, Ctrl+Shift+T to open the variant picker, or click the variant tag.
+- `/` triggers command completion both at the start of the box and mid-text after whitespace, matches case-insensitively (including singular aliases `/model` and `/agent`, `/models <m>`, `/agents <a>`, `/variant <v|default>`, `/sessions <s>`, `/close-session <s…>`), and completes arguments for `/cd`, `/export`, `/models`, `/agents`, `/variant`, `/sessions` and `/close-session` (plus `@file` inside custom command arguments). Standalone commands (all built-ins except `/rename`) complete without a trailing space on Tab and run on Enter; unknown single-word `/foo` inputs are blocked with a warning toast and fuzzy suggestion instead of being sent as a prompt. `@` lists files under the session's directory (`.gitignore` is respected) and inserts `@path `.
+- Images and files: paste an image from the clipboard (Ctrl+V), paste a file path or `file://` address, or drop any file on the box. Supported images (PNG, JPEG, GIF and WebP, up to 20 MiB each) attach as a thumbnail above the text with a remove button and an atomic `[Image N]` token in the text (the cursor steps over it, selections expand across it, and Backspace/Delete removes the whole token), as in the terminal UI; other existing local files insert their path at the cursor.
 - The prompt history is the file `prompt-history.jsonl` in the state directory (500 entries) and is shared with the terminal UI. Shell lines are saved with their `!`.
 
 ## Notifications
@@ -163,8 +166,8 @@ On macOS, Ctrl in the table is Cmd. The letters are the same in the [Web UI](web
 | Switch session (live and history) | Ctrl+Shift+L | `/sessions` |
 | Switch model (this session only) | Ctrl+Shift+M | `/models` (`/model`) |
 | Switch agent | Ctrl+Shift+A | `/agents` (`/agent`) |
+| Cycle model variant | Ctrl+T | `/variant` |
 | Set or cycle the model variant | Ctrl+Shift+T | `/variant` |
-| Compact the conversation (no confirmation) | Ctrl+Shift+C | `/compact` |
 | Undo last prompt | Ctrl+Shift+U | `/undo` |
 | Close this session | Ctrl+Shift+K | `/close` |
 | Export transcript as Markdown | Ctrl+Shift+X | `/export` |
@@ -189,14 +192,14 @@ Open them with Ctrl+Shift+S or the settings button at the bottom of the sidebar.
 - **Notifications:** the master switch and the three kinds described [above](#notifications).
 - **Configuration:** *Reload configuration* and *Edit ref.json…* (see [Graphical editor and profiles](configuration.md#graphical-editor-and-profiles)).
 
-They are saved in `gui.json` in the state directory ([Files and directories](cli.md#files-and-directories)), together with whether the sidebar is shown and the size of the window:
+They are saved in `gui.json` in the state directory ([Files and directories](cli.md#files-and-directories)), together with whether the sidebar is shown, the sidebar width, and the size of the window:
 
 ```json
 {
   "theme": "system",
   "language": "system",
   "notifications": { "enabled": true, "permission": true, "turnDone": true, "turnError": true },
-  "sidebar": { "visible": true },
+  "sidebar": { "visible": true, "width": 264 },
   "window": { "width": 980, "height": 760 }
 }
 ```
