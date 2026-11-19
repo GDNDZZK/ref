@@ -127,17 +127,27 @@ pub fn classify_http_error(status: u16, headers: &HeaderMap, body: &str) -> LlmE
 /// Responses `response.failed` / `error`, Chat `{"error": {...}}` chunks).
 /// `code` is the provider error code/type when available.
 #[cfg(test)]
-pub(crate) fn stream_error(code: Option<&str>, message: &str) -> LlmError {
-    build_stream_error(code, message, None)
+fn stream_error(code: Option<&str>, message: &str) -> LlmError {
+    build_stream_error(code, message, None, &[])
 }
 
-/// Like [`stream_error`], also inspecting a parsed JSON error payload for structured
-/// `retry_after` / `retry_after_ms` / `retryDelay` hints.
-pub(crate) fn stream_error_json(code: Option<&str>, message: &str, value: &Value) -> LlmError {
-    build_stream_error(code, message, Some(value))
+/// Like `stream_error`, inspecting a scoped JSON error payload `err` and optional
+/// top-level retry metadata values (ignoring echoed prompts, tools, and outputs).
+pub(crate) fn stream_error_json(
+    code: Option<&str>,
+    message: &str,
+    err: &Value,
+    meta: &[&Value],
+) -> LlmError {
+    build_stream_error(code, message, Some(err), meta)
 }
 
-fn build_stream_error(code: Option<&str>, message: &str, value: Option<&Value>) -> LlmError {
+fn build_stream_error(
+    code: Option<&str>,
+    message: &str,
+    err: Option<&Value>,
+    meta: &[&Value],
+) -> LlmError {
     let code = code.unwrap_or("").trim();
     let text = if code.is_empty() || message.contains(code) {
         message.trim().to_string()
@@ -158,9 +168,13 @@ fn build_stream_error(code: Option<&str>, message: &str, value: Option<&Value>) 
     ) || is_context_overflow(message);
     let retryable = !overflow;
     let retry_after = if retryable {
-        let from_value = value.and_then(parse_retry_after_json);
+        let from_err = err.and_then(parse_retry_after_json);
+        let from_meta = meta
+            .iter()
+            .filter_map(|m| parse_retry_after_top_level(m))
+            .max();
         let from_message = parse_retry_after_body(message);
-        from_value.max(from_message)
+        from_err.max(from_meta).max(from_message)
     } else {
         None
     };
@@ -280,7 +294,7 @@ fn parse_timestamp_retry_after(s: &str) -> Option<Duration> {
     Some(Duration::from_millis(delta.max(0) as u64))
 }
 
-/// Parse a `retry_after` / `retryDelay` string value: numeric seconds, Go duration, or timestamp.
+/// Parse a `retry_after` / `retryDelay` string value: numeric seconds, duration with unit, or timestamp.
 fn parse_retry_after_str(s: &str) -> Option<Duration> {
     let s = s.trim();
     if s.is_empty() {
@@ -289,7 +303,7 @@ fn parse_retry_after_str(s: &str) -> Option<Duration> {
     if let Ok(secs) = s.parse::<f64>() {
         return secs_to_duration(secs);
     }
-    if let Some(d) = parse_go_duration(&s.to_ascii_lowercase()) {
+    if let Some(d) = parse_duration_token(s) {
         return Some(d);
     }
     parse_timestamp_retry_after(s)
@@ -312,38 +326,88 @@ fn parse_json_retry_after(v: &Value) -> Option<Duration> {
     }
 }
 
-/// Extract the largest retry delay hint from a parsed JSON payload, checking structured fields
-/// recursively across root, `error`, `details`, and nested values as well as error strings.
+const SKIP_JSON_KEYS: &[&str] = &[
+    "instructions",
+    "tools",
+    "output",
+    "input",
+    "messages",
+    "prompt",
+    "choices",
+    "candidates",
+    "delta",
+    "usage",
+];
+
+const ERROR_TEXT_KEYS: &[&str] = &[
+    "message",
+    "msg",
+    "detail",
+    "details",
+    "error",
+    "reason",
+    "error_description",
+    "title",
+    "description",
+    "text",
+];
+
+fn parse_structured_retry_field(key: &str, value: &Value) -> Option<Option<Duration>> {
+    match key.to_ascii_lowercase().as_str() {
+        "retry_after_ms" | "retry-after-ms" | "retryafterms" => Some(parse_json_ms(value)),
+        "retry_after" | "retry-after" | "retryafter" | "retrydelay" | "retry_delay" => {
+            Some(parse_json_retry_after(value))
+        }
+        _ => None,
+    }
+}
+
+fn parse_retry_after_top_level(value: &Value) -> Option<Duration> {
+    let Value::Object(map) = value else {
+        return None;
+    };
+    map.iter()
+        .filter_map(|(k, v)| parse_structured_retry_field(k, v).flatten())
+        .max()
+}
+
+/// Extract the largest retry delay hint from a parsed JSON payload, checking structured retry
+/// fields recursively and error-message text fields while skipping echoed request/output subtrees.
 pub(crate) fn parse_retry_after_json(value: &Value) -> Option<Duration> {
+    if let Value::String(s) = value {
+        return parse_retry_after_text(s);
+    }
     let mut best: Option<Duration> = None;
-    collect_retry_after_json(value, &mut best);
+    collect_retry_after_json(value, false, &mut best);
     best
 }
 
-fn collect_retry_after_json(value: &Value, best: &mut Option<Duration>) {
+fn collect_json_field(key: &str, value: &Value, best: &mut Option<Duration>) {
+    if let Some(hint) = parse_structured_retry_field(key, value) {
+        *best = (*best).max(hint);
+        return;
+    }
+    let lower = key.to_ascii_lowercase();
+    if SKIP_JSON_KEYS.contains(&lower.as_str()) {
+        return;
+    }
+    let allow_text = ERROR_TEXT_KEYS.contains(&lower.as_str());
+    collect_retry_after_json(value, allow_text, best);
+}
+
+fn collect_retry_after_json(value: &Value, allow_text: bool, best: &mut Option<Duration>) {
     match value {
         Value::Object(map) => {
             for (k, v) in map {
-                let hint = match k.to_ascii_lowercase().as_str() {
-                    "retry_after_ms" | "retry-after-ms" | "retryafterms" => Some(parse_json_ms(v)),
-                    "retry_after" | "retry-after" | "retryafter" | "retrydelay" | "retry_delay" => {
-                        Some(parse_json_retry_after(v))
-                    }
-                    _ => None,
-                };
-                if let Some(d) = hint {
-                    *best = (*best).max(d);
-                } else {
-                    collect_retry_after_json(v, best);
-                }
+                collect_json_field(k, v, best);
             }
         }
         Value::Array(items) => {
             for item in items {
-                collect_retry_after_json(item, best);
+                collect_retry_after_json(item, allow_text, best);
             }
         }
-        Value::String(s) => {
+        Value::String(s) if allow_text => {
             *best = (*best).max(parse_retry_after_text(s));
         }
         _ => {}
@@ -351,7 +415,7 @@ fn collect_retry_after_json(value: &Value, best: &mut Option<Duration>) {
 }
 
 /// Extract a retry delay hint from an HTTP/error body (JSON fields or message text).
-pub(crate) fn parse_retry_after_body(body: &str) -> Option<Duration> {
+fn parse_retry_after_body(body: &str) -> Option<Duration> {
     if body.trim().is_empty() {
         return None;
     }
@@ -363,7 +427,7 @@ pub(crate) fn parse_retry_after_body(body: &str) -> Option<Duration> {
 
 const DURATION_RE_FRAG: &str = concat!(
     r"(?:",
-    r"(?:\d+(?:\.\d+)?(?:ms|h|m|s))+(?-u:\b)",
+    r"\d+(?:\.\d+)?(?:ms|h|m|s)(?:\s*\d+(?:\.\d+)?(?:ms|h|m|s))*(?-u:\b)",
     r"|",
     r"\d+(?:\.\d+)?\s*(?:milliseconds?|msecs?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h)(?-u:\b)",
     r"|",
@@ -373,12 +437,12 @@ const DURATION_RE_FRAG: &str = concat!(
 
 static RETRY_PHRASE_RE: LazyLock<Regex> = LazyLock::new(|| {
     let en = format!(
-        r"(?i)(?-u:\b)(?:try\s+again\s+(?:in|after)|retry\s+(?:in|after)|please\s+wait|available\s+in|resets?\s+in)\s+(?P<en>{DURATION_RE_FRAG})"
+        r"(?i)(?-u:\b)(?:(?:re)?try\s+again\s+(?:in|after)|retry\s+(?:in|after)|please\s+wait|available\s+in|resets?\s+in)\s+(?P<en>{DURATION_RE_FRAG})"
     );
     let wait_retry = format!(
-        r"(?i)(?-u:\b)wait\s+(?P<wr>{DURATION_RE_FRAG})\s+(?:before\s+retrying|to\s+retry)(?-u:\b)"
+        r"(?i)(?-u:\b)wait\s+(?P<wr>{DURATION_RE_FRAG})\s+(?:before\s+(?:re)?trying(?:\s+again)?|to\s+retry|and\s+(?:re)?try(?:\s+again)?)(?-u:\b)"
     );
-    let zh_after = format!(r"(?:请在\s*)?(?P<zha>{DURATION_RE_FRAG})\s*后重试");
+    let zh_after = format!(r"(?:请在\s*)?(?P<zha>{DURATION_RE_FRAG})\s*(?:后重试|后再试)");
     let zh_wait = format!(r"请等待\s*(?P<zhw>{DURATION_RE_FRAG})");
     Regex::new(&format!("{en}|{wait_retry}|{zh_after}|{zh_wait}")).expect("retry phrase regex")
 });
@@ -408,9 +472,13 @@ static LEADING_RFC2822_RE: LazyLock<Regex> = LazyLock::new(|| {
 
 fn parse_duration_token(raw: &str) -> Option<Duration> {
     let trimmed = raw.trim();
-    let lower = trimmed.to_ascii_lowercase();
-    if lower.bytes().any(|b| b.is_ascii_alphabetic())
-        && let Some(d) = parse_go_duration(&lower)
+    let compact: String = trimmed
+        .chars()
+        .filter(|c| !c.is_ascii_whitespace())
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+    if compact.bytes().any(|b| b.is_ascii_alphabetic())
+        && let Some(d) = parse_go_duration(&compact)
     {
         return Some(d);
     }
@@ -438,27 +506,27 @@ fn unwrap_leading_quote(s: &str) -> &str {
     s
 }
 
-fn parse_leading_unitless_float(rest: &str, allow_followed_by_word: bool) -> Option<f64> {
+fn parse_leading_unitless_float(rest: &str) -> Option<f64> {
     let m = LEADING_FLOAT_RE.find(rest)?;
-    if !allow_followed_by_word {
-        let after = rest[m.end()..].trim_start_matches([' ', '\t']);
-        if after
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_alphabetic())
-        {
-            return None;
-        }
+    let after = &rest[m.end()..];
+    if after.starts_with(['-', '/', ':', '%'])
+        || (after.starts_with('.')
+            && after[1..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_digit()))
+    {
+        return None;
+    }
+    let after_ws = after.trim_start_matches([' ', '\t']);
+    if after_ws.chars().next().is_some_and(char::is_alphabetic) {
+        return None;
     }
     m.as_str().parse::<f64>().ok()
 }
 
-fn parse_kv_value(key: &str, rest: &str, allow_unitless_word: bool) -> Option<Duration> {
+fn parse_kv_value(key: &str, rest: &str, allow_unitless: bool) -> Option<Duration> {
     let normalized = key.to_ascii_lowercase().replace(['-', '_', ' '], "");
-    if normalized == "retryafterms" {
-        let ms = parse_leading_unitless_float(rest, true)?;
-        return secs_to_duration(ms / 1000.0);
-    }
     if normalized == "retryafter"
         && let Some(m) = LEADING_RFC3339_RE
             .find(rest)
@@ -469,11 +537,19 @@ fn parse_kv_value(key: &str, rest: &str, allow_unitless_word: bool) -> Option<Du
     if let Some(m) = LEADING_DURATION_RE.find(rest) {
         return parse_duration_token(m.as_str());
     }
-    let secs = parse_leading_unitless_float(rest, allow_unitless_word)?;
+    if !allow_unitless {
+        return None;
+    }
+    let val = parse_leading_unitless_float(rest)?;
+    let secs = if normalized == "retryafterms" {
+        val / 1000.0
+    } else {
+        val
+    };
     secs_to_duration(secs)
 }
 
-fn parse_retry_after_text(text: &str) -> Option<Duration> {
+pub(crate) fn parse_retry_after_text(text: &str) -> Option<Duration> {
     let mut best: Option<Duration> = None;
     for caps in RETRY_PHRASE_RE.captures_iter(text) {
         for name in ["en", "wr", "zha", "zhw"] {
@@ -483,10 +559,9 @@ fn parse_retry_after_text(text: &str) -> Option<Duration> {
         }
     }
     for caps in RETRY_KV_PREFIX_RE.captures_iter(text) {
-        let (Some(key), Some(sep), Some(full)) = (caps.name("key"), caps.name("sep"), caps.get(0))
-        else {
-            continue;
-        };
+        let key = caps.name("key").expect("key");
+        let sep = caps.name("sep").expect("sep");
+        let full = caps.get(0).expect("full match");
         let sep_str = sep.as_str();
         let has_punct = sep_str.contains(':') || sep_str.contains('=');
         let has_key_sep = key.as_str().contains('-') || key.as_str().contains('_');
@@ -860,6 +935,7 @@ mod tests {
             Some("rate_limit_error"),
             "Rate limited, please wait 5s",
             &payload,
+            &[],
         );
         assert!(e.retryable);
         assert_eq!(e.retry_after, Some(Duration::from_secs(25)));
@@ -875,8 +951,71 @@ mod tests {
             Some("context_length_exceeded"),
             "Your input exceeds the context window. Please try again in 20s",
             &overflow_payload,
+            &[],
         );
         assert!(e.context_overflow && !e.retryable);
         assert_eq!(e.retry_after, None);
+    }
+
+    #[test]
+    fn retry_after_ignores_echoed_payloads_and_unitless_false_positives() {
+        let echoed = serde_json::json!({
+            "id": "try again in 99s",
+            "model": "retry in 99s",
+            "name": "please wait 99s",
+            "instructions": "Please try again in 99s",
+            "prompt": "Please try again in 99s",
+            "input": [{"content": "retry_after: 99"}],
+            "messages": [{"role": "user", "content": "retry in 99s", "retry_after": 99}],
+            "tools": [{"description": "Please try again in 99s"}],
+            "output": [{"content": [{"text": "Please try again in 99s"}]}],
+            "choices": [{"delta": {"content": "Please try again in 99s"}}],
+            "error": {
+                "code": "rate_limit",
+                "message": "Rate limit exceeded"
+            }
+        });
+        let e = classify_http_error(429, &HeaderMap::new(), &echoed.to_string());
+        assert_eq!(e.retry_after, None);
+
+        for body in [
+            "Retry-After: 500 us",
+            "Retry-After: 500μs",
+            "Retry-After: 5 mb",
+            "Retry-After: 3 attempts",
+            "retry-after 3 attempts",
+            "retry after 8",
+            "Please retry after 2026-11-19 11:05:00 UTC",
+            "Retry-After: 2026-11-19",
+            "Please retry after 11:30 UTC",
+            "Retry-After: 1.2.3",
+            "cannot retry after 3/3 attempts",
+            "retry after 50% jitter",
+        ] {
+            let e = classify_http_error(429, &HeaderMap::new(), body);
+            assert_eq!(e.retry_after, None, "false positive for: {body}");
+        }
+    }
+
+    #[test]
+    fn retry_after_real_world_variants_and_punctuation_edges() {
+        let cases = [
+            ("retry_after_ms: 2 s", Duration::from_secs(2)),
+            ("Retry-After: 30, please wait", Duration::from_secs(30)),
+            ("Retry-After: 30. Please wait", Duration::from_secs(30)),
+            ("retry-after 8", Duration::from_secs(8)),
+            ("retry again in 20s", Duration::from_secs(20)),
+            ("retry again after 30s", Duration::from_secs(30)),
+            (r#"{"retry_after": "20 seconds"}"#, Duration::from_secs(20)),
+            (r#"{"retryDelay": "500 ms"}"#, Duration::from_millis(500)),
+            ("Please try again in 1m 30s", Duration::from_secs(90)),
+            ("Wait 30s and try again", Duration::from_secs(30)),
+            ("Wait 30s before trying again", Duration::from_secs(30)),
+            ("请求过于频繁，30秒后再试", Duration::from_secs(30)),
+        ];
+        for (body, expected) in cases {
+            let e = classify_http_error(429, &HeaderMap::new(), body);
+            assert_eq!(e.retry_after, Some(expected), "{body}");
+        }
     }
 }

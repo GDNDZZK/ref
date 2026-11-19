@@ -274,3 +274,42 @@ async fn sse_error_events_honor_retry_after_across_apis() {
     assert!(err.retryable);
     assert_eq!(err.retry_after, Some(Duration::from_secs(14)));
 }
+
+#[tokio::test]
+async fn sse_response_failed_ignores_echoed_instructions_tools_and_output() {
+    let responses_chunks = vec![format!(
+        "data: {}\n\n",
+        serde_json::json!({
+            "type": "response.failed",
+            "response": {
+                "status": "failed",
+                "instructions": "Please try again in 99s",
+                "tools": [{"name": "t", "description": "retry after 88s"}],
+                "output": [{"type": "message", "content": [{"type": "output_text", "text": "retry in 77s"}]}],
+                "error": {
+                    "code": "server_error",
+                    "message": "Internal failure"
+                }
+            }
+        })
+    )];
+    let (url, _server) = serve(sse_head(), responses_chunks, Duration::ZERO, Duration::ZERO).await;
+    let p = provider(ApiKind::OpenAIResponses, url, Duration::from_secs(5));
+    let mut sink = |_e: StreamEvent| {};
+    let err = run_stream(&p, &mut sink).await.unwrap_err();
+    assert!(err.retryable);
+    assert_eq!(err.retry_after, None);
+
+    let chat_chunks = vec![format!(
+        "data: {}\n\n",
+        serde_json::json!({
+            "choices": [{"index": 0, "delta": {"content": "Please try again in 99s"}}],
+            "error": {"code": "server_error", "message": "Internal failure"}
+        })
+    )];
+    let (url, _server) = serve(sse_head(), chat_chunks, Duration::ZERO, Duration::ZERO).await;
+    let p = provider(ApiKind::OpenAIChat, url, Duration::from_secs(5));
+    let err = run_stream(&p, &mut sink).await.unwrap_err();
+    assert!(err.retryable);
+    assert_eq!(err.retry_after, None);
+}

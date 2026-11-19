@@ -467,28 +467,35 @@ impl ResponsesState {
                 return Ok(true);
             }
             "response.failed" => {
-                let resp = ev.get("response").cloned().unwrap_or(Value::Null);
+                let resp = ev.get("response").unwrap_or(&Value::Null);
                 if let Some(err) = resp.get("error").filter(|e| !e.is_null()) {
                     let (code, message) = error_fields(err);
-                    return Err(stream_error_json(code.as_deref(), &message, ev));
+                    return Err(stream_error_json(
+                        code.as_deref(),
+                        &message,
+                        err,
+                        &[ev, resp],
+                    ));
                 }
                 let reason = resp
                     .pointer("/incomplete_details/reason")
                     .and_then(Value::as_str);
+                let details = resp.get("incomplete_details").unwrap_or(&Value::Null);
                 return Err(stream_error_json(
                     None,
                     &format!(
                         "response failed{}",
                         reason.map(|r| format!(": {r}")).unwrap_or_default()
                     ),
-                    ev,
+                    details,
+                    &[ev, resp],
                 ));
             }
             "error" => {
                 let err = ev.get("error").filter(|e| e.is_object()).unwrap_or(ev);
                 let (code, message) = error_fields(err);
                 let code = code.filter(|c| c != "error");
-                return Err(stream_error_json(code.as_deref(), &message, ev));
+                return Err(stream_error_json(code.as_deref(), &message, err, &[ev]));
             }
             _ => {}
         }
