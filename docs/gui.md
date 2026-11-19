@@ -65,7 +65,7 @@ The window has a sidebar on the left and the content on the right: one session, 
 - A running session is labelled with the name you gave it, else its title, else the name of its directory. A session in the history is labelled with its title (on one line), else its name, else the name of its directory, as in the terminal UI. The *Running* list is as tall as its rows and scrolls only when *History* would get fewer than three rows.
 - The *New session* button creates a session in the workspace's default directory. The folder button next to it, or *New session in folder…* / *New session in another folder…*, asks for a directory first and updates the workspace's default directory to that folder.
 - Closing a session that is still working asks for confirmation first (including from the sidebar and the *Sessions* dialog); its conversation stays in history. Closing the last open session returns to *No session open* instead of starting a new one (and in split view, closing the held foreground session clears it without pulling a background tile out of the grid).
-- The sidebar can be hidden and shown again (Ctrl+Shift+B) and resized by dragging its right border (210–480 px; double-click the edge to reset to 264 px). Both its visibility and width are remembered.
+- The sidebar can be hidden and shown again (Ctrl+Shift+B) and resized by dragging its right border (210–480 px; double-click the edge to reset to 264 px). Click a *Todo*, *Running*, or *History* header (or press Space / Return / Enter when focused) to collapse or expand that section; collapsed sections give their vertical space to the remaining expanded ones. Sidebar visibility, width, and section fold states are remembered.
 - At the top of the sidebar, above *Running*, the *Todo* section shows the to-do list of the session you are looking at (in the split view, of the focused tile) with the number of items done, like *Todo 2/5*; cancelled items count in neither number. Long items wrap, the list scrolls when it takes more than a third of the sidebar, and the section is hidden while the session has no to-do list.
 - The command palette (Ctrl+P) lists every command and filters as you type. Commands that take no argument run at once; choosing *Rename the session*, *Change this session's working directory*, *Export transcript as markdown*, *Set or cycle model variant* or *Close live sessions* opens its dedicated dialog directly, and pressing Esc while entering custom-command arguments returns to the command list. It holds the same commands as the `/` list in the input box, including your [custom commands](configuration.md) (group *Custom*). Without a shortcut: *New session in another folder…*, *Move session to background* (`/detach`), *Rename the session*, *Change this session's working directory*, *Close live sessions*, the `peers` commands, *MCP servers*, *Configuration* (`/config`) and *Reload configuration* (`/reload`). There are no `/editor` and `/exit` commands.
 - *Configuration* (`/config` or `/configuration`, the configuration button in the sidebar footer, or *Settings* → *Edit ref.json…*) opens the 860 px six-section visual and raw JSONC editor for global `ref.json`, with multi-profile switching (`ref.json.<n>.bak`) and Ctrl+S to save; `/reload` (`/reload-config`, or the reload button) hot-reloads configuration across live sessions and MCP servers. See [Graphical editor and profiles](configuration.md#graphical-editor-and-profiles).
@@ -192,15 +192,14 @@ Open them with Ctrl+Shift+S or the settings button at the bottom of the sidebar.
 - **Notifications:** the master switch and the three kinds described [above](#notifications).
 - **Configuration:** *Reload configuration* and *Edit ref.json…* (see [Graphical editor and profiles](configuration.md#graphical-editor-and-profiles)).
 
-They are saved in `gui.json` in the state directory ([Files and directories](cli.md#files-and-directories)), together with whether the sidebar is shown, the sidebar width, and the size of the window:
+They are saved in `gui.json` in the state directory ([Files and directories](cli.md#files-and-directories)), together with whether the sidebar is shown, its width and section fold states, and the size of the window:
 
 ```json
 {
   "theme": "system",
   "language": "system",
   "notifications": { "enabled": true, "permission": true, "turnDone": true, "turnError": true },
-  "sidebar": { "visible": true, "width": 264 },
-  "window": { "width": 980, "height": 760 }
+  "sidebar": { "visible": true, "todoExpanded": true, "runningExpanded": true, "historyExpanded": true, "width": 264 },
 }
 ```
 
