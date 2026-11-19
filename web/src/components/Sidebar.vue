@@ -14,12 +14,12 @@ import { useLayoutStore } from '../stores/layout.ts'
 import { useMcpStore } from '../stores/mcp.ts'
 import { useNoticesStore } from '../stores/notices.ts'
 import { useWorkspaceStore } from '../stores/workspace.ts'
+import Chevron from './Chevron.vue'
 import HistoryRow from './HistoryRow.vue'
 import Icon from './Icon.vue'
 import McpDots from './McpDots.vue'
 import SidebarRow from './SidebarRow.vue'
 import SidebarTodo from './SidebarTodo.vue'
-
 const LOCKUP_WIDTH = 60
 const LOCKUP_HEIGHT = 24
 
@@ -162,48 +162,88 @@ function stopResize(event: PointerEvent): void {
       </div>
 
       <div class="body">
-        <SidebarTodo :todos="todos" />
-        <div class="lists">
-          <h2 class="section">{{ t('sidebar.running') }}</h2>
-          <TransitionGroup tag="div" name="session" class="running" role="list">
-            <SidebarRow
-              v-for="info in workspace.live"
-              :key="info.id"
-              :info="info"
-              :current="info.id === workspace.focusedId"
-              :tile="workspace.mode === 'split' && workspace.tileIds.includes(info.id)"
-              :can-detach="workspace.mode === 'single' && info.id === workspace.currentId"
-              @open="open(info.id)"
-              @detach="report(workspace.detachCurrent())"
-              @close="close(info.id)"
-              @rename="(name) => report(workspace.renameSession(info.id, name))"
-            />
-          </TransitionGroup>
-
-          <h2 class="section">{{ t('sidebar.history') }}</h2>
-          <label class="search">
-            <Icon icon="search-16" class="search-icon" />
-            <input v-model="query" type="text" :placeholder="t('sidebar.searchHistory')" />
+        <SidebarTodo
+          :todos="todos"
+          :expanded="layout.sidebarTodoExpanded"
+          @toggle="layout.toggleSidebarTodo()"
+        />
+        <div class="lists" :class="{ 'history-collapsed': !layout.sidebarHistoryExpanded }">
+          <h2 class="section">
             <button
-              v-if="query"
               type="button"
-              class="clear"
-              :aria-label="t('sidebar.clearSearch')"
-              @click="query = ''"
+              class="section-toggle"
+              :aria-expanded="layout.sidebarRunningExpanded"
+              @click="layout.toggleSidebarRunning()"
             >
-              <Icon icon="close-16" />
+              <span class="section-label">{{ t('sidebar.running') }}</span>
+              <Chevron class="section-chevron" :class="{ open: layout.sidebarRunningExpanded }" />
             </button>
-          </label>
-          <div class="history" role="list">
-            <HistoryRow
-              v-for="info in history"
-              :key="info.id"
-              :info="info"
-              @open="open(info.id)"
-              @remove="dialogs.open({ kind: 'deleteHistory', sessionId: info.id })"
-            />
-            <p v-if="!workspace.historyLoaded" class="empty">{{ t('sidebar.loading') }}</p>
-            <p v-else-if="history.length === 0" class="empty">{{ t('sidebar.noMatch') }}</p>
+          </h2>
+          <div
+            class="running-slot"
+            :class="{ open: layout.sidebarRunningExpanded }"
+            :inert="!layout.sidebarRunningExpanded || undefined"
+          >
+            <div class="fold">
+              <TransitionGroup tag="div" name="session" class="running" role="list">
+                <SidebarRow
+                  v-for="info in workspace.live"
+                  :key="info.id"
+                  :info="info"
+                  :current="info.id === workspace.focusedId"
+                  :tile="workspace.mode === 'split' && workspace.tileIds.includes(info.id)"
+                  :can-detach="workspace.mode === 'single' && info.id === workspace.currentId"
+                  @open="open(info.id)"
+                  @detach="report(workspace.detachCurrent())"
+                  @close="close(info.id)"
+                  @rename="(name) => report(workspace.renameSession(info.id, name))"
+                />
+              </TransitionGroup>
+            </div>
+          </div>
+
+          <h2 class="section">
+            <button
+              type="button"
+              class="section-toggle"
+              :aria-expanded="layout.sidebarHistoryExpanded"
+              @click="layout.toggleSidebarHistory()"
+            >
+              <span class="section-label">{{ t('sidebar.history') }}</span>
+              <Chevron class="section-chevron" :class="{ open: layout.sidebarHistoryExpanded }" />
+            </button>
+          </h2>
+          <div
+            class="history-slot"
+            :class="{ open: layout.sidebarHistoryExpanded }"
+            :inert="!layout.sidebarHistoryExpanded || undefined"
+          >
+            <div class="fold">
+              <label class="search">
+                <Icon icon="search-16" class="search-icon" />
+                <input v-model="query" type="text" :placeholder="t('sidebar.searchHistory')" />
+                <button
+                  v-if="query"
+                  type="button"
+                  class="clear"
+                  :aria-label="t('sidebar.clearSearch')"
+                  @click="query = ''"
+                >
+                  <Icon icon="close-16" />
+                </button>
+              </label>
+              <div class="history" role="list">
+                <HistoryRow
+                  v-for="info in history"
+                  :key="info.id"
+                  :info="info"
+                  @open="open(info.id)"
+                  @remove="dialogs.open({ kind: 'deleteHistory', sessionId: info.id })"
+                />
+                <p v-if="!workspace.historyLoaded" class="empty">{{ t('sidebar.loading') }}</p>
+                <p v-else-if="history.length === 0" class="empty">{{ t('sidebar.noMatch') }}</p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -447,14 +487,82 @@ function stopResize(event: PointerEvent): void {
 
 .section {
   flex: none;
-  display: flex;
-  align-items: center;
   height: var(--sidebar-section-height);
   margin: 0;
-  padding-left: 10px;
-  color: var(--text-muted);
   font-size: var(--small-font-size);
   font-weight: 400;
+}
+
+.section-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  padding: 0 10px;
+  border-radius: var(--radius-small);
+  color: var(--text-muted);
+  text-align: left;
+  transition:
+    background-color var(--motion-quick) var(--motion-ease),
+    color var(--motion-quick) var(--motion-ease);
+}
+
+.section-toggle:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.section-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.section-chevron {
+  flex: none;
+  color: var(--text-muted);
+  transition: rotate var(--motion-standard) var(--motion-ease);
+}
+
+.section-chevron.open {
+  rotate: 90deg;
+}
+
+.fold {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.running-slot {
+  display: grid;
+  flex: 0 1 auto;
+  grid-template-rows: 0fr;
+  min-height: 0;
+  max-height: max(
+    calc(
+      100% - 2 * var(--sidebar-section-height) - var(--search-height) - var(--search-gap) -
+        var(--sidebar-min-history-rows) * var(--sidebar-history-row-height)
+    ),
+    calc(var(--sidebar-min-running-rows) * (var(--sidebar-row-height) + 2px))
+  );
+  opacity: 0;
+  transition:
+    grid-template-rows var(--motion-standard) var(--motion-ease),
+    opacity var(--motion-standard) var(--motion-ease);
+}
+
+.running-slot.open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.lists.history-collapsed .running-slot {
+  max-height: calc(100% - 2 * var(--sidebar-section-height));
 }
 
 .running {
@@ -464,16 +572,8 @@ function stopResize(event: PointerEvent): void {
   flex-direction: column;
   gap: 2px;
   min-height: 0;
-  max-height: max(
-    calc(
-      100% - 2 * var(--sidebar-section-height) - var(--search-height) - var(--search-gap) -
-        var(--sidebar-min-history-rows) * var(--sidebar-history-row-height)
-    ),
-    calc(var(--sidebar-min-running-rows) * (var(--sidebar-row-height) + 2px))
-  );
   overflow-y: auto;
 }
-
 .session-enter-active,
 .session-leave-active {
   transition:
@@ -546,6 +646,24 @@ function stopResize(event: PointerEvent): void {
   right: 8px;
   display: flex;
   color: var(--text-muted);
+}
+
+.history-slot {
+  display: grid;
+  flex: 0 0 0px;
+  grid-template-rows: 0fr;
+  min-height: 0;
+  opacity: 0;
+  transition:
+    flex-grow var(--motion-standard) var(--motion-ease),
+    grid-template-rows var(--motion-standard) var(--motion-ease),
+    opacity var(--motion-standard) var(--motion-ease);
+}
+
+.history-slot.open {
+  flex: 1 1 0px;
+  grid-template-rows: 1fr;
+  opacity: 1;
 }
 
 .history {
