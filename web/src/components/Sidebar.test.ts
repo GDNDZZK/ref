@@ -21,8 +21,8 @@ beforeEach(() => {
   setActivePinia(pinia)
 })
 afterEach(() => {
+  vi.useRealTimers()
   Object.defineProperty(window, 'innerWidth', {
-    configurable: true,
     writable: true,
     value: originalInnerWidth,
   })
@@ -351,5 +351,188 @@ describe('Sidebar', () => {
     expect(historySlot.attributes('inert')).toBeUndefined()
     expect(lists.classes()).not.toContain('history-collapsed')
     wrapper.unmount()
+  })
+
+  describe('running session long-press reorder', () => {
+    it('still opens/detaches on a short click without triggering drag', async () => {
+      vi.useFakeTimers()
+      const { workspace, wrapper } = mountSidebar()
+      const detachSpy = vi.spyOn(workspace, 'detachCurrent').mockResolvedValue(undefined)
+      const openSpy = vi.spyOn(workspace, 'openSession').mockResolvedValue(undefined)
+      workspace.currentId = 's1'
+      await nextTick()
+
+      const rows = wrapper.findAll('.running .row')
+      await rows[1]!.trigger('pointerdown', { button: 0, pointerId: 1, clientX: 40, clientY: 100 })
+      vi.advanceTimersByTime(100)
+      await rows[1]!.trigger('pointerup', { pointerId: 1, clientX: 40, clientY: 100 })
+      await rows[1]!.trigger('click')
+      expect(rows[1]!.classes()).not.toContain('dragging')
+      expect(openSpy).toHaveBeenCalledWith('s2')
+      expect(detachSpy).not.toHaveBeenCalled()
+      wrapper.unmount()
+    })
+
+    it('cancels the hold timer when moving more than 6px before 280ms', async () => {
+      vi.useFakeTimers()
+      const { workspace, wrapper } = mountSidebar()
+      await nextTick()
+
+      const row = wrapper.findAll('.running .row')[0]!
+      await row.trigger('pointerdown', { button: 0, pointerId: 1, clientX: 40, clientY: 100 })
+      await row.trigger('pointermove', { pointerId: 1, clientX: 40, clientY: 108 })
+      vi.advanceTimersByTime(300)
+      await nextTick()
+      expect(row.classes()).not.toContain('dragging')
+      await row.trigger('pointermove', { pointerId: 1, clientX: 40, clientY: 240 })
+      expect(workspace.live.map((s) => s.id)).toEqual(['s1', 's2', 's3'])
+      wrapper.unmount()
+    })
+
+    it('reorders rows after holding >=280ms, persists to localStorage, and suppresses click on drop', async () => {
+      vi.useFakeTimers()
+      const { workspace, wrapper } = mountSidebar()
+      const openSpy = vi.spyOn(workspace, 'openSession').mockResolvedValue(undefined)
+      const detachSpy = vi.spyOn(workspace, 'detachCurrent').mockResolvedValue(undefined)
+      workspace.currentId = 's1'
+      await nextTick()
+
+      const firstRow = wrapper.findAll('.running .row')[0]!
+      await firstRow.trigger('pointerdown', { button: 0, pointerId: 1, clientX: 40, clientY: 100 })
+      vi.advanceTimersByTime(280)
+      await nextTick()
+      expect(firstRow.classes()).toContain('dragging')
+
+      const stride = metrics.sidebarRowHeight + 2
+      await firstRow.trigger('pointermove', { pointerId: 1, clientX: 40, clientY: 100 + stride * 2 })
+      await nextTick()
+      expect(workspace.live.map((s) => s.id)).toEqual(['s2', 's3', 's1'])
+      expect(wrapper.findAll('.running .row .title').map((t) => t.text())).toEqual(['beta', 'gamma', 'alpha'])
+      expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({
+        sidebarRunningOrder: ['s2', 's3', 's1'],
+      })
+
+      await firstRow.trigger('pointerup', { pointerId: 1, clientX: 40, clientY: 100 + stride * 2 })
+      await firstRow.trigger('click')
+      expect(firstRow.classes()).not.toContain('dragging')
+      expect(openSpy).not.toHaveBeenCalled()
+      expect(detachSpy).not.toHaveBeenCalled()
+      wrapper.unmount()
+    })
+
+    it('cleans up dragging state on pointercancel, lostpointercapture, and section collapse', async () => {
+      vi.useFakeTimers()
+      const { wrapper } = mountSidebar()
+      const layout = useLayoutStore()
+      await nextTick()
+
+      const row = wrapper.findAll('.running .row')[0]!
+      await row.trigger('pointerdown', { button: 0, pointerId: 1, clientX: 40, clientY: 100 })
+      vi.advanceTimersByTime(280)
+      await nextTick()
+      expect(row.classes()).toContain('dragging')
+      await row.trigger('pointercancel', { pointerId: 1 })
+      await nextTick()
+      expect(row.classes()).not.toContain('dragging')
+
+      await row.trigger('pointerdown', { button: 0, pointerId: 2, clientX: 40, clientY: 100 })
+      vi.advanceTimersByTime(280)
+      await nextTick()
+      expect(row.classes()).toContain('dragging')
+      await row.trigger('lostpointercapture', { pointerId: 2 })
+      await nextTick()
+      expect(row.classes()).not.toContain('dragging')
+
+      await row.trigger('pointerdown', { button: 0, pointerId: 3, clientX: 40, clientY: 100 })
+      vi.advanceTimersByTime(280)
+      await nextTick()
+      expect(row.classes()).toContain('dragging')
+      layout.toggleSidebarRunning()
+      await nextTick()
+      expect(row.classes()).not.toContain('dragging')
+      wrapper.unmount()
+    })
+
+    it('clears .dragging and any pending .session-move class on drag end', async () => {
+      vi.useFakeTimers()
+      const origGetComputedStyle = window.getComputedStyle.bind(window)
+      const styleSpy = vi.spyOn(window, 'getComputedStyle').mockImplementation((el, pseudo) => {
+        if (el instanceof HTMLElement && el.classList.contains('session-move')) {
+          return {
+            ...origGetComputedStyle(el, pseudo),
+            transitionProperty: 'transform',
+            transitionDuration: '0.2s',
+            transitionDelay: '0s',
+            animationDuration: '0s',
+            animationDelay: '0s',
+          } as CSSStyleDeclaration
+        }
+        return origGetComputedStyle(el, pseudo)
+      })
+      const origRect = HTMLElement.prototype.getBoundingClientRect
+      const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement,
+      ) {
+        if (this.classList.contains('row') && this.parentElement?.classList.contains('running')) {
+          const rows = [...this.parentElement.querySelectorAll(':scope > .row')]
+          const idx = rows.indexOf(this)
+          const stride = metrics.sidebarRowHeight + 2
+          const top = Math.max(0, idx) * stride
+          return {
+            top,
+            left: 0,
+            x: 0,
+            y: top,
+            width: 248,
+            height: metrics.sidebarRowHeight,
+            right: 248,
+            bottom: top + metrics.sidebarRowHeight,
+            toJSON: () => ({}),
+          } as DOMRect
+        }
+        return origRect.call(this)
+      })
+      try {
+        const workspace = useWorkspaceStore()
+        workspace.onFrame({
+          kind: 'sessions',
+          sessions: [
+            info({ id: 's1', name: 'alpha' }),
+            info({ id: 's2', name: 'beta', created_at: 2, attached: 0 }),
+            info({ id: 's3', name: 'gamma', created_at: 3, attached: 0 }),
+          ],
+        })
+        const wrapper = mount(Sidebar, {
+          attachTo: document.body,
+          global: {
+            plugins: [pinia, createAppI18n(['en'])],
+            stubs: { TransitionGroup: false },
+          },
+        })
+
+        const firstRow = wrapper.findAll('.running .row')[0]!
+        await firstRow.trigger('pointerdown', { button: 0, pointerId: 1, clientX: 40, clientY: 20 })
+        vi.advanceTimersByTime(280)
+        await nextTick()
+        expect(firstRow.classes()).toContain('dragging')
+
+        const stride = metrics.sidebarRowHeight + 2
+        await firstRow.trigger('pointermove', { pointerId: 1, clientX: 40, clientY: 20 + stride })
+        await nextTick()
+        expect(workspace.live.map((s) => s.id)).toEqual(['s2', 's1', 's3'])
+        expect(wrapper.findAll('.running .row').map((r) => r.classes())).toContainEqual(
+          expect.arrayContaining(['dragging', 'session-move']),
+        )
+
+        await firstRow.trigger('pointerup', { pointerId: 1, clientX: 40, clientY: 20 + stride })
+        await nextTick()
+        expect(wrapper.findAll('.running .row.dragging')).toHaveLength(0)
+        expect(wrapper.findAll('.running .row.session-move')).toHaveLength(0)
+        wrapper.unmount()
+      } finally {
+        rectSpy.mockRestore()
+        styleSpy.mockRestore()
+      }
+    })
   })
 })

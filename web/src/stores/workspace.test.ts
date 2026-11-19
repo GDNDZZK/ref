@@ -2,9 +2,10 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { info, snapshot, userMessage } from '../model/testMessages.ts'
 import type { SessionInfo } from '../proto/generated'
+import { STORAGE_KEY } from '../settings/model.ts'
 import { useNoticesStore } from './notices.ts'
+import { useSettingsStore } from './settings.ts'
 import { errorToast, sortLive, useWorkspaceStore } from './workspace.ts'
-
 const api = {
   attach: vi.fn(),
   detach: vi.fn(),
@@ -40,6 +41,7 @@ function setup(sessions: SessionInfo[]) {
 }
 
 beforeEach(() => {
+  localStorage.clear()
   setActivePinia(createPinia())
   for (const fn of Object.values(api)) fn.mockReset().mockResolvedValue(undefined)
   api.listHistory.mockResolvedValue([])
@@ -51,8 +53,57 @@ describe('sortLive', () => {
     const sorted = sortLive([session('ses_3'), session('ses_1'), session('b', { created_at: 3 })])
     expect(sorted.map((entry) => entry.id)).toEqual(['ses_1', 'b', 'ses_3'])
   })
+
+  it('places ordered sessions first using first occurrence, then falls back for new ones', () => {
+    const sorted = sortLive(
+      [session('ses_1'), session('ses_2'), session('ses_3'), session('ses_4')],
+      ['ses_3', 'ses_1', 'ses_3'],
+    )
+    expect(sorted.map((entry) => entry.id)).toEqual(['ses_3', 'ses_1', 'ses_2', 'ses_4'])
+  })
 })
 
+describe('running session order', () => {
+  it('reorders sessions, persists to localStorage, and keeps order across updates', () => {
+    const workspace = setup([session('ses_1'), session('ses_2'), session('ses_3')])
+    workspace.moveRunningSession('ses_3', 0)
+    expect(workspace.live.map((entry) => entry.id)).toEqual(['ses_3', 'ses_1', 'ses_2'])
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({
+      sidebarRunningOrder: ['ses_3', 'ses_1', 'ses_2'],
+    })
+
+    workspace.onFrame({
+      kind: 'sessions',
+      sessions: [session('ses_1'), session('ses_2'), session('ses_3'), session('ses_4')],
+    })
+    expect(workspace.live.map((entry) => entry.id)).toEqual(['ses_3', 'ses_1', 'ses_2', 'ses_4'])
+  })
+
+  it('prunes closed sessions from sidebarRunningOrder only when needed', () => {
+    const workspace = setup([session('ses_1'), session('ses_2'), session('ses_3')])
+    workspace.moveRunningSession('ses_3', 0)
+    const updateSpy = vi.spyOn(useSettingsStore(), 'update')
+    workspace.onFrame({ kind: 'sessions', sessions: [session('ses_1'), session('ses_2'), session('ses_3')] })
+    expect(updateSpy).not.toHaveBeenCalled()
+
+    workspace.onFrame({ kind: 'sessions', sessions: [session('ses_1'), session('ses_3')] })
+    expect(updateSpy).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({
+      sidebarRunningOrder: ['ses_3', 'ses_1'],
+    })
+    updateSpy.mockRestore()
+  })
+  it('re-sorts live sessions when another tab updates sidebarRunningOrder', () => {
+    const workspace = setup([session('ses_1'), session('ses_2'), session('ses_3')])
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: STORAGE_KEY,
+        newValue: JSON.stringify({ sidebarRunningOrder: ['ses_2', 'ses_3', 'ses_1'] }),
+      }),
+    )
+    expect(workspace.live.map((entry) => entry.id)).toEqual(['ses_2', 'ses_3', 'ses_1'])
+  })
+})
 describe('errorToast', () => {
   it('names the session and puts the whole error on one line, as the TUI does', () => {
     expect(errorToast('parser', 'rate limited\n\n  retry\tlater \n')).toBe('parser: rate limited retry later')

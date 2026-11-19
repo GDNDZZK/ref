@@ -7,6 +7,7 @@
 
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef, watch } from 'vue'
+import { clamp } from '../clamp.ts'
 import { crossfade } from '../composables/crossfade.ts'
 import { emitDraftRestored } from '../composer/draftBus.ts'
 import { ChatSession } from '../model/chatSession.ts'
@@ -20,7 +21,7 @@ import type { Startup } from '../net/startup.ts'
 import type { ModelRef, SessionInfo } from '../proto/generated'
 import { useConnectionStore } from './connection.ts'
 import { useNoticesStore } from './notices.ts'
-
+import { useSettingsStore } from './settings.ts'
 export type ViewMode = 'single' | 'split'
 
 export interface NewSessionOptions {
@@ -33,9 +34,20 @@ export interface NewSessionOptions {
 const HISTORY_LIMIT = 200
 const ERROR_TOAST_MAX_CHARS = 200
 
-// Live sessions in the order they were created, which is the order of the sidebar.
-export function sortLive(sessions: readonly SessionInfo[]): SessionInfo[] {
-  return [...sessions].sort((a, b) => a.created_at - b.created_at || a.id.localeCompare(b.id))
+// Live sessions in custom order first, then by creation time and id.
+export function sortLive(sessions: readonly SessionInfo[], order: readonly string[] = []): SessionInfo[] {
+  const rank = new Map<string, number>()
+  for (const id of order) {
+    if (!rank.has(id)) rank.set(id, rank.size)
+  }
+  return [...sessions].sort((a, b) => {
+    const ia = rank.get(a.id)
+    const ib = rank.get(b.id)
+    if (ia !== undefined && ib !== undefined) return ia - ib
+    if (ia !== undefined) return -1
+    if (ib !== undefined) return 1
+    return a.created_at - b.created_at || a.id.localeCompare(b.id)
+  })
 }
 
 // "name: the error on one line", cut at 200 characters with an ellipsis (the TUI's toast for a
@@ -50,7 +62,7 @@ export function errorToast(name: string, text: string): string {
 export const useWorkspaceStore = defineStore('workspace', () => {
   const connection = useConnectionStore()
   const notices = useNoticesStore()
-
+  const settingsStore = useSettingsStore()
   const live = shallowRef<readonly SessionInfo[]>([])
   const history = shallowRef<readonly SessionInfo[]>([])
   const historyLoaded = ref(false)
@@ -95,7 +107,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   watch(currentId, (id) => writeLocation({ sessionId: id }))
   watch(mode, (value) => writeLocation({ split: value === 'split' }))
   watch(tileIds, () => void syncTiles().catch(notices.pushError))
-
+  watch(
+    () => settingsStore.settings.sidebarRunningOrder,
+    (order) => {
+      live.value = sortLive(live.value, order)
+    },
+    { flush: 'sync' },
+  )
   // The session's object; made on first use, without any request.
   function chat(id: string): ChatSession {
     const existing = chats.get(id)
@@ -173,7 +191,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function newSession(options: NewSessionOptions = {}): Promise<string> {
     const info = await connection.getApi().createSession(options.cwd ?? cwd.value, options)
     cwd.value = info.cwd
-    live.value = sortLive([...live.value.filter((session) => session.id !== info.id), info])
+    live.value = sortLive(
+      [...live.value.filter((session) => session.id !== info.id), info],
+      settingsStore.settings.sidebarRunningOrder,
+    )
     await openSession(info.id)
     return info.id
   }
@@ -398,17 +419,44 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   function showInfo(info: SessionInfo): void {
-    live.value = sortLive([...live.value.filter((session) => session.id !== info.id), info])
+    live.value = sortLive(
+      [...live.value.filter((session) => session.id !== info.id), info],
+      settingsStore.settings.sidebarRunningOrder,
+    )
     chats.get(info.id)?.setInfo(info)
   }
 
   function setLive(sessions: readonly SessionInfo[]): void {
     const gone = live.value.some((old) => !sessions.some((session) => session.id === old.id))
-    live.value = sortLive(sessions)
+    const liveIds = new Set(sessions.map((session) => session.id))
+    const currentOrder = settingsStore.settings.sidebarRunningOrder
+    const pruned = currentOrder.filter((id) => liveIds.has(id))
+    if (pruned.length !== currentOrder.length) {
+      settingsStore.update((draft) => {
+        draft.sidebarRunningOrder = pruned
+      })
+    }
+    live.value = sortLive(sessions, pruned)
     for (const info of sessions) chats.get(info.id)?.setInfo(info)
     if (gone) void refreshHistory().catch(notices.pushError)
   }
 
+  function moveRunningSession(id: string, toIndex: number): void {
+    if (live.value.length <= 1) return
+    const fromIndex = live.value.findIndex((session) => session.id === id)
+    if (fromIndex < 0) return
+    const clamped = clamp(toIndex, 0, live.value.length - 1)
+    if (fromIndex === clamped) return
+    const list = [...live.value]
+    const [moved] = list.splice(fromIndex, 1)
+    if (!moved) return
+    list.splice(clamped, 0, moved)
+    live.value = list
+    const nextOrder = list.map((session) => session.id)
+    settingsStore.update((draft) => {
+      draft.sidebarRunningOrder = nextOrder
+    })
+  }
   function onSessionEvent(frame: Extract<EventFrame, { kind: 'event' }>): void {
     const { session_id: id, event } = frame
     const session = chats.get(id)
@@ -492,6 +540,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     peerCommand,
     listDirs,
     refreshHistory,
+    moveRunningSession,
     enterSplit,
     leaveSplit,
     toggleSplit,

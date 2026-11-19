@@ -22,6 +22,7 @@ export interface Settings {
   sidebarTodoExpanded: boolean
   sidebarRunningExpanded: boolean
   sidebarHistoryExpanded: boolean
+  sidebarRunningOrder: string[]
 }
 
 export const STORAGE_KEY = 'ref.settings'
@@ -39,6 +40,7 @@ export function defaultSettings(): Settings {
     sidebarTodoExpanded: true,
     sidebarRunningExpanded: true,
     sidebarHistoryExpanded: true,
+    sidebarRunningOrder: [],
   }
 }
 
@@ -56,6 +58,18 @@ function width(value: unknown, fallback: number): number {
 }
 function record(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {}
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const item of value) {
+    if (typeof item !== 'string' || item === '' || seen.has(item)) continue
+    seen.add(item)
+    result.push(item)
+  }
+  return result
 }
 
 // Every field falls back on its own, so one bad value (or a field a newer version added) does not
@@ -87,6 +101,7 @@ export function parseSettings(raw: string | null): { settings: Settings; corrupt
     sidebarTodoExpanded: flag(stored['sidebarTodoExpanded'], defaults.sidebarTodoExpanded),
     sidebarRunningExpanded: flag(stored['sidebarRunningExpanded'], defaults.sidebarRunningExpanded),
     sidebarHistoryExpanded: flag(stored['sidebarHistoryExpanded'], defaults.sidebarHistoryExpanded),
+    sidebarRunningOrder: stringList(stored['sidebarRunningOrder']),
   }
   return { settings, corrupt: false }
 }
