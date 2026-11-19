@@ -44,6 +44,7 @@ private slots:
 	void atomicPlaceholderSnappingSelectionAndDeletion();
 	void nextTokenSkipsExistingTokensInTextAndRestore();
 	void undoAndRedoSyncAttachmentsAndNumbering();
+	void undoAndRedoSyncShellMode();
 };
 
 void TestPromptDraft::attachInsertsTokenAtCursor()
@@ -355,6 +356,62 @@ void TestPromptDraft::undoAndRedoSyncAttachmentsAndNumbering()
 		++undoCount;
 	}
 	QCOMPARE(undoCount, 200);
+}
+
+void TestPromptDraft::undoAndRedoSyncShellMode()
+{
+	PromptDraft draft;
+	QVERIFY(!draft.canUndo());
+	QVERIFY(!draft.canRedo());
+	QVERIFY(!draft.shellMode());
+
+	// Entering and leaving shell mode via setShellMode and clear().
+	draft.setShellMode(true);
+	QVERIFY(draft.shellMode());
+	QVERIFY(draft.canUndo());
+	draft.clear(); // clear() on empty shell mode is undoable
+	QVERIFY(!draft.shellMode());
+	QVERIFY(draft.undo());
+	QVERIFY(draft.shellMode());
+	QVERIFY(draft.undo());
+	QVERIFY(!draft.shellMode());
+	QVERIFY(!draft.canUndo());
+	QVERIFY(draft.canRedo());
+	QVERIFY(draft.redo());
+	QVERIFY(draft.shellMode());
+
+	// Atomic replace() between attachment draft and shell mode keeps attachments out of shell mode.
+	draft.clear();
+	draft.take();
+	draft.attach(image(u"a"_s));
+	QCOMPARE(draft.text(), u"[Image 1] "_s);
+	QVERIFY(!draft.shellMode());
+	draft.replace(u"make"_s, 4, true);
+	QVERIFY(draft.shellMode());
+	QCOMPARE(draft.text(), u"make"_s);
+	QVERIFY(draft.attachments().isEmpty());
+	QVERIFY(draft.undo());
+	QVERIFY(!draft.shellMode());
+	QCOMPARE(draft.text(), u"[Image 1] "_s);
+	QCOMPARE(dataOf(draft), QStringList{u"[Image 1]=a"_s});
+	QVERIFY(draft.redo());
+	QVERIFY(draft.shellMode());
+	QCOMPARE(draft.text(), u"make"_s);
+	QVERIFY(draft.attachments().isEmpty());
+
+	// restore(..., shellMode = true) and take() sync shellMode cleanly.
+	draft.clear();
+	draft.restore(u"ls"_s, {}, true);
+	QVERIFY(draft.shellMode());
+	QCOMPARE(draft.text(), u"ls"_s);
+	QVERIFY(draft.undo());
+	QVERIFY(!draft.shellMode());
+	QVERIFY(draft.redo());
+	QVERIFY(draft.shellMode());
+	QCOMPARE(draft.take().text, u"ls"_s);
+	QVERIFY(!draft.shellMode());
+	QVERIFY(!draft.canUndo());
+	QVERIFY(!draft.canRedo());
 }
 
 QTEST_GUILESS_MAIN(TestPromptDraft)

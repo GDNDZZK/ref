@@ -25,6 +25,7 @@ qt_add_qml_module(ref-gui
 		question_prompt_type.h
 		qml_types.h
 		system_fonts.h
+		text_edit_support.h
 		tool_info.h
 		tile_model.cpp
 		tile_model.h

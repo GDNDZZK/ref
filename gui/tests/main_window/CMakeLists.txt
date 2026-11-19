@@ -29,6 +29,7 @@ refgui_add_test(tst_main_window
 		${PROJECT_SOURCE_DIR}/src/app/question_prompt_type.h
 		${PROJECT_SOURCE_DIR}/src/app/qml_types.h
 		${PROJECT_SOURCE_DIR}/src/app/system_fonts.h
+		${PROJECT_SOURCE_DIR}/src/app/text_edit_support.h
 		${PROJECT_SOURCE_DIR}/src/app/tile_model.cpp
 		${PROJECT_SOURCE_DIR}/src/app/tile_model.h
 		${PROJECT_SOURCE_DIR}/src/app/tile_stage.cpp
