@@ -19,9 +19,15 @@ Rectangle {
 	readonly property int runningRowSpacing: 2
 	readonly property real minRunningHeight: Theme.sidebarMinRunningRows * (Theme.sidebarRowHeight + runningRowSpacing)
 	readonly property real minHistoryHeight: Theme.sidebarMinHistoryRows * Theme.sidebarHistoryRowHeight
-	// Space for the three lists: what is left of the column after the fixed parts.
-	readonly property real listSpace: fixedSpace - todoSection.height
-	readonly property real fixedSpace: height - Theme.sidebarHeaderHeight - newRowHeight - 2 * Theme.sidebarSectionHeight - searchHeight - historyGap - Theme.sidebarFooterHeight
+	readonly property real chromeHeight: Theme.sidebarHeaderHeight + newRowHeight + 2 * Theme.sidebarSectionHeight + Theme.sidebarFooterHeight
+	readonly property real bodySpace: Math.max(0, height - chromeHeight)
+	readonly property real historyOverhead: searchHeight + historyGap
+	readonly property bool todoExpanded: Workspace.settings.sidebarTodoExpanded
+	readonly property bool runningExpanded: Workspace.settings.sidebarRunningExpanded
+	readonly property bool historyExpanded: Workspace.settings.sidebarHistoryExpanded
+	readonly property real reservedRunning: runningExpanded ? minRunningHeight : 0
+	readonly property real reservedHistory: historyExpanded ? (historyOverhead + minHistoryHeight) : 0
+	property bool ready: false
 
 	// The to-do list of the session in front: the current one, or the focused tile in split view. One value, {items,
 	// done, total}, and nothing else is derived from it by a binding that could be read before it has caught up. The
@@ -29,10 +35,15 @@ Rectangle {
 	readonly property var front: Workspace.frontSession
 	readonly property var todo: front ? front.todo : ({ items: [], done: 0, total: 0 })
 	property var shownTodo: ({ items: [], done: 0, total: 0 })
-	// Up to a third of the column, and never so much that the lists below lose their minimum.
-	readonly property real todoCap: Math.min(height / 3, fixedSpace - minRunningHeight - minHistoryHeight)
-	readonly property bool todoFits: todo.items.length > 0 && todoCap >= Theme.sidebarSectionHeight + todoList.rowHeight
-	readonly property real todoHeight: todoFits ? Math.min(Theme.sidebarSectionHeight + todoList.height, todoCap) : 0
+	// Up to a third of the column, and never so much that expanded lists below lose their minimum.
+	readonly property real todoCap: Math.max(0, Math.min(height / 3, bodySpace - reservedRunning - reservedHistory))
+	readonly property bool todoFits: todo.items.length > 0 && todoCap >= Theme.sidebarSectionHeight + (todoExpanded ? todoList.rowHeight : 0)
+	readonly property real minTodoBodyHeight: todoList.rowHeight + 2 * todoList.verticalPadding
+	readonly property real todoHeight: !todoFits ? 0 : (todoExpanded ? Math.max(0, Math.min(Theme.sidebarSectionHeight + Math.max(todoList.height, minTodoBodyHeight), todoCap)) : Theme.sidebarSectionHeight)
+	readonly property real remainingAfterTodo: Math.max(0, bodySpace - todoSection.height)
+	readonly property real runningMaxHeight: Math.min(remainingAfterTodo, Math.max(remainingAfterTodo - reservedHistory, minRunningHeight))
+	readonly property real runningTargetHeight: Math.max(0, Math.min(running.contentHeight, runningMaxHeight))
+	readonly property real historySpace: Math.max(0, bodySpace - todoSection.height - running.height)
 	readonly property string emptyHistoryText: {
 		if (!Workspace.historyLoaded)
 			return qsTr("Loading…")
@@ -49,14 +60,81 @@ Rectangle {
 	}
 
 	onTodoChanged: keepTodo()
-	Component.onCompleted: keepTodo()
-
+	onHistoryExpandedChanged: {
+		if (!historyExpanded && searchInput.activeFocus)
+			searchInput.focus = false
+	}
+	Component.onCompleted: {
+		keepTodo()
+		ready = true
+	}
 	color: Theme.surface
 	clip: true
 
 	signal collapseRequested()
 	signal moveRequested()
 	signal toggleMaximizeRequested()
+	component SectionHeader: Item {
+		id: sectionHeader
+
+		required property string text
+		required property bool expanded
+		property bool ready: false
+		signal toggled()
+
+		width: parent.width
+		height: Theme.sidebarSectionHeight
+		activeFocusOnTab: true
+		Accessible.role: Accessible.Button
+		Accessible.name: text
+		Accessible.onPressAction: toggled()
+		Keys.onReturnPressed: event => {
+			toggled()
+			event.accepted = true
+		}
+		Keys.onSpacePressed: event => {
+			toggled()
+			event.accepted = true
+		}
+
+		Rectangle {
+			anchors { fill: parent; leftMargin: Theme.sidebarPadding; rightMargin: Theme.sidebarPadding }
+			radius: Theme.radiusSmall
+			color: headerHover.hovered ? Theme.surfaceHover : "transparent"
+
+			Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+		}
+
+		Text {
+			textFormat: Text.PlainText
+			anchors { left: parent.left; leftMargin: Theme.listLabelInset; right: chevron.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
+			text: sectionHeader.text
+			color: Theme.textMuted
+			font.pixelSize: Theme.smallFontSize
+			elide: Text.ElideRight
+		}
+
+		Chevron {
+			id: chevron
+			anchors { right: parent.right; rightMargin: 16; verticalCenter: parent.verticalCenter }
+			color: Theme.textMuted
+			rotation: sectionHeader.expanded ? 90 : 0
+
+			Behavior on rotation {
+				enabled: sectionHeader.ready
+				NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
+			}
+		}
+
+		HoverHandler {
+			id: headerHover
+			cursorShape: Qt.PointingHandCursor
+		}
+		TapHandler {
+			onTapped: sectionHeader.toggled()
+		}
+	}
+
 	Rectangle {
 		anchors { top: parent.top; bottom: parent.bottom; right: parent.right }
 		width: 1
@@ -71,6 +149,13 @@ Rectangle {
 		z: 10
 		visible: Workspace.settings.sidebarVisible && sidebar.width >= Theme.sidebarMinWidth
 		property real startWidth: sidebar.contentWidth
+		property real startSceneX: 0
+
+		function updateWidth(sceneX) {
+			const nextWidth = resizeHandle.startWidth + (sceneX - resizeHandle.startSceneX)
+			Workspace.settings.sidebarWidth = Math.round(Math.max(Theme.sidebarMinWidth, Math.min(sidebar.maxAllowed, nextWidth)))
+		}
+
 		HoverHandler {
 			id: resizeHover
 			cursorShape: Qt.SplitHCursor
@@ -81,16 +166,22 @@ Rectangle {
 			target: null
 			yAxis.enabled: false
 			dragThreshold: 2
+			grabPermissions: PointerHandler.CanTakeOverFromAnything
 			onActiveChanged: {
-				if (active)
+				if (active) {
 					resizeHandle.startWidth = sidebar.contentWidth
+					resizeHandle.startSceneX = centroid.scenePressPosition.x
+					resizeHandle.updateWidth(centroid.scenePosition.x)
+				}
 			}
-			onTranslationChanged: {
+			onCentroidChanged: {
 				if (active)
-					Workspace.settings.sidebarWidth = Math.round(Math.max(Theme.sidebarMinWidth, Math.min(sidebar.maxAllowed, resizeHandle.startWidth + translation.x)))
+					resizeHandle.updateWidth(centroid.scenePosition.x)
 			}
 		}
 		TapHandler {
+			gesturePolicy: TapHandler.ReleaseWithinBounds
+			grabPermissions: PointerHandler.CanTakeOverFromAnything | PointerHandler.ApprovesTakeOverByHandlersOfDifferentType
 			onDoubleTapped: Workspace.settings.sidebarWidth = Theme.sidebarWidth
 		}
 	}
@@ -203,29 +294,50 @@ Rectangle {
 		// The to-do list of the session in front, as the todo call's card shows it. Hidden without items.
 		Item {
 			id: todoSection
+			objectName: "todoSection"
 			anchors.top: newRow.bottom
 			width: parent.width
 			height: sidebar.todoHeight
 			clip: true
-			opacity: sidebar.todo.items.length > 0 ? 1 : 0
+			opacity: sidebar.todoFits ? 1 : 0
 			visible: height > 0
 
-			Behavior on height { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-			Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+			Behavior on height {
+				enabled: sidebar.ready
+				NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
+			}
+			Behavior on opacity {
+				enabled: sidebar.ready
+				NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
+			}
 
-			SectionLabel {
-				id: todoLabel
-				leftPadding: Theme.listLabelInset
+			SectionHeader {
+				id: todoHeader
+				objectName: "todoSectionHeader"
 				text: qsTr("Todo %1/%2").arg(sidebar.shownTodo.done).arg(sidebar.shownTodo.total)
+				expanded: sidebar.todoExpanded
+				ready: sidebar.ready
+				onToggled: Workspace.settings.sidebarTodoExpanded = !Workspace.settings.sidebarTodoExpanded
 			}
 
 			Flickable {
-				anchors { top: todoLabel.bottom; bottom: parent.bottom }
+				id: todoFlickable
+				objectName: "todoListFlickable"
+				y: todoHeader.height
 				width: parent.width
+				height: Math.max(0, parent.height - todoHeader.height)
 				contentWidth: width
 				contentHeight: todoList.height
 				boundsBehavior: Flickable.StopAtBounds
 				clip: true
+				opacity: sidebar.todoExpanded ? 1 : 0
+				visible: height > 0 && opacity > 0
+				interactive: sidebar.todoExpanded
+
+				Behavior on opacity {
+					enabled: sidebar.ready
+					NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
+				}
 
 				TodoList {
 					id: todoList
@@ -239,24 +351,36 @@ Rectangle {
 			}
 		}
 
-		SectionLabel {
-			id: runningLabel
-			leftPadding: Theme.listLabelInset
+		SectionHeader {
+			id: runningHeader
+			objectName: "runningSectionHeader"
 			anchors.top: todoSection.bottom
 			text: qsTr("Running")
+			expanded: sidebar.runningExpanded
+			ready: sidebar.ready
+			onToggled: Workspace.settings.sidebarRunningExpanded = !Workspace.settings.sidebarRunningExpanded
 		}
 
 		ListView {
 			id: running
-			anchors.top: runningLabel.bottom
+			objectName: "runningList"
+			property real openProgress: sidebar.runningExpanded ? 1 : 0
+			anchors.top: runningHeader.bottom
 			width: parent.width
 			// The rows' own height; scrolls only when the history would get less than its minimum.
-			height: Math.min(contentHeight, Math.max(sidebar.listSpace - sidebar.minHistoryHeight, sidebar.minRunningHeight))
+			height: openProgress === 1 ? sidebar.runningTargetHeight : Math.round(sidebar.runningTargetHeight * openProgress)
+			visible: height > 0
+			enabled: sidebar.runningExpanded
 			model: Workspace.sessions
 			spacing: sidebar.runningRowSpacing
 			clip: true
 			boundsBehavior: Flickable.StopAtBounds
 			delegate: SessionRow {}
+
+			Behavior on openProgress {
+				enabled: sidebar.ready
+				NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
+			}
 
 			add: Transition {
 				ParallelAnimation {
@@ -280,84 +404,111 @@ Rectangle {
 			ScrollBar.vertical: ThemedScrollBar {}
 		}
 
-		SectionLabel {
-			id: historyLabel
-			leftPadding: Theme.listLabelInset
+		SectionHeader {
+			id: historyHeader
+			objectName: "historySectionHeader"
 			anchors.top: running.bottom
 			text: qsTr("History")
+			expanded: sidebar.historyExpanded
+			ready: sidebar.ready
+			onToggled: Workspace.settings.sidebarHistoryExpanded = !Workspace.settings.sidebarHistoryExpanded
 		}
 
-		// The search field of the history.
-		Rectangle {
-			id: search
-			anchors.top: historyLabel.bottom
-			x: Theme.sidebarPadding
-			width: parent.width - 2 * Theme.sidebarPadding
-			height: sidebar.searchHeight
-			radius: 16
-			color: Theme.surface
-			border.color: searchInput.activeFocus ? Theme.accentText : Theme.border
-
-			Behavior on border.color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-
-			Icon {
-				x: 10
-				anchors.verticalCenter: parent.verticalCenter
-				name: "search"
-				size: 16
-				color: Theme.textMuted
-			}
-			TextInput {
-				id: searchInput
-				anchors { left: parent.left; leftMargin: 34; right: clear.left; rightMargin: 6; verticalCenter: parent.verticalCenter }
-				color: Theme.text
-				selectionColor: Theme.selection
-				selectedTextColor: Theme.text
-				font.pixelSize: Theme.captionFontSize
-				clip: true
-				Accessible.name: qsTr("Search history")
-				onTextChanged: Workspace.history.filter = text.trim()
-
-				PlaceholderText {
-					anchors.fill: parent
-					textInput: searchInput
-					text: qsTr("Search history")
-					font.pixelSize: Theme.captionFontSize
-				}
-			}
-			IconButton {
-				id: clear
-				anchors { right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
-				buttonSize: 22
-				iconName: "close"
-				iconSize: 16
-				opacity: searchInput.text !== "" ? 1 : 0
-				visible: opacity > 0
-				Accessible.name: qsTr("Clear search")
-				onClicked: searchInput.text = ""
-
-				Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
-			}
-		}
-
-		ListView {
-			id: history
-			anchors { top: search.bottom; topMargin: sidebar.historyGap; bottom: footerBar.top }
+		Item {
+			id: historyBody
+			objectName: "historyBody"
+			property real openProgress: sidebar.historyExpanded ? 1 : 0
+			anchors.top: historyHeader.bottom
 			width: parent.width
-			model: Workspace.history
+			height: openProgress === 1 ? sidebar.historySpace : Math.round(sidebar.historySpace * openProgress)
 			clip: true
-			boundsBehavior: Flickable.StopAtBounds
-			delegate: HistoryRow {}
+			visible: height > 0
+			enabled: sidebar.historyExpanded
 
-			ScrollBar.vertical: ThemedScrollBar {}
+			Behavior on openProgress {
+				enabled: sidebar.ready
+				NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
+			}
 
-			Text {
-				textFormat: Text.PlainText
-				anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: 16 }
-				visible: history.count === 0
-				text: sidebar.emptyHistoryText
-				color: Theme.textMuted
-				font.pixelSize: Theme.captionFontSize
+			// Keep inner geometry at full height so search and history never squeeze below zero during fold.
+			Item {
+				width: parent.width
+				height: Math.max(sidebar.historyOverhead, sidebar.historySpace)
+
+				// The search field of the history.
+				Rectangle {
+					id: search
+					anchors.top: parent.top
+					x: Theme.sidebarPadding
+					width: parent.width - 2 * Theme.sidebarPadding
+					height: sidebar.searchHeight
+					radius: 16
+					color: Theme.surface
+					border.color: searchInput.activeFocus ? Theme.accentText : Theme.border
+
+					Behavior on border.color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+
+					Icon {
+						x: 10
+						anchors.verticalCenter: parent.verticalCenter
+						name: "search"
+						size: 16
+						color: Theme.textMuted
+					}
+					TextInput {
+						id: searchInput
+						anchors { left: parent.left; leftMargin: 34; right: clear.left; rightMargin: 6; verticalCenter: parent.verticalCenter }
+						color: Theme.text
+						selectionColor: Theme.selection
+						selectedTextColor: Theme.text
+						font.pixelSize: Theme.captionFontSize
+						clip: true
+						Accessible.name: qsTr("Search history")
+						onTextChanged: Workspace.history.filter = text.trim()
+
+						PlaceholderText {
+							anchors.fill: parent
+							textInput: searchInput
+							text: qsTr("Search history")
+							font.pixelSize: Theme.captionFontSize
+						}
+					}
+					IconButton {
+						id: clear
+						anchors { right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
+						buttonSize: 22
+						iconName: "close"
+						iconSize: 16
+						opacity: searchInput.text !== "" ? 1 : 0
+						visible: opacity > 0
+						Accessible.name: qsTr("Clear search")
+						onClicked: searchInput.text = ""
+
+						Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+					}
+				}
+
+				ListView {
+					id: history
+					objectName: "historyList"
+					anchors { top: search.bottom; topMargin: sidebar.historyGap; bottom: parent.bottom }
+					width: parent.width
+					model: Workspace.history
+					clip: true
+					boundsBehavior: Flickable.StopAtBounds
+					delegate: HistoryRow {}
+
+					ScrollBar.vertical: ThemedScrollBar {}
+
+					Text {
+						textFormat: Text.PlainText
+						anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: 16 }
+						visible: history.count === 0
+						text: sidebar.emptyHistoryText
+						color: Theme.textMuted
+						font.pixelSize: Theme.captionFontSize
+					}
+				}
 			}
 		}
 

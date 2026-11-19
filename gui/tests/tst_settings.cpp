@@ -54,6 +54,9 @@ void TestSettings::defaultsWithoutAFile()
 	QCOMPARE(settings.language(), Settings::System);
 	QVERIFY(settings.notifyEnabled() && settings.notifyPermission() && settings.notifyTurnDone() && settings.notifyTurnError());
 	QVERIFY(settings.sidebarVisible());
+	QVERIFY(settings.sidebarTodoExpanded());
+	QVERIFY(settings.sidebarRunningExpanded());
+	QVERIFY(settings.sidebarHistoryExpanded());
 	QCOMPARE(settings.sidebarWidth(), Settings::DefaultSidebarWidth);
 	QCOMPARE(settings.windowWidth(), Settings::DefaultWindowWidth);
 	QVERIFY(settings.loadProblem().isEmpty());
@@ -70,6 +73,9 @@ void TestSettings::savedChangesComeBack()
 		settings.setLanguage(Settings::ChineseSimplified);
 		settings.setNotifyTurnDone(false);
 		settings.setSidebarVisible(false);
+		settings.setSidebarTodoExpanded(false);
+		settings.setSidebarRunningExpanded(false);
+		settings.setSidebarHistoryExpanded(false);
 		settings.setSidebarWidth(340);
 		settings.setWindowWidth(1200);
 		settings.setWindowHeight(800);
@@ -81,6 +87,9 @@ void TestSettings::savedChangesComeBack()
 	QVERIFY(!again.notifyTurnDone());
 	QVERIFY(again.notifyPermission());
 	QVERIFY(!again.sidebarVisible());
+	QVERIFY(!again.sidebarTodoExpanded());
+	QVERIFY(!again.sidebarRunningExpanded());
+	QVERIFY(!again.sidebarHistoryExpanded());
 	QCOMPARE(again.sidebarWidth(), 340);
 	QCOMPARE(again.windowWidth(), 1200);
 	QCOMPARE(again.windowHeight(), 800);
@@ -155,17 +164,23 @@ void TestSettings::unknownValuesAreIgnoredAndReported()
 {
 	QTemporaryDir dir;
 	const QString path = dir.filePath(u"gui.json"_s);
-	writeFile(path, R"({"theme":"purple","language":"zh_CN","sidebar":{"visible":"yes","width":"wide"},"window":{"width":5,"height":700}})");
+	writeFile(path, R"({"theme":"purple","language":"zh_CN","sidebar":{"visible":"yes","todoExpanded":"no","runningExpanded":1,"historyExpanded":{},"width":"wide"},"window":{"width":5,"height":700}})");
 	const Settings settings(path);
 	QCOMPARE(settings.theme(), Settings::System);
 	QCOMPARE(settings.language(), Settings::ChineseSimplified); // the valid fields still count
 	QVERIFY(settings.sidebarVisible());
+	QVERIFY(settings.sidebarTodoExpanded());
+	QVERIFY(settings.sidebarRunningExpanded());
+	QVERIFY(settings.sidebarHistoryExpanded());
 	QCOMPARE(settings.sidebarWidth(), Settings::DefaultSidebarWidth);
 	QCOMPARE(settings.windowWidth(), Settings::DefaultWindowWidth);
 	QCOMPARE(settings.windowHeight(), 700);
 	const QString problem = settings.loadProblem();
 	QVERIFY(problem.contains(u"theme"_s));
 	QVERIFY(problem.contains(u"sidebar.visible"_s));
+	QVERIFY(problem.contains(u"sidebar.todoExpanded"_s));
+	QVERIFY(problem.contains(u"sidebar.runningExpanded"_s));
+	QVERIFY(problem.contains(u"sidebar.historyExpanded"_s));
 	QVERIFY(problem.contains(u"sidebar.width"_s));
 	QVERIFY(problem.contains(u"window.width"_s));
 }

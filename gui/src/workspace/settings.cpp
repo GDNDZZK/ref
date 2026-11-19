@@ -30,6 +30,9 @@ const QString TurnDoneKey = u"turnDone"_s;
 const QString TurnErrorKey = u"turnError"_s;
 const QString SidebarKey = u"sidebar"_s;
 const QString VisibleKey = u"visible"_s;
+const QString TodoExpandedKey = u"todoExpanded"_s;
+const QString RunningExpandedKey = u"runningExpanded"_s;
+const QString HistoryExpandedKey = u"historyExpanded"_s;
 const QString WindowKey = u"window"_s;
 const QString WidthKey = u"width"_s;
 const QString HeightKey = u"height"_s;
@@ -226,6 +229,21 @@ void Settings::setSidebarVisible(bool visible)
 	set(m_sidebarVisible, visible, &Settings::sidebarVisibleChanged);
 }
 
+void Settings::setSidebarTodoExpanded(bool expanded)
+{
+	set(m_sidebarTodoExpanded, expanded, &Settings::sidebarTodoExpandedChanged);
+}
+
+void Settings::setSidebarRunningExpanded(bool expanded)
+{
+	set(m_sidebarRunningExpanded, expanded, &Settings::sidebarRunningExpandedChanged);
+}
+
+void Settings::setSidebarHistoryExpanded(bool expanded)
+{
+	set(m_sidebarHistoryExpanded, expanded, &Settings::sidebarHistoryExpandedChanged);
+}
+
 void Settings::setSidebarWidth(int width)
 {
 	set(m_sidebarWidth, std::clamp(width, MinSidebarWidth, MaxSidebarWidth), &Settings::sidebarWidthChanged);
@@ -290,6 +308,9 @@ void Settings::readFields(const QJsonObject& root)
 	readFlag(root, NotificationsKey, TurnErrorKey, m_notifyTurnError, problems);
 
 	readFlag(root, SidebarKey, VisibleKey, m_sidebarVisible, problems);
+	readFlag(root, SidebarKey, TodoExpandedKey, m_sidebarTodoExpanded, problems);
+	readFlag(root, SidebarKey, RunningExpandedKey, m_sidebarRunningExpanded, problems);
+	readFlag(root, SidebarKey, HistoryExpandedKey, m_sidebarHistoryExpanded, problems);
 	readSidebarWidth(root, SidebarKey, WidthKey, m_sidebarWidth, problems);
 	readEdge(root, WindowKey, WidthKey, m_windowWidth, problems);
 	readEdge(root, WindowKey, HeightKey, m_windowHeight, problems);
@@ -315,6 +336,9 @@ QJsonObject Settings::toJson() const
 
 	QJsonObject sidebar = section(root, SidebarKey);
 	sidebar.insert(VisibleKey, m_sidebarVisible);
+	sidebar.insert(TodoExpandedKey, m_sidebarTodoExpanded);
+	sidebar.insert(RunningExpandedKey, m_sidebarRunningExpanded);
+	sidebar.insert(HistoryExpandedKey, m_sidebarHistoryExpanded);
 	sidebar.insert(WidthKey, m_sidebarWidth);
 	root.insert(SidebarKey, sidebar);
 
