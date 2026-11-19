@@ -15,4 +15,7 @@ QtObject {
 	readonly property string agents: "agents"
 	readonly property string models: "models"
 	readonly property string palette: "palette"
+	readonly property string uiZoomIn: "ui-zoom-in"
+	readonly property string uiZoomOut: "ui-zoom-out"
+	readonly property string uiZoomReset: "ui-zoom-reset"
 }

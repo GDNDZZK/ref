@@ -77,6 +77,7 @@ public:
 	const QString& creatorId() const { return m_creatorId; }
 	void setCurrentId(const QString& id);
 	void setTileIds(const QStringList& ids);
+	void setLiveOrder(const QStringList& ids);
 
 	// The row of the session, or -1 when it is not listed (also when filtered out).
 	Q_INVOKABLE int indexOf(const QString& sessionId) const;
@@ -145,6 +146,7 @@ private:
 	QString m_creatorId;
 	QString m_currentId;
 	QStringList m_tileIds;
+	QHash<QString, int> m_liveOrder;
 	QHash<QString, proto::SessionInfo> m_all;
 	QList<Row> m_rows; // the listed ones, in order
 };

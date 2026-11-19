@@ -52,6 +52,11 @@ Workspace::Workspace(refgui::cli::LaunchOptions options, QString settingsPath, Q
 	});
 	connect(&m_commands, &refgui::workspace::CommandRegistry::unavailable, this, [this] { toastCommandUnavailable(); });
 
+	connect(&m_settings, &refgui::workspace::Settings::sidebarRunningOrderChanged, this, [this] {
+		m_directory.setLiveOrder(m_settings.sidebarRunningOrder());
+	});
+	m_directory.setLiveOrder(m_settings.sidebarRunningOrder());
+
 	m_effectiveCwd = m_cwd;
 	m_config.setCwd(m_effectiveCwd);
 	registerCommands();
@@ -628,6 +633,39 @@ QCoro::Task<> Workspace::closeTask(QString sessionId)
 	handleGone(sessionId);
 }
 
+void Workspace::moveRunningSession(const QString& sessionId, int toIndex)
+{
+	const auto& live = m_directory.live();
+	const int count = live.count();
+	if(sessionId.isEmpty() || count <= 1)
+	{
+		return;
+	}
+	QStringList order;
+	order.reserve(count);
+	int fromIndex = -1;
+	for(int row = 0; row < count; ++row)
+	{
+		const QString id = live.data(live.index(row), refgui::workspace::SessionListModel::SessionIdRole).toString();
+		if(id == sessionId)
+		{
+			fromIndex = row;
+		}
+		order.append(id);
+	}
+	if(fromIndex < 0)
+	{
+		return;
+	}
+	const int clamped = std::clamp(toIndex, 0, count - 1);
+	if(clamped == fromIndex)
+	{
+		return;
+	}
+	order.move(fromIndex, clamped);
+	m_settings.setSidebarRunningOrder(order);
+}
+
 // A session ended, closed here or elsewhere: forgets it, and when it was the current one in single view
 // switches to another live session or leaves the workspace empty.
 void Workspace::handleGone(const QString& sessionId)
@@ -712,6 +750,23 @@ void Workspace::onLiveChanged()
 	}
 	// Closed sessions the backend no longer lists cannot come back.
 	m_leaving.removeIf([this, &now](const QString& id) { return !now.contains(id) && !m_chats.contains(id); });
+	const QStringList currentOrder = m_settings.sidebarRunningOrder();
+	if(!currentOrder.isEmpty())
+	{
+		QStringList pruned;
+		pruned.reserve(currentOrder.size());
+		for(const QString& id : currentOrder)
+		{
+			if(now.contains(id))
+			{
+				pruned.append(id);
+			}
+		}
+		if(pruned != currentOrder)
+		{
+			m_settings.setSidebarRunningOrder(pruned);
+		}
+	}
 	if(m_split)
 	{
 		syncTiles();

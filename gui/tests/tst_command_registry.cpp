@@ -71,6 +71,7 @@ private slots:
 	void singularAliasesAndCaseInsensitiveSlashesWork();
 	void typoSuggestionsAndSingleSlashTokenDetection();
 	void requiresArgsReflectsOptionalVsRequiredHints();
+	void uiZoomCommandsAreRegisteredWithUniqueShortcutsAndNeedNothing();
 };
 
 void TestCommandRegistry::idsShortcutsAndSlashNamesAreUnique()
@@ -294,6 +295,37 @@ void TestCommandRegistry::requiresArgsReflectsOptionalVsRequiredHints()
 	QVERIFY(!flagFor(u"close-session"_s));
 	QVERIFY(!flagFor(u"new"_s));
 	QVERIFY(!flagFor(u"custom:review"_s));
+}
+
+void TestCommandRegistry::uiZoomCommandsAreRegisteredWithUniqueShortcutsAndNeedNothing()
+{
+	Fixture f;
+	f.registry.setContext({.connected = false, .hasSession = false, .canDetach = false, .liveSessions = 0, .splitView = false});
+	QVERIFY(f.registry.run(u"ui-zoom-in"_s));
+	QVERIFY(f.registry.run(u"ui-zoom-out"_s));
+	QVERIFY(f.registry.run(u"ui-zoom-reset"_s));
+	QCOMPARE(f.ran, (QStringList{u"ui-zoom-in||"_s, u"ui-zoom-out||"_s, u"ui-zoom-reset||"_s}));
+
+	const auto entryFor = [&](const QString& id) {
+		for(const QVariant& item : f.registry.matching({}, false))
+		{
+			const QVariantMap map = item.toMap();
+			if(map.value(u"id"_s).toString() == id)
+			{
+				return map;
+			}
+		}
+		return QVariantMap{};
+	};
+	const QVariantMap zoomIn = entryFor(u"ui-zoom-in"_s);
+	const QVariantMap zoomOut = entryFor(u"ui-zoom-out"_s);
+	const QVariantMap zoomReset = entryFor(u"ui-zoom-reset"_s);
+	QCOMPARE(zoomIn.value(u"shortcut"_s).toString(), u"Ctrl+="_s);
+	QCOMPARE(zoomOut.value(u"shortcut"_s).toString(), u"Ctrl+-"_s);
+	QCOMPARE(zoomReset.value(u"shortcut"_s).toString(), u"Ctrl+0"_s);
+	QCOMPARE(zoomIn.value(u"category"_s).toString(), u"View"_s);
+	QCOMPARE(zoomOut.value(u"category"_s).toString(), u"View"_s);
+	QCOMPARE(zoomReset.value(u"category"_s).toString(), u"View"_s);
 }
 QTEST_GUILESS_MAIN(TestCommandRegistry)
 #include "tst_command_registry.moc"

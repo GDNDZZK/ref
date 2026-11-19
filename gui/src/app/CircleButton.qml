@@ -33,10 +33,12 @@ Item {
 
 	HoverHandler {
 		id: hover
+		enabled: button.enabled
 		cursorShape: Qt.PointingHandCursor
 	}
 	TapHandler {
 		id: tap
+		enabled: button.enabled
 		onTapped: button.clicked()
 	}
 

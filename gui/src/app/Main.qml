@@ -60,7 +60,7 @@ Window {
 	function pointInItem(item, scenePos) {
 		if (!item.visible)
 			return false
-		const p = page.mapToItem(item, scenePos.x, scenePos.y)
+		const p = item.mapFromItem(null, scenePos.x, scenePos.y)
 		return p.x >= 0 && p.y >= 0 && p.x <= item.width && p.y <= item.height
 	}
 
@@ -110,6 +110,12 @@ Window {
 		value: window.wantsDark
 	}
 
+	Binding {
+		target: UiScale
+		property: "factor"
+		value: Workspace.settings.uiScale
+	}
+
 	Connections {
 		target: Workspace
 
@@ -140,9 +146,16 @@ Window {
 
 		delegate: Shortcut {
 			required property var model
+			readonly property bool isZoomCommand: model.commandId === CommandId.uiZoomIn
+				|| model.commandId === CommandId.uiZoomOut
+				|| model.commandId === CommandId.uiZoomReset
 
 			sequence: model.shortcut
-			enabled: model.shortcut !== "" && model.enabled && (Workspace.dialog === "" || (Workspace.dialog === DialogId.palette && model.commandId === CommandId.palette))
+			enabled: model.shortcut !== "" && model.enabled && (
+				Workspace.dialog === ""
+				|| (Workspace.dialog === DialogId.palette && model.commandId === CommandId.palette)
+				|| (Workspace.dialog !== DialogId.palette && isZoomCommand)
+			)
 			autoRepeat: false
 			onActivated: {
 				if (Workspace.dialog === DialogId.palette && model.commandId === CommandId.palette)
@@ -151,6 +164,12 @@ Window {
 					Commands.run(model.commandId)
 			}
 		}
+	}
+	Shortcut {
+		sequences: ["Ctrl++", "Ctrl+Shift+="]
+		enabled: Workspace.dialog !== DialogId.palette
+		autoRepeat: false
+		onActivated: Commands.run(CommandId.uiZoomIn)
 	}
 	Shortcut {
 		sequence: "Ctrl+T"
@@ -174,6 +193,13 @@ Window {
 		}
 	}
 
+	Item {
+		id: scaledRoot
+		objectName: "scaledRoot"
+		transformOrigin: Item.TopLeft
+		scale: Workspace.settings.uiScale
+		width: window.width / scale
+		height: window.height / scale
 	Item {
 		id: page
 		anchors.fill: parent
@@ -456,6 +482,7 @@ Window {
 			window.allowDirtyWindowClose = true
 			window.close()
 		}
+	}
 	}
 
 	WindowResizeHandles {

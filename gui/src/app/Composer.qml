@@ -190,6 +190,7 @@ Item {
 				Basic.ContextMenu.menu: Basic.Menu {
 					id: editMenu
 					objectName: "composerContextMenu"
+					font.pixelSize: Math.round(Theme.secondaryFontSize * Workspace.settings.uiScale)
 					palette.window: Theme.surface
 					palette.windowText: Theme.text
 					palette.dark: Theme.border

@@ -272,12 +272,15 @@ FocusScope {
 
 	Popup {
 		id: popup
+		readonly property real uiScale: Workspace.settings.uiScale
+
 		y: box.height + 4
-		width: Math.max(box.width, 200)
-		height: Math.min(field.filteredOptions.length, field.maxVisibleRows) * field.optionRowHeight + 8
-		padding: 4
+		width: popupInner.width * uiScale
+		height: popupInner.height * uiScale
+		padding: 0
 		visible: false
 		closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+		background: null
 
 		enter: Transition {
 			NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Motion.quick; easing.type: Motion.ease }
@@ -287,15 +290,26 @@ FocusScope {
 			NumberAnimation { property: "opacity"; to: 0; duration: Motion.quick; easing.type: Motion.ease }
 		}
 
-		background: Rectangle {
-			radius: Theme.radius
-			color: Theme.surface
-			border.color: Theme.border
-		}
+		contentItem: Item {
+			Item {
+				id: popupInner
+				readonly property int popupPadding: 4
+				width: Math.max(box.width, 200)
+				height: Math.min(field.filteredOptions.length, field.maxVisibleRows) * field.optionRowHeight + 2 * popupPadding
+				transformOrigin: Item.TopLeft
+				scale: popup.uiScale
 
-		contentItem: ListView {
-			id: listView
-			clip: true
+				Rectangle {
+					anchors.fill: parent
+					radius: Theme.radius
+					color: Theme.surface
+					border.color: Theme.border
+				}
+
+				ListView {
+					id: listView
+					anchors { fill: parent; margins: popupInner.popupPadding }
+					clip: true
 			boundsBehavior: Flickable.StopAtBounds
 			model: field.filteredOptions
 			highlightFollowsCurrentItem: false
@@ -367,6 +381,8 @@ FocusScope {
 			}
 
 			ScrollBar.vertical: ThemedScrollBar {}
+		}
+			}
 		}
 	}
 

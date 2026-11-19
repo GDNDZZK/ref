@@ -377,6 +377,21 @@
     </message>
     <message>
         <location filename="../src/workspace/command_registry.cpp" line="109"/>
+        <source>Zoom in interface</source>
+        <translation>放大界面</translation>
+    </message>
+    <message>
+        <location filename="../src/workspace/command_registry.cpp" line="110"/>
+        <source>Zoom out interface</source>
+        <translation>缩小界面</translation>
+    </message>
+    <message>
+        <location filename="../src/workspace/command_registry.cpp" line="111"/>
+        <source>Reset interface zoom</source>
+        <translation>重置界面缩放</translation>
+    </message>
+    <message>
+        <location filename="../src/workspace/command_registry.cpp" line="109"/>
         <source>MCP servers: status, errors and tools</source>
         <translation>MCP 服务器：状态、错误和工具</translation>
     </message>
@@ -3146,6 +3161,16 @@ $ARGUMENTS</translation>
         <location filename="../src/app/SettingsDialog.qml" line="54"/>
         <source>Language</source>
         <translation>语言</translation>
+    </message>
+    <message>
+        <location filename="../src/app/SettingsDialog.qml" line="84"/>
+        <source>Interface zoom</source>
+        <translation>界面缩放</translation>
+    </message>
+    <message>
+        <location filename="../src/app/SettingsDialog.qml" line="98"/>
+        <source>Reset</source>
+        <translation>重置</translation>
     </message>
     <message>
         <location filename="../src/app/SettingsDialog.qml" line="84"/>

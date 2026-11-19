@@ -154,6 +154,7 @@ set(tool_block_singletons
 	Fields.qml
 	SessionTools.qml
 	TodoStatus.qml
+	UiScale.qml
 )
 set(tool_block_qml_names
 	${tool_block_singletons}

@@ -169,6 +169,23 @@ bool SessionListModel::before(const Row& a, const Row& b) const
 	{
 		return a.live;
 	}
+	if(a.live && !m_liveOrder.isEmpty())
+	{
+		const int orderA = m_liveOrder.value(a.id, -1);
+		const int orderB = m_liveOrder.value(b.id, -1);
+		if(orderA != orderB)
+		{
+			if(orderA < 0)
+			{
+				return true;
+			}
+			if(orderB < 0)
+			{
+				return false;
+			}
+			return orderA < orderB;
+		}
+	}
 	const qint64 left = a.live ? a.createdAt : a.updatedAt;
 	const qint64 right = a.live ? b.createdAt : b.updatedAt;
 	if(left != right)
@@ -247,6 +264,25 @@ void SessionListModel::setTileIds(const QStringList& ids)
 	{
 		emitRowChanged(id);
 	}
+}
+
+void SessionListModel::setLiveOrder(const QStringList& ids)
+{
+	QHash<QString, int> next;
+	int rank = 0;
+	for(const QString& id : ids)
+	{
+		if(!id.isEmpty() && !next.contains(id))
+		{
+			next.insert(id, rank++);
+		}
+	}
+	if(next == m_liveOrder)
+	{
+		return;
+	}
+	m_liveOrder = std::move(next);
+	rebuild();
 }
 
 void SessionListModel::emitRowChanged(const QString& id)

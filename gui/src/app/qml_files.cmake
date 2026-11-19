@@ -15,6 +15,7 @@ set(REFGUI_APP_SINGLETONS
 	MessageSource.qml
 	Fields.qml
 	SessionTools.qml
+	UiScale.qml
 )
 
 set(REFGUI_APP_QML_NAMES
@@ -109,6 +110,7 @@ set(REFGUI_APP_QML_NAMES
 	Icon.qml
 	Theme.qml
 	Motion.qml
+	UiScale.qml
 	ChatView.qml
 	Block.qml
 	UserBlock.qml
