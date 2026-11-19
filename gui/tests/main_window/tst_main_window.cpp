@@ -2023,7 +2023,39 @@ void TestMainWindow::sidebarSectionsCollapseExpandAndResizeWithoutOscillation()
 	QTRY_VERIFY(runningList->isVisible());
 	QTRY_COMPARE(qRound(runningList->height()), qRound(runningHeightWithHistory));
 
-	QVERIFY2(warningSpy.isEmpty(), "Sidebar collapse/expand or drag emitted QML warnings");
+	// Keyboard focus and Return / Enter / Space toggle on SectionHeader, plus visible focus border.
+	auto* runningBg = findByTypePrefix(runningHeader, "QQuickRectangle");
+	QVERIFY(runningBg);
+	runningHeader->forceActiveFocus();
+	QTRY_VERIFY(runningHeader->hasActiveFocus());
+	QTRY_VERIFY(runningBg->property("border").value<QObject*>() != nullptr);
+	QCOMPARE(runningBg->property("border").value<QObject*>()->property("width").toReal(), 1.0);
+	QTRY_VERIFY(runningBg->property("border").value<QObject*>()->property("color").value<QColor>().alpha() > 0);
+	QTest::keyClick(window, Qt::Key_Space);
+	QVERIFY(!f.workspace->settings()->sidebarRunningExpanded());
+	QTest::keyClick(window, Qt::Key_Return);
+	QVERIFY(f.workspace->settings()->sidebarRunningExpanded());
+	QTest::keyClick(window, Qt::Key_Enter);
+	QVERIFY(!f.workspace->settings()->sidebarRunningExpanded());
+	QTest::keyClick(window, Qt::Key_Enter);
+	QVERIFY(f.workspace->settings()->sidebarRunningExpanded());
+	QTRY_VERIFY(runningList->isVisible());
+
+	// At ~580px height, collapsed Todo must not show a dangling header that vanishes on expand.
+	const int originalWindowHeight = window->height();
+	f.workspace->settings()->setSidebarTodoExpanded(false);
+	window->setHeight(580);
+	QTRY_VERIFY(!sidebar->property("todoFits").toBool());
+	QTRY_VERIFY(!todoSection->isVisible());
+	QCOMPARE(qRound(todoSection->height()), 0);
+	window->setHeight(originalWindowHeight);
+	QTRY_VERIFY(sidebar->property("todoFits").toBool());
+	QTRY_VERIFY(todoSection->isVisible());
+	QTRY_COMPARE(qRound(todoSection->height()), qRound(todoHeader->height()));
+	f.workspace->settings()->setSidebarTodoExpanded(true);
+	QTRY_VERIFY(todoFlickable->isVisible());
+
+	QVERIFY2(warningSpy.isEmpty(), "Sidebar collapse/expand, keyboard toggle, or drag emitted QML warnings");
 }
 
 QTEST_MAIN(TestMainWindow)
