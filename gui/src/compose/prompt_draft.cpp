@@ -72,6 +72,10 @@ void PromptDraft::removeAttachment(qsizetype index)
 {
 	const QString token = m_attachments.at(index).token;
 	m_attachments.removeAt(index);
+	if(m_attachments.isEmpty())
+	{
+		m_lastImageNumber = 0;
+	}
 
 	const qsizetype at = m_text.indexOf(token);
 	if(at < 0)
@@ -160,11 +164,16 @@ void PromptDraft::clear()
 	m_text.clear();
 	m_cursor = 0;
 	m_attachments.clear();
+	m_lastImageNumber = 0;
 }
 
 void PromptDraft::dropOrphans()
 {
 	m_attachments.removeIf([this](const Attachment& attachment) { return !m_text.contains(attachment.token); });
+	if(m_attachments.isEmpty())
+	{
+		m_lastImageNumber = 0;
+	}
 }
 
 QList<PromptDraft::TokenSpan> PromptDraft::tokenSpans() const

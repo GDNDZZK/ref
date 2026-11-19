@@ -75,7 +75,7 @@ private:
 	QString m_text;
 	qsizetype m_cursor = 0;
 	QList<Attachment> m_attachments;
-	int m_lastImageNumber = 0; // numbers keep rising after the draft is emptied, as in the TUI
+	int m_lastImageNumber = 0; // resets to 0 whenever the draft has no attachments
 };
 
 } // namespace refgui::compose
