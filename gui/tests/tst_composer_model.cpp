@@ -268,6 +268,7 @@ private slots:
 	void atomicImagePlaceholderHelpersSyncDraftAndAttachments();
 	void midTextSlashReplacementAndShellWrapperCompletionWork();
 	void imageNumberingResetsPerDraft();
+	void undoRedoSyncAttachmentsAndHistoryAvoidsTokenCollision();
 };
 
 void TestComposerModel::labelsFollowTheSessionAndTheConfiguration()
@@ -1013,6 +1014,7 @@ void TestComposerModel::midTextSlashReplacementAndShellWrapperCompletionWork()
 	QTRY_COMPARE(f.composer.completions()->rowCount(), 1);
 	QCOMPARE(f.composer.completions()->index(0, 0).data(composer::CompletionItemModel::ValueRole).toString(), u"docker"_s);
 }
+
 void TestComposerModel::imageNumberingResetsPerDraft()
 {
 	Fixture f;
@@ -1057,5 +1059,60 @@ void TestComposerModel::imageNumberingResetsPerDraft()
 	QVERIFY(f.composer.pasteFromClipboard());
 	QCOMPARE(f.composer.text(), u"[Image 1] "_s);
 }
+
+void TestComposerModel::undoRedoSyncAttachmentsAndHistoryAvoidsTokenCollision()
+{
+	Fixture f;
+	QImage img(4, 4, QImage::Format_RGB32);
+	img.fill(Qt::green);
+	QGuiApplication::clipboard()->setImage(img);
+
+	// Attach -> type word char-by-char -> undo restores "[Image 1] " with attachment -> undo restores "" -> redo.
+	QVERIFY(f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.text(), u"[Image 1] "_s);
+	f.composer.edit(u"[Image 1] w"_s, 11);
+	f.composer.edit(u"[Image 1] wo"_s, 12);
+	f.composer.edit(u"[Image 1] wor"_s, 13);
+	f.composer.edit(u"[Image 1] word"_s, 14);
+	QVERIFY(f.composer.undo());
+	QCOMPARE(f.composer.text(), u"[Image 1] "_s);
+	QCOMPARE(f.composer.attachments()->rowCount(), 1);
+	QVERIFY(f.composer.undo());
+	QCOMPARE(f.composer.text(), QString());
+	QCOMPARE(f.composer.attachments()->rowCount(), 0);
+	QVERIFY(!f.composer.undo());
+	QVERIFY(f.composer.redo());
+	QCOMPARE(f.composer.text(), u"[Image 1] "_s);
+	QCOMPARE(f.composer.attachments()->rowCount(), 1);
+	QVERIFY(f.composer.redo());
+	QCOMPARE(f.composer.text(), u"[Image 1] word"_s);
+	QCOMPARE(f.composer.attachments()->rowCount(), 1);
+
+	// Selection-delete/cut -> undo restores attachment and m_lastImageNumber == 1.
+	f.type(QString());
+	QCOMPARE(f.composer.attachments()->rowCount(), 0);
+	QVERIFY(f.composer.undo());
+	QCOMPARE(f.composer.text(), u"[Image 1] word"_s);
+	QCOMPARE(f.composer.attachments()->rowCount(), 1);
+	QVERIFY(f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.attachments()->rowCount(), 2);
+	QCOMPARE(f.composer.attachments()->index(1, 0).data(composer::AttachmentModel::TokenRole).toString(), u"[Image 2]"_s);
+
+	// Submit clears undo/redo history.
+	QVERIFY(f.composer.submit());
+	QTRY_COMPARE(f.requestsOf(u"prompt"_s).size(), 1);
+	QVERIFY(!f.composer.undo());
+	QVERIFY(!f.composer.redo());
+
+	// History recall with "[Image 1] explain" + attach yields [Image 2].
+	f.history.push(u"[Image 1] explain"_s);
+	QVERIFY(f.composer.historyPrevious());
+	QCOMPARE(f.composer.text(), u"[Image 1] explain"_s);
+	QVERIFY(f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.text(), u"[Image 1] explain [Image 2] "_s);
+	QCOMPARE(f.composer.attachments()->rowCount(), 1);
+	QCOMPARE(f.composer.attachments()->index(0, 0).data(composer::AttachmentModel::TokenRole).toString(), u"[Image 2]"_s);
+}
+
 QTEST_MAIN(TestComposerModel)
 #include "tst_composer_model.moc"

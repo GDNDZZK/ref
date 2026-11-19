@@ -1005,7 +1005,7 @@ bool ComposerModel::submit()
 		const QString command = m_draft.text().trimmed();
 		m_history.push(ShellPrefix + command);
 		setShellMode(false);
-		m_draft.clear();
+		m_draft.take();
 		changeDraft();
 		sendShell(command);
 		return true;
@@ -1028,7 +1028,7 @@ void ComposerModel::finishCommand()
 	m_forceShellEmpty = false;
 	m_browser.reset();
 	m_history.push(m_draft.text());
-	m_draft.clear();
+	m_draft.take();
 	changeDraft();
 }
 
@@ -1487,6 +1487,32 @@ bool ComposerModel::deletePlaceholderAt(int cursor, bool backward)
 	m_browser.reset();
 	changeDraft();
 	emit userEdited();
+	return true;
+}
+
+bool ComposerModel::undo()
+{
+	if(!m_draft.undo())
+	{
+		return false;
+	}
+	m_forceShellEmpty = false;
+	m_completionDismissed = false;
+	m_browser.reset();
+	changeDraft();
+	return true;
+}
+
+bool ComposerModel::redo()
+{
+	if(!m_draft.redo())
+	{
+		return false;
+	}
+	m_forceShellEmpty = false;
+	m_completionDismissed = false;
+	m_browser.reset();
+	changeDraft();
 	return true;
 }
 

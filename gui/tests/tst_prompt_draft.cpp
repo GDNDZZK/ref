@@ -42,6 +42,8 @@ private slots:
 	void restoreGivesLeftoverImagesATokenAtTheEnd();
 	void restoreIgnoresNothing();
 	void atomicPlaceholderSnappingSelectionAndDeletion();
+	void nextTokenSkipsExistingTokensInTextAndRestore();
+	void undoAndRedoSyncAttachmentsAndNumbering();
 };
 
 void TestPromptDraft::attachInsertsTokenAtCursor()
@@ -221,5 +223,139 @@ void TestPromptDraft::atomicPlaceholderSnappingSelectionAndDeletion()
 	QCOMPARE(draft.text(), u"see and [Image 9]"_s);
 	QVERIFY(draft.attachments().isEmpty());
 }
+
+void TestPromptDraft::nextTokenSkipsExistingTokensInTextAndRestore()
+{
+	PromptDraft draft;
+	draft.setText(u"[Image 1] explain"_s, 17);
+	draft.attach(image(u"a"_s));
+	QCOMPARE(draft.text(), u"[Image 1] explain [Image 2] "_s);
+	QCOMPARE(dataOf(draft), QStringList{u"[Image 2]=a"_s});
+
+	// Plain text without [Image N] still starts at [Image 1].
+	draft.clear();
+	draft.setText(u"plain text"_s, 10);
+	draft.attach(image(u"b"_s));
+	QCOMPARE(draft.text(), u"plain text [Image 1] "_s);
+
+	// Multiple existing tokens in text are skipped without collision.
+	draft.clear();
+	draft.setText(u"see [Image 1] and [Image 3]"_s, 27);
+	draft.attach(image(u"c"_s));
+	draft.attach(image(u"d"_s));
+	QCOMPARE(dataOf(draft), (QStringList{u"[Image 2]=c"_s, u"[Image 4]=d"_s}));
+
+	// Unbound tokens left in restored text are skipped on subsequent attach and during restore.
+	draft.clear();
+	draft.restore(u"[Image 1] [Image 2]"_s, {image(u"e"_s)});
+	QCOMPARE(draft.text(), u"[Image 1] [Image 2]"_s);
+	draft.attach(image(u"f"_s));
+	QCOMPARE(dataOf(draft), (QStringList{u"[Image 1]=e"_s, u"[Image 3]=f"_s}));
+
+	draft.clear();
+	draft.attach(image(u"g"_s));
+	draft.restore(u"[Image 1] [Image 2]"_s, {image(u"h"_s)});
+	QCOMPARE(draft.text(), u"[Image 1]\n\n[Image 3] [Image 2]"_s);
+	QCOMPARE(dataOf(draft), (QStringList{u"[Image 1]=g"_s, u"[Image 3]=h"_s}));
+}
+
+void TestPromptDraft::undoAndRedoSyncAttachmentsAndNumbering()
+{
+	PromptDraft draft;
+	QVERIFY(!draft.undo());
+	QVERIFY(!draft.redo());
+
+	// Attach -> type word char-by-char -> undo back to "[Image 1] " -> undo back to "" -> redo.
+	draft.attach(image(u"a"_s));
+	draft.setText(u"[Image 1] w"_s, 11);
+	draft.setText(u"[Image 1] wo"_s, 12);
+	draft.setText(u"[Image 1] wor"_s, 13);
+	draft.setText(u"[Image 1] word"_s, 14);
+	QVERIFY(draft.undo());
+	QCOMPARE(draft.text(), u"[Image 1] "_s);
+	QCOMPARE(draft.cursor(), 10);
+	QCOMPARE(dataOf(draft), QStringList{u"[Image 1]=a"_s});
+	QVERIFY(draft.undo());
+	QCOMPARE(draft.text(), QString());
+	QCOMPARE(draft.cursor(), 0);
+	QVERIFY(draft.attachments().isEmpty());
+	QVERIFY(!draft.undo());
+	QVERIFY(draft.redo());
+	QCOMPARE(draft.text(), u"[Image 1] "_s);
+	QCOMPARE(dataOf(draft), QStringList{u"[Image 1]=a"_s});
+	QVERIFY(draft.redo());
+	QCOMPARE(draft.text(), u"[Image 1] word"_s);
+	QCOMPARE(draft.cursor(), 14);
+	QVERIFY(!draft.redo());
+
+	// Deleting the entire draft (e.g. Ctrl+A + Delete/Cut) and undoing restores attachment and image numbering.
+	draft.setText(QString(), 0);
+	QVERIFY(draft.attachments().isEmpty());
+	QVERIFY(draft.undo());
+	QCOMPARE(draft.text(), u"[Image 1] word"_s);
+	QCOMPARE(dataOf(draft), QStringList{u"[Image 1]=a"_s});
+	draft.attach(image(u"b"_s));
+	QCOMPARE(dataOf(draft), (QStringList{u"[Image 1]=a"_s, u"[Image 2]=b"_s}));
+
+	// Spaces and independent cursor moves start new undo boundaries.
+	draft.clear();
+	draft.setText(u"h"_s, 1);
+	draft.setText(u"hi"_s, 2);
+	draft.setText(u"hi "_s, 3);
+	draft.setText(u"hi t"_s, 4);
+	draft.setText(u"hi to"_s, 5);
+	draft.setCursor(3);
+	draft.setCursor(5);
+	draft.setText(u"hi to!"_s, 6);
+	QVERIFY(draft.undo());
+	QCOMPARE(draft.text(), u"hi to"_s);
+	QVERIFY(draft.undo());
+	QCOMPARE(draft.text(), u"hi "_s);
+	QVERIFY(draft.undo());
+	QCOMPARE(draft.text(), u"hi"_s);
+	QVERIFY(draft.undo());
+	QCOMPARE(draft.text(), QString());
+	// Undo after clear() recovers the cleared draft.
+	QVERIFY(draft.undo());
+	QCOMPARE(dataOf(draft), (QStringList{u"[Image 1]=a"_s, u"[Image 2]=b"_s}));
+
+	// take() clears undo and redo history.
+	QCOMPARE(draft.take().images.size(), 2);
+	QVERIFY(!draft.undo());
+	QVERIFY(!draft.redo());
+
+	// Discrete helpers (insertPath, deletePlaceholderAt, removeAttachment, restore) are undoable.
+	draft.insertPath(u"src/main.cpp"_s);
+	QCOMPARE(draft.text(), u"src/main.cpp "_s);
+	QVERIFY(draft.undo());
+	QCOMPARE(draft.text(), QString());
+	draft.attach(image(u"c"_s));
+	QVERIFY(draft.deletePlaceholderAt(9, true));
+	QVERIFY(draft.attachments().isEmpty());
+	QVERIFY(draft.undo());
+	QCOMPARE(dataOf(draft), QStringList{u"[Image 1]=c"_s});
+	draft.removeAttachment(0);
+	QVERIFY(draft.attachments().isEmpty());
+	QVERIFY(draft.undo());
+	QCOMPARE(dataOf(draft), QStringList{u"[Image 1]=c"_s});
+	draft.restore(u"old [Image 5]"_s, {image(u"d"_s)});
+	QCOMPARE(dataOf(draft), (QStringList{u"[Image 1]=c"_s, u"[Image 2]=d"_s}));
+	QVERIFY(draft.undo());
+	QCOMPARE(dataOf(draft), QStringList{u"[Image 1]=c"_s});
+
+	// Undo history is capped at 200 snapshots.
+	draft.clear();
+	for(int i = 1; i <= 210; ++i)
+	{
+		draft.setText(u"step %1"_s.arg(i), 7);
+	}
+	int undoCount = 0;
+	while(draft.undo())
+	{
+		++undoCount;
+	}
+	QCOMPARE(undoCount, 200);
+}
+
 QTEST_GUILESS_MAIN(TestPromptDraft)
 #include "tst_prompt_draft.moc"
