@@ -463,8 +463,8 @@ Column {
 				showReset: { void section.editor.revision; return section.editor.contains(["mcp", serverCard.serverName, "timeout"]) }
 				onResetClicked: {
 					section.forceActiveFocus()
-					timeoutField.resetState()
 					section.editor.removeAt(["mcp", serverCard.serverName, "timeout"], false)
+					timeoutField.resetState()
 				}
 
 				NumberField {
@@ -557,9 +557,9 @@ Column {
 					}
 					onResetClicked: {
 						section.forceActiveFocus()
-						envEditor.resetState()
 						section.editor.removeAt(["mcp", serverCard.serverName, "environment"], false)
 						section.editor.removeAt(["mcp", serverCard.serverName, "env"], false)
+						envEditor.resetState()
 					}
 
 					KeyValueEditor {
@@ -611,8 +611,8 @@ Column {
 					showReset: { void section.editor.revision; return section.editor.contains(["mcp", serverCard.serverName, "headers"]) }
 					onResetClicked: {
 						section.forceActiveFocus()
-						headersEditor.resetState()
 						section.editor.removeAt(["mcp", serverCard.serverName, "headers"], false)
+						headersEditor.resetState()
 					}
 
 					KeyValueEditor {

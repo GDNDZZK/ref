@@ -402,6 +402,13 @@ Column {
 			}
 		}
 
+		function resetLimit(limitKey, field) {
+			section.forceActiveFocus()
+			mMutate(() => setModelLimit(limitKey, undefined))
+			field.value = undefined
+			field.resetState()
+		}
+
 		function syncModelCard() {
 			const nextVars = section.editor.keysAt(mPath(["variants"]))
 			if (!section.sameKeys(variantKeys, nextVars))
@@ -762,14 +769,11 @@ Column {
 				controlWidth: 200
 				showDivider: true
 				showReset: { void section.editor.revision; return section.editor.contains(modelCard.mPath(["limit", "context"])) }
-				onResetClicked: {
-					section.forceActiveFocus()
-					ctxLimitField.resetState()
-					modelCard.mMutate(() => modelCard.setModelLimit("context", undefined))
-				}
+				onResetClicked: modelCard.resetLimit("context", ctxLimitField)
 
 				NumberField {
 					id: ctxLimitField
+					objectName: "modelContextField_" + modelCard.providerId + "_" + modelCard.modelKey
 					width: parent.width
 					minimum: 1
 					step: 8192
@@ -784,11 +788,7 @@ Column {
 				controlWidth: 200
 				showDivider: true
 				showReset: { void section.editor.revision; return section.editor.contains(modelCard.mPath(["limit", "output"])) }
-				onResetClicked: {
-					section.forceActiveFocus()
-					outLimitField.resetState()
-					modelCard.mMutate(() => modelCard.setModelLimit("output", undefined))
-				}
+				onResetClicked: modelCard.resetLimit("output", outLimitField)
 
 				NumberField {
 					id: outLimitField
@@ -806,11 +806,7 @@ Column {
 				controlWidth: 200
 				showDivider: true
 				showReset: { void section.editor.revision; return section.editor.contains(modelCard.mPath(["limit", "compact"])) }
-				onResetClicked: {
-					section.forceActiveFocus()
-					compactLimitField.resetState()
-					modelCard.mMutate(() => modelCard.setModelLimit("compact", undefined))
-				}
+				onResetClicked: modelCard.resetLimit("compact", compactLimitField)
 
 				NumberField {
 					id: compactLimitField
@@ -828,11 +824,7 @@ Column {
 				controlWidth: 200
 				showDivider: true
 				showReset: { void section.editor.revision; return section.editor.contains(modelCard.mPath(["limit", "threshold"])) }
-				onResetClicked: {
-					section.forceActiveFocus()
-					threshLimitField.resetState()
-					modelCard.mMutate(() => modelCard.setModelLimit("threshold", undefined))
-				}
+				onResetClicked: modelCard.resetLimit("threshold", threshLimitField)
 
 				NumberField {
 					id: threshLimitField
@@ -855,8 +847,8 @@ Column {
 				showReset: { void section.editor.revision; return section.editor.contains(modelCard.mPath(["temperature"])) }
 				onResetClicked: {
 					section.forceActiveFocus()
-					mTempField.resetState()
 					section.editor.removeAt(modelCard.mPath(["temperature"]), false)
+					mTempField.resetState()
 				}
 
 				NumberField {
@@ -884,8 +876,8 @@ Column {
 				showReset: { void section.editor.revision; return section.editor.contains(modelCard.mPath(["top_p"])) }
 				onResetClicked: {
 					section.forceActiveFocus()
-					mTopPField.resetState()
 					section.editor.removeAt(modelCard.mPath(["top_p"]), false)
+					mTopPField.resetState()
 				}
 
 				NumberField {
@@ -1545,8 +1537,8 @@ Column {
 				showReset: { void section.editor.revision; return section.editor.contains(["provider", provCard.providerId, "env"]) }
 				onResetClicked: {
 					section.forceActiveFocus()
-					envVarsEditor.resetState()
 					section.editor.removeAt(["provider", provCard.providerId, "env"], false)
+					envVarsEditor.resetState()
 				}
 
 				StringListEditor {
@@ -1598,15 +1590,17 @@ Column {
 				showReset: { void section.editor.revision; return section.editor.contains(["provider", provCard.providerId, "options", "chunkTimeout"]) }
 				onResetClicked: {
 					section.forceActiveFocus()
-					chunkTimeoutField.resetState()
 					provCard.cardMutate(() => {
 						section.editor.removeAt(["provider", provCard.providerId, "options", "chunkTimeout"], false)
 						provCard.pruneEmptyProviderOptions()
 					})
+					chunkTimeoutField.value = undefined
+					chunkTimeoutField.resetState()
 				}
 
 				NumberField {
 					id: chunkTimeoutField
+					objectName: "providerChunkTimeout_" + provCard.providerId
 					width: parent.width
 					minimum: 0
 					step: 5000
@@ -1631,11 +1625,12 @@ Column {
 				showReset: { void section.editor.revision; return section.editor.contains(["provider", provCard.providerId, "options", "headers"]) }
 				onResetClicked: {
 					section.forceActiveFocus()
-					provHeadersEditor.resetState()
 					provCard.cardMutate(() => {
 						section.editor.removeAt(["provider", provCard.providerId, "options", "headers"], false)
 						provCard.pruneEmptyProviderOptions()
 					})
+					provHeadersEditor.loadFromEntries([])
+					provHeadersEditor.resetState()
 				}
 
 				KeyValueEditor {
@@ -1662,8 +1657,8 @@ Column {
 				showReset: { void section.editor.revision; return section.editor.contains(["provider", provCard.providerId, "whitelist"]) }
 				onResetClicked: {
 					section.forceActiveFocus()
-					whitelistEditor.resetState()
 					section.editor.removeAt(["provider", provCard.providerId, "whitelist"], false)
+					whitelistEditor.resetState()
 				}
 
 				StringListEditor {
@@ -1689,8 +1684,8 @@ Column {
 				showReset: { void section.editor.revision; return section.editor.contains(["provider", provCard.providerId, "blacklist"]) }
 				onResetClicked: {
 					section.forceActiveFocus()
-					blacklistEditor.resetState()
 					section.editor.removeAt(["provider", provCard.providerId, "blacklist"], false)
+					blacklistEditor.resetState()
 				}
 
 				StringListEditor {

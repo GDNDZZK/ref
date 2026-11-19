@@ -140,7 +140,11 @@ Column {
 		}
 
 		HoverHandler { cursorShape: Qt.PointingHandCursor }
-		TapHandler { onTapped: row.toggled(!row.checked) }
+		TapHandler {
+			gesturePolicy: TapHandler.ReleaseWithinBounds
+			grabPermissions: PointerHandler.CanTakeOverFromItems | PointerHandler.CanTakeOverFromHandlersOfSameType
+			onTapped: row.toggled(!row.checked)
+		}
 
 		Accessible.role: Accessible.CheckBox
 		Accessible.name: label.text

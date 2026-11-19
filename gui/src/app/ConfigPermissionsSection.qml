@@ -81,14 +81,22 @@ Column {
 		mutate(() => {
 			if (targetMode === "none") {
 				globalDelayField.value = undefined
+				globalDelayField.resetState()
 				delayMapEditor.loadFromEntries([])
+				delayMapEditor.resetState()
 				editor.removeAt(["delay"])
 			} else if (targetMode === "number") {
+				delayMapEditor.loadFromEntries([])
+				delayMapEditor.resetState()
 				globalDelayField.value = 2
+				globalDelayField.resetState()
 				editor.setValueAt(["delay"], 2)
 			} else {
 				const initial = [{ key: "bash", value: 2 }]
+				globalDelayField.value = undefined
+				globalDelayField.resetState()
 				delayMapEditor.loadFromEntries(initial)
+				delayMapEditor.resetState()
 				editor.setOrderedObjectAt(["delay"], initial, true, true)
 			}
 		})
@@ -132,8 +140,8 @@ Column {
 		showReset: { void section.editor.revision; return section.editor.contains(["permission"]) }
 		onResetClicked: {
 			section.forceActiveFocus()
-			permEditor.resetState()
 			section.editor.removeAt(["permission"])
+			permEditor.resetState()
 		}
 
 		PermissionRulesEditor {
@@ -171,9 +179,12 @@ Column {
 		showReset: { void section.editor.revision; return section.editor.contains(["delay"]) }
 		onResetClicked: {
 			section.forceActiveFocus()
-			globalDelayField.resetState()
-			delayMapEditor.resetState()
 			section.editor.removeAt(["delay"])
+			section.delayMode = "none"
+			globalDelayField.value = undefined
+			globalDelayField.resetState()
+			delayMapEditor.loadFromEntries([])
+			delayMapEditor.resetState()
 		}
 
 		Column {
@@ -239,8 +250,8 @@ Column {
 		resetText: qsTr("Remove legacy map")
 		onResetClicked: {
 			section.forceActiveFocus()
-			legacyToolsEditor.resetState()
 			section.editor.removeAt(["tools"])
+			legacyToolsEditor.resetState()
 		}
 
 		KeyValueEditor {

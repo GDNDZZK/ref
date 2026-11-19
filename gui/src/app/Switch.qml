@@ -69,17 +69,24 @@ FocusScope {
 		}
 	}
 
-	HoverHandler {
-		id: hover
-		enabled: control.enabled
-		cursorShape: Qt.PointingHandCursor
-	}
-	TapHandler {
-		id: tap
-		enabled: control.enabled
-		onTapped: {
-			control.forceActiveFocus()
-			control.toggle()
+	Item {
+		id: hitArea
+		anchors { fill: parent; leftMargin: -4; rightMargin: -4; topMargin: -8; bottomMargin: -8 }
+
+		HoverHandler {
+			id: hover
+			enabled: control.enabled
+			cursorShape: Qt.PointingHandCursor
+		}
+		TapHandler {
+			id: tap
+			enabled: control.enabled
+			gesturePolicy: TapHandler.ReleaseWithinBounds
+			grabPermissions: PointerHandler.CanTakeOverFromItems | PointerHandler.CanTakeOverFromHandlersOfSameType
+			onTapped: {
+				control.toggle()
+				control.forceActiveFocus()
+			}
 		}
 	}
 

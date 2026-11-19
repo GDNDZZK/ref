@@ -469,8 +469,8 @@ Column {
 					text: qsTr("Reset override")
 					onClicked: {
 						section.forceActiveFocus()
-						card.resetCardState()
 						section.editor.removeAt(["agent", card.agentName])
+						card.resetCardState()
 					}
 				}
 
@@ -617,8 +617,8 @@ Column {
 				showDivider: true
 				showReset: { void section.editor.revision; return section.editor.contains(["agent", card.agentName, "color"]) }
 				onResetClicked: {
-					colorPicker.resetState()
 					card.resetKey("color")
+					colorPicker.resetState()
 				}
 
 				ColorSwatchPicker {
@@ -721,8 +721,8 @@ Column {
 				showDivider: true
 				showReset: { void section.editor.revision; return section.editor.contains(["agent", card.agentName, "temperature"]) }
 				onResetClicked: {
-					tempField.resetState()
 					card.resetKey("temperature")
+					tempField.resetState()
 				}
 
 				NumberField {
@@ -749,8 +749,8 @@ Column {
 				showDivider: true
 				showReset: { void section.editor.revision; return section.editor.contains(["agent", card.agentName, "top_p"]) }
 				onResetClicked: {
-					topPField.resetState()
 					card.resetKey("top_p")
+					topPField.resetState()
 				}
 
 				NumberField {
@@ -796,8 +796,8 @@ Column {
 				showDivider: true
 				showReset: { void section.editor.revision; return section.editor.contains(["agent", card.agentName, "options"]) }
 				onResetClicked: {
-					optionsEditor.resetState()
 					card.resetKey("options")
+					optionsEditor.resetState()
 				}
 
 				KeyValueEditor {
@@ -822,8 +822,8 @@ Column {
 				showDivider: true
 				showReset: { void section.editor.revision; return section.editor.contains(["agent", card.agentName, "permission"]) }
 				onResetClicked: {
-					agentPermEditor.resetState()
 					card.resetKey("permission")
+					agentPermEditor.resetState()
 				}
 
 				PermissionRulesEditor {
@@ -844,9 +844,12 @@ Column {
 				stacked: true
 				showReset: { void section.editor.revision; return section.editor.contains(["agent", card.agentName, "delay"]) }
 				onResetClicked: {
-					agentDelayNumber.resetState()
-					agentDelayMap.resetState()
 					card.resetKey("delay")
+					card.delayMode = "inherit"
+					agentDelayNumber.value = undefined
+					agentDelayNumber.resetState()
+					agentDelayMap.loadFromEntries([])
+					agentDelayMap.resetState()
 				}
 
 				Column {
@@ -869,12 +872,22 @@ Column {
 							card.cardMutate(() => {
 								if (m === "inherit") {
 									section.editor.removeAt(["agent", card.agentName, "delay"], card.isBuiltin)
+									agentDelayNumber.value = undefined
+									agentDelayNumber.resetState()
+									agentDelayMap.loadFromEntries([])
+									agentDelayMap.resetState()
 								} else if (m === "number") {
+									agentDelayMap.loadFromEntries([])
+									agentDelayMap.resetState()
 									agentDelayNumber.value = 1
+									agentDelayNumber.resetState()
 									section.editor.setValueAt(["agent", card.agentName, "delay"], 1)
 								} else {
 									const init = [{ key: "bash", value: 1 }]
+									agentDelayNumber.value = undefined
+									agentDelayNumber.resetState()
 									agentDelayMap.loadFromEntries(init)
+									agentDelayMap.resetState()
 									section.editor.setOrderedObjectAt(["agent", card.agentName, "delay"], init, true, card.isBuiltin)
 								}
 							})
