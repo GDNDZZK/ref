@@ -33,7 +33,7 @@ class TestPromptDraft : public QObject
 private slots:
 	void attachInsertsTokenAtCursor();
 	void attachPadsAfterText();
-	void tokensKeepCountingAfterClear();
+	void tokensResetWhenDraftHasNoAttachments();
 	void editingTheTextDropsOrphanedImages();
 	void removingAnAttachmentRemovesItsToken();
 	void takeReturnsTextAndImages();
@@ -62,16 +62,64 @@ void TestPromptDraft::attachPadsAfterText()
 
 	draft.setText(u"line\n"_s, 5);
 	draft.attach(image(u"b"_s));
-	QVERIFY(draft.text().endsWith(u"line\n[Image 2] "_s));
+	QCOMPARE(draft.text(), u"line\n[Image 1] "_s);
 }
 
-void TestPromptDraft::tokensKeepCountingAfterClear()
+void TestPromptDraft::tokensResetWhenDraftHasNoAttachments()
 {
 	PromptDraft draft;
 	draft.attach(image(u"a"_s));
+	QCOMPARE(draft.text(), u"[Image 1] "_s);
+
+	// clear() resets numbering.
 	draft.clear();
 	draft.attach(image(u"b"_s));
-	QCOMPARE(draft.text(), u"[Image 2] "_s);
+	QCOMPARE(draft.text(), u"[Image 1] "_s);
+
+	// take() empties the draft via clear() and resets numbering.
+	QCOMPARE(draft.take().images.size(), 1);
+	draft.attach(image(u"c"_s));
+	QCOMPARE(draft.text(), u"[Image 1] "_s);
+
+	// Partial removeAttachment() keeps rising; full removal resets.
+	draft.attach(image(u"d"_s));
+	QCOMPARE(dataOf(draft), (QStringList{u"[Image 1]=c"_s, u"[Image 2]=d"_s}));
+	draft.removeAttachment(0);
+	draft.attach(image(u"e"_s));
+	QCOMPARE(dataOf(draft), (QStringList{u"[Image 2]=d"_s, u"[Image 3]=e"_s}));
+	draft.removeAttachment(0);
+	draft.removeAttachment(0);
+	QVERIFY(draft.attachments().isEmpty());
+	draft.attach(image(u"f"_s));
+	QCOMPARE(draft.text(), u"[Image 1] "_s);
+
+	// Partial setText()/dropOrphans() keeps rising; dropping all tokens resets.
+	draft.attach(image(u"g"_s));
+	draft.setText(u"[Image 2] "_s, 10);
+	draft.attach(image(u"h"_s));
+	QCOMPARE(dataOf(draft), (QStringList{u"[Image 2]=g"_s, u"[Image 3]=h"_s}));
+	draft.setText(u"plain text"_s, 10);
+	QVERIFY(draft.attachments().isEmpty());
+	draft.attach(image(u"i"_s));
+	QCOMPARE(draft.text(), u"plain text [Image 1] "_s);
+
+	// deletePlaceholderAt() drops the last attachment and resets numbering.
+	QVERIFY(draft.deletePlaceholderAt(20, true));
+	QCOMPARE(draft.text(), u"plain text "_s);
+	QVERIFY(draft.attachments().isEmpty());
+	draft.attach(image(u"j"_s));
+	QCOMPARE(draft.text(), u"plain text [Image 1] "_s);
+
+	// restore() renumbers into the current box sequence without colliding, and resets after clear().
+	draft.clear();
+	draft.restore(u"see [Image 5]"_s, {image(u"r"_s)});
+	QCOMPARE(draft.text(), u"see [Image 1]"_s);
+	draft.attach(image(u"k"_s));
+	QCOMPARE(dataOf(draft), (QStringList{u"[Image 1]=r"_s, u"[Image 2]=k"_s}));
+	draft.clear();
+	draft.restore(u"just text"_s, {});
+	draft.attach(image(u"l"_s));
+	QCOMPARE(draft.text(), u"just text [Image 1] "_s);
 }
 
 void TestPromptDraft::editingTheTextDropsOrphanedImages()

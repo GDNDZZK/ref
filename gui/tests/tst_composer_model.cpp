@@ -267,6 +267,7 @@ private slots:
 	void shellEscapeClipboardPipelinesDuplicateSessionsAndBackslashPathsWork();
 	void atomicImagePlaceholderHelpersSyncDraftAndAttachments();
 	void midTextSlashReplacementAndShellWrapperCompletionWork();
+	void imageNumberingResetsPerDraft();
 };
 
 void TestComposerModel::labelsFollowTheSessionAndTheConfiguration()
@@ -1011,6 +1012,50 @@ void TestComposerModel::midTextSlashReplacementAndShellWrapperCompletionWork()
 	QCOMPARE(f.composer.completionKind(), u"shellCommand"_s);
 	QTRY_COMPARE(f.composer.completions()->rowCount(), 1);
 	QCOMPARE(f.composer.completions()->index(0, 0).data(composer::CompletionItemModel::ValueRole).toString(), u"docker"_s);
+}
+void TestComposerModel::imageNumberingResetsPerDraft()
+{
+	Fixture f;
+	QImage img(4, 4, QImage::Format_RGB32);
+	img.fill(Qt::red);
+	QGuiApplication::clipboard()->setImage(img);
+
+	// paste -> submit -> paste starts back at [Image 1].
+	QVERIFY(f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.text(), u"[Image 1] "_s);
+	QVERIFY(f.composer.submit());
+	QTRY_COMPARE(f.requestsOf(u"prompt"_s).size(), 1);
+	QCOMPARE(f.composer.attachments()->rowCount(), 0);
+	QVERIFY(f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.text(), u"[Image 1] "_s);
+
+	// paste -> removeAttachment -> paste resets to [Image 1].
+	f.composer.removeAttachment(0);
+	QCOMPARE(f.composer.attachments()->rowCount(), 0);
+	QVERIFY(f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.text(), u"[Image 1] "_s);
+
+	// paste -> edit dropping the token -> paste resets to [Image 1].
+	f.type(u"just words"_s);
+	QCOMPARE(f.composer.attachments()->rowCount(), 0);
+	QVERIFY(f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.text(), u"just words [Image 1] "_s);
+
+	// Partial deletion keeps rising ([Image 1]/[Image 2] -> [Image 3]); clearDraft() resets to [Image 1].
+	QVERIFY(f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.text(), u"just words [Image 1] [Image 2] "_s);
+	QCOMPARE(f.composer.attachments()->rowCount(), 2);
+	f.composer.removeAttachment(0);
+	QCOMPARE(f.composer.attachments()->rowCount(), 1);
+	QVERIFY(f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.attachments()->rowCount(), 2);
+	QCOMPARE(f.composer.attachments()->index(0, 0).data(composer::AttachmentModel::TokenRole).toString(), u"[Image 2]"_s);
+	QCOMPARE(f.composer.attachments()->index(1, 0).data(composer::AttachmentModel::TokenRole).toString(), u"[Image 3]"_s);
+	QVERIFY(f.composer.text().contains(u"[Image 3]"_s));
+
+	f.composer.clearDraft();
+	QVERIFY(f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.text(), u"[Image 1] "_s);
 }
 QTEST_MAIN(TestComposerModel)
 #include "tst_composer_model.moc"

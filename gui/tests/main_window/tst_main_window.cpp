@@ -1784,6 +1784,9 @@ void TestMainWindow::shimmerTextModelsHoverCtrlTAtomicImageAndCompletionsWork()
 	QTest::keyClick(window, Qt::Key_Delete); // deletes "[Image 1] " atomically
 	QCOMPARE(f.workspace->current()->composer()->text(), QString());
 	QCOMPARE(f.workspace->current()->composer()->attachments()->rowCount(), 0);
+	QVERIFY(f.workspace->current()->composer()->pasteFromClipboard());
+	QCOMPARE(f.workspace->current()->composer()->text(), u"[Image 1] "_s);
+	f.workspace->current()->composer()->clearDraft();
 	const auto typeText = [&](const QString& text) {
 		for(const QChar ch : text)
 		{
