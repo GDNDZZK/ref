@@ -22,12 +22,23 @@ describe('parseSettings', () => {
       notifications: { enabled: false, permission: true, turnDone: false, turnError: true },
       sidebarOpen: false,
       sidebarWidth: 340,
+      sidebarTodoExpanded: false,
+      sidebarRunningExpanded: false,
+      sidebarHistoryExpanded: false,
     }
     expect(parseSettings(JSON.stringify(stored))).toEqual({ settings: stored, corrupt: false })
   })
 
   it('replaces only the fields that are invalid or missing', () => {
-    const { settings } = parseSettings(JSON.stringify({ theme: 'sepia', language: 'en', sidebarOpen: 'no' }))
+    const { settings } = parseSettings(
+      JSON.stringify({
+        theme: 'sepia',
+        language: 'en',
+        sidebarOpen: 'no',
+        sidebarTodoExpanded: 'yes',
+        sidebarRunningExpanded: 0,
+      }),
+    )
     expect(settings).toEqual({ ...defaultSettings(), language: 'en' })
   })
 

@@ -5,9 +5,13 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Todo } from '../proto/generated'
 import { todoProgress } from '../shell/sessionRow.ts'
+import Chevron from './Chevron.vue'
 import TodoList from './TodoList.vue'
 
-const props = defineProps<{ todos: readonly Todo[] | undefined }>()
+const props = withDefaults(defineProps<{ todos: readonly Todo[] | undefined; expanded?: boolean }>(), {
+  expanded: true,
+})
+const emit = defineEmits<{ toggle: [] }>()
 
 const { t } = useI18n()
 const progress = computed(() => todoProgress(props.todos))
@@ -20,12 +24,21 @@ const list = computed(() => [...(props.todos ?? [])])
       <div class="todo-fold">
         <section class="todo-section" :aria-label="t('sidebar.todo')">
           <h2 class="heading">
-            {{ t('sidebar.todo') }}
-            <span class="count" :class="{ complete: progress.complete }"
-              >{{ progress.done }}/{{ progress.total }}</span
-            >
+            <button type="button" class="section-toggle" :aria-expanded="expanded" @click="emit('toggle')">
+              <span class="section-label">
+                {{ t('sidebar.todo') }}
+                <span class="count" :class="{ complete: progress.complete }"
+                  >{{ progress.done }}/{{ progress.total }}</span
+                >
+              </span>
+              <Chevron class="section-chevron" :class="{ open: expanded }" />
+            </button>
           </h2>
-          <TodoList class="list" :todos="list" />
+          <div class="todo-body" :class="{ open: expanded }" :inert="!expanded || undefined">
+            <div class="todo-body-fold">
+              <TodoList class="list" :todos="list" />
+            </div>
+          </div>
         </section>
       </div>
     </div>
@@ -66,20 +79,79 @@ const list = computed(() => [...(props.todos ?? [])])
 }
 
 .heading {
-  display: flex;
   flex: none;
-  align-items: center;
-  gap: 8px;
   height: var(--sidebar-section-height);
   margin: 0;
-  padding-left: 10px;
-  color: var(--text-muted);
   font-size: var(--small-font-size);
   font-weight: 400;
 }
 
+.section-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  padding: 0 10px;
+  border-radius: var(--radius-small);
+  color: var(--text-muted);
+  text-align: left;
+  transition:
+    background-color var(--motion-quick) var(--motion-ease),
+    color var(--motion-quick) var(--motion-ease);
+}
+
+.section-toggle:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.section-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.count {
+  margin-left: 6px;
+}
 .count.complete {
   color: var(--success-text);
+}
+
+.section-chevron {
+  flex: none;
+  color: var(--text-muted);
+  transition: rotate var(--motion-standard) var(--motion-ease);
+}
+
+.section-chevron.open {
+  rotate: 90deg;
+}
+
+.todo-body {
+  display: grid;
+  flex: 0 1 auto;
+  grid-template-rows: 0fr;
+  min-height: 0;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--motion-standard) var(--motion-ease),
+    opacity var(--motion-standard) var(--motion-ease);
+}
+
+.todo-body.open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.todo-body-fold {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .todo-section .list {

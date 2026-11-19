@@ -62,4 +62,24 @@ describe('settings store', () => {
     store.update((draft) => (draft.sidebarWidth = 340))
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({ sidebarWidth: 340 })
   })
+
+  it('persists sidebar section expanded flags and falls back on bad values', () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ sidebarTodoExpanded: false, sidebarRunningExpanded: 'bad' }),
+    )
+    const store = useSettingsStore()
+    expect(store.settings.sidebarTodoExpanded).toBe(false)
+    expect(store.settings.sidebarRunningExpanded).toBe(true)
+    expect(store.settings.sidebarHistoryExpanded).toBe(true)
+    store.update((draft) => {
+      draft.sidebarRunningExpanded = false
+      draft.sidebarHistoryExpanded = false
+    })
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({
+      sidebarTodoExpanded: false,
+      sidebarRunningExpanded: false,
+      sidebarHistoryExpanded: false,
+    })
+  })
 })

@@ -193,16 +193,16 @@ impl Env {
     async fn start_with_port(&self, port: Option<u16>, args: &[&str]) -> Web {
         match self.try_start(port, args).await {
             Ok(web) => web,
-            Err(status) => panic!("ref-web exited early: {status}"),
+            Err(EarlyExit {
+                status,
+                stdout,
+                stderr,
+            }) => panic!("ref-web exited early: {status}\nstdout: {stdout}\nstderr: {stderr}"),
         }
     }
 
-    /// `Err` holds the exit status of a ref-web that stopped before it listened.
-    async fn try_start(
-        &self,
-        port: Option<u16>,
-        args: &[&str],
-    ) -> Result<Web, std::process::ExitStatus> {
+    /// `Err` holds the exit status and captured logs of a ref-web that stopped before it listened.
+    async fn try_start(&self, port: Option<u16>, args: &[&str]) -> Result<Web, EarlyExit> {
         let mut all = vec!["--no-open".to_string()];
         if let Some(port) = port {
             all.extend(["--port".to_string(), port.to_string()]);
@@ -234,7 +234,14 @@ impl Env {
                 .build()
                 .unwrap(),
         };
-        let (port, host, tls) = web.wait_for_record(&self.state_dir()).await?;
+        let (port, host, tls) = web
+            .wait_for_record(&self.state_dir())
+            .await
+            .map_err(|status| EarlyExit {
+                status,
+                stdout: web.stdout(),
+                stderr: web.stderr(),
+            })?;
         web.port = port;
         web.tls = tls;
         web.host = match host.as_str() {
@@ -242,13 +249,25 @@ impl Env {
             "::" => "::1".to_string(),
             _ => host,
         };
-        web.wait_until_listening().await?;
+        web.wait_until_listening()
+            .await
+            .map_err(|status| EarlyExit {
+                status,
+                stdout: web.stdout(),
+                stderr: web.stderr(),
+            })?;
         web.key = match args.iter().position(|a| *a == "--key") {
             Some(i) => args[i + 1].to_string(),
             None => std::fs::read_to_string(self.state_dir().join("web/login-token")).unwrap(),
         };
         Ok(web)
     }
+}
+
+struct EarlyExit {
+    status: std::process::ExitStatus,
+    stdout: String,
+    stderr: String,
 }
 
 pub struct Web {

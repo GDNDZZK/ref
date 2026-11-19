@@ -19,6 +19,9 @@ export interface Settings {
   notifications: NotificationSettings
   sidebarOpen: boolean
   sidebarWidth: number
+  sidebarTodoExpanded: boolean
+  sidebarRunningExpanded: boolean
+  sidebarHistoryExpanded: boolean
 }
 
 export const STORAGE_KEY = 'ref.settings'
@@ -33,6 +36,9 @@ export function defaultSettings(): Settings {
     notifications: { enabled: true, permission: true, turnDone: true, turnError: true },
     sidebarOpen: true,
     sidebarWidth: metrics.sidebarWidth,
+    sidebarTodoExpanded: true,
+    sidebarRunningExpanded: true,
+    sidebarHistoryExpanded: true,
   }
 }
 
@@ -78,6 +84,9 @@ export function parseSettings(raw: string | null): { settings: Settings; corrupt
     },
     sidebarOpen: flag(stored['sidebarOpen'], defaults.sidebarOpen),
     sidebarWidth: width(stored['sidebarWidth'], defaults.sidebarWidth),
+    sidebarTodoExpanded: flag(stored['sidebarTodoExpanded'], defaults.sidebarTodoExpanded),
+    sidebarRunningExpanded: flag(stored['sidebarRunningExpanded'], defaults.sidebarRunningExpanded),
+    sidebarHistoryExpanded: flag(stored['sidebarHistoryExpanded'], defaults.sidebarHistoryExpanded),
   }
   return { settings, corrupt: false }
 }
