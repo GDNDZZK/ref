@@ -130,6 +130,7 @@ impl Editor {
         self.anchor = None;
         self.pastes.clear();
         self.images.clear();
+        self.image_seq = 0;
         self.pref_col = None;
         self.scroll = 0;
         self.hscroll = 0;
@@ -1476,5 +1477,45 @@ mod tests {
         assert!(e.cursor >= "[Image 1]".len());
         assert!(e.up());
         assert_eq!(e.cursor, 0);
+    }
+
+    #[test]
+    fn image_numbering_resets_only_when_empty() {
+        let mut e = Editor::default();
+        e.attach_image(img("1"), None);
+        e.attach_image(img("2"), None);
+        assert_eq!(e.text, "[Image 1] [Image 2] ");
+
+        // Deleting [Image 1] keeps [Image 2]; next attach continues at [Image 3].
+        e.cursor = "[Image 1]".len();
+        e.backspace();
+        assert_eq!(e.images.len(), 1);
+        assert_eq!(e.images[0].token, "[Image 2]");
+        e.buf_end();
+        e.attach_image(img("3"), None);
+        assert_eq!(e.text, " [Image 2] [Image 3] ");
+        assert_eq!(e.images[1].token, "[Image 3]");
+
+        // Deleting all tokens via gc_tokens() resets numbering to [Image 1].
+        e.kill_to_start();
+        assert!(e.images.is_empty());
+        e.attach_image(img("4"), None);
+        assert_eq!(e.text, "[Image 1] ");
+        assert_eq!(e.images[0].token, "[Image 1]");
+
+        // submit() resets numbering to [Image 1].
+        let sub = e.submit();
+        assert_eq!(sub.images.len(), 1);
+        e.attach_image(img("5"), None);
+        assert_eq!(e.text, "[Image 1] ");
+        assert_eq!(e.images[0].token, "[Image 1]");
+
+        // clear() resets numbering to [Image 1].
+        e.attach_image(img("6"), None);
+        assert_eq!(e.images[1].token, "[Image 2]");
+        e.clear();
+        e.attach_image(img("7"), None);
+        assert_eq!(e.text, "[Image 1] ");
+        assert_eq!(e.images[0].token, "[Image 1]");
     }
 }
