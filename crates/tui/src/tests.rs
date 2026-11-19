@@ -7471,3 +7471,71 @@ fn review_fixes_watch_selection_cleanup_drag_edge_and_shell_tab_reset() {
         "stale binary response must not reopen popup after Esc reset"
     );
 }
+
+#[test]
+fn maybe_image_path_ctrl_z_restores_path_without_extra_empty_snapshot_or_reattach() {
+    let dir = std::env::temp_dir().join(format!("ref-tui-img-undo-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let img_path = dir.join("shot.png");
+    std::fs::write(&img_path, b"\x89PNG\r\n\x1a\npayload").unwrap();
+    let path_str = img_path.to_str().unwrap();
+
+    let mut app = test_app(false);
+    type_text(&mut app, path_str);
+    assert_eq!(app.editor.text, "[Image 1] ");
+    assert_eq!(app.editor.images.len(), 1);
+    assert_eq!(
+        app.toasts.items.last().map(|t| (t.level, t.text.as_str())),
+        Some((ToastLevel::Info, "Attached image shot.png"))
+    );
+
+    // First Ctrl+Z restores the typed path (no extra empty snapshot, no immediate re-attach).
+    press_with(&mut app, KeyCode::Char('z'), KeyModifiers::CONTROL);
+    assert_eq!(app.editor.text, path_str);
+    assert!(app.editor.images.is_empty());
+
+    // Second Ctrl+Z restores the empty editor.
+    press_with(&mut app, KeyCode::Char('z'), KeyModifiers::CONTROL);
+    assert!(app.editor.is_empty());
+
+    // Ctrl+Y steps cleanly back through the path to the attached image.
+    press_with(&mut app, KeyCode::Char('y'), KeyModifiers::CONTROL);
+    assert_eq!(app.editor.text, path_str);
+    assert!(app.editor.images.is_empty());
+
+    press_with(&mut app, KeyCode::Char('y'), KeyModifiers::CONTROL);
+    assert_eq!(app.editor.text, "[Image 1] ");
+    assert_eq!(app.editor.images.len(), 1);
+
+    // Typing after maybe_image_path does not coalesce into the attachment undo step.
+    type_text(&mut app, "fix");
+    assert_eq!(app.editor.text, "[Image 1] fix");
+    press_with(&mut app, KeyCode::Char('z'), KeyModifiers::CONTROL);
+    assert_eq!(app.editor.text, "[Image 1] ");
+    assert_eq!(app.editor.images.len(), 1);
+    press_with(&mut app, KeyCode::Char('z'), KeyModifiers::CONTROL);
+    assert_eq!(app.editor.text, path_str);
+    assert!(app.editor.images.is_empty());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn typing_after_attach_image_does_not_coalesce_with_attachment() {
+    let mut app = test_app(false);
+    app.editor
+        .attach_image(ref_proto::ImageData::new("image/png", "AA"), None);
+    type_text(&mut app, "fix");
+    assert_eq!(app.editor.text, "[Image 1] fix");
+    assert_eq!(app.editor.images.len(), 1);
+
+    // First Ctrl+Z reverts only "fix", keeping [Image 1] and its attachment.
+    press_with(&mut app, KeyCode::Char('z'), KeyModifiers::CONTROL);
+    assert_eq!(app.editor.text, "[Image 1] ");
+    assert_eq!(app.editor.images.len(), 1);
+
+    // Second Ctrl+Z reverts [Image 1] cleanly.
+    press_with(&mut app, KeyCode::Char('z'), KeyModifiers::CONTROL);
+    assert!(app.editor.is_empty());
+}

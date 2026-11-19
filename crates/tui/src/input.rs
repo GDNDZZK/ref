@@ -438,6 +438,15 @@ fn history_next(app: &mut App) {
     }
 }
 
+fn is_undo_or_redo(k: &KeyEvent) -> bool {
+    k.modifiers.contains(CTRL)
+        && !k.modifiers.contains(ALT)
+        && matches!(
+            k.code,
+            KeyCode::Char(c) if matches!(c.to_ascii_lowercase(), 'z' | '-' | 'y' | '.')
+        )
+}
+
 fn edit_chat_input(app: &mut App, k: &KeyEvent, before: &str) {
     if !edit_key(&mut app.editor, k, true) {
         return;
@@ -446,8 +455,8 @@ fn edit_chat_input(app: &mut App, k: &KeyEvent, before: &str) {
         app.history.reset();
         app.suppress_ac = false;
         app.update_autocomplete_on_edit();
-        // Typed / pasted path to an image → attachment (disabled in `!` shell mode).
-        if !app.shell_mode {
+        // Typed / pasted path to an image → attachment (disabled in `!` shell mode and on undo/redo).
+        if !app.shell_mode && !is_undo_or_redo(k) {
             maybe_image_path(app);
         }
     }
@@ -714,8 +723,7 @@ fn maybe_image_path(app: &mut App) {
     }
     match crate::clipboard::image_from_path(t) {
         Ok(Some((img, name))) => {
-            app.editor.clear();
-            app.editor.attach_image(img, Some(name.clone()));
+            app.editor.replace_with_image(img, Some(name.clone()));
             app.ac = None;
             app.toasts.info(format!("Attached image {name}"));
         }
