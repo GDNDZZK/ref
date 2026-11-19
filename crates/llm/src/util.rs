@@ -2,7 +2,10 @@
 //! option handling, history normalisation, the SSE transport loop and the
 //! response/event assembler.
 
-use crate::error::{classify_http_error, network_error, stream_error, trim_body};
+use crate::error::{
+    classify_http_error, network_error, parse_retry_after, parse_retry_after_json,
+    parse_retry_after_text, stream_error_json, trim_body,
+};
 use crate::sse::{SseEvent, SseParser};
 use crate::{
     AssistantBlock, BlockKind, ChatMessage, LlmError, Model, Provider, Response, StreamEvent,
@@ -506,8 +509,9 @@ pub(crate) async fn run_sse(
         .to_ascii_lowercase();
     if content_type.contains("application/json") {
         // Some gateways answer streaming requests with a plain JSON error.
+        let resp_headers = resp.headers().clone();
         let text = read_body(resp, idle, cancel).await?;
-        return Err(json_body_error(&text));
+        return Err(json_body_error(&resp_headers, &text));
     }
 
     let mut parser = SseParser::default();
@@ -613,16 +617,28 @@ pub(crate) fn replay<S: StreamState>(
 }
 
 /// Error for a 2xx response that carried JSON instead of an event stream.
-fn json_body_error(text: &str) -> LlmError {
+fn json_body_error(headers: &HeaderMap, text: &str) -> LlmError {
     let parsed: Option<Value> = serde_json::from_str(text).ok();
-    if let Some(err) = parsed.as_ref().and_then(|v| v.get("error")) {
+    let mut err = if let Some(value) = parsed.as_ref()
+        && let Some(err) = value.get("error")
+    {
         let (code, message) = error_fields(err);
-        return stream_error(code.as_deref(), &message);
+        stream_error_json(code.as_deref(), &message, err, &[value])
+    } else {
+        let mut e = LlmError::transient(format!(
+            "expected an event stream, got JSON: {}",
+            trim_body(text)
+        ));
+        e.retry_after = match parsed.as_ref() {
+            Some(value) => parse_retry_after_json(value),
+            None => parse_retry_after_text(text),
+        };
+        e
+    };
+    if err.retryable {
+        err.retry_after = err.retry_after.max(parse_retry_after(headers));
     }
-    LlmError::transient(format!(
-        "expected an event stream, got JSON: {}",
-        trim_body(text)
-    ))
+    err
 }
 
 /// Extract `(code, message)` from a provider error object (or string).
