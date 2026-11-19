@@ -1265,7 +1265,7 @@ void TestMainWindow::paletteAndComposerCompletionsAndShellModeOperateWithoutWarn
 	QVERIFY(window);
 	QVERIFY(QTest::qWaitForWindowExposed(window));
 	window->requestActivate();
-
+	QTRY_VERIFY(window->isActive());
 	// 1) CommandPalette: choosing "cd" opens CdDialog directly; choosing "custom:review" enters askingArgument, and Esc returns to list.
 	f.workspace->openDialog(u"palette"_s);
 	QQuickItem* palette = nullptr;
@@ -1305,6 +1305,7 @@ void TestMainWindow::paletteAndComposerCompletionsAndShellModeOperateWithoutWarn
 	QQuickItem* paletteInput = findByTypePrefix(palette, "QQuickTextInput");
 	QVERIFY(paletteInput);
 	paletteInput->forceActiveFocus();
+	QTRY_VERIFY(paletteInput->hasActiveFocus());
 	QTest::keyClick(window, Qt::Key_Escape);
 	QVERIFY(!palette->property("askingArgument").toBool());
 	QCOMPARE(f.workspace->dialog(), u"palette"_s);
@@ -1326,6 +1327,7 @@ void TestMainWindow::paletteAndComposerCompletionsAndShellModeOperateWithoutWarn
 
 	// 3) `!` shell mode: Tab and Backtab never cycle agent; unnavigated Enter runs free-form typed command directly.
 	QMetaObject::invokeMethod(composerItem, "focusInput");
+	QTRY_VERIFY(window->activeFocusItem() != nullptr && window->activeFocusItem()->hasActiveFocus());
 	composerModel->edit(u"!"_s, 1);
 	QVERIFY(composerModel->shellMode());
 	QTest::keyClick(window, Qt::Key_Tab);
@@ -1519,7 +1521,7 @@ void TestMainWindow::configDialogSupportsOpencodeAliasesInlineRenameTopBarLockAn
 	QVERIFY(window);
 	QVERIFY(QTest::qWaitForWindowExposed(window));
 	window->requestActivate();
-
+	QTRY_VERIFY(window->isActive());
 	const auto findByName = [](QQuickItem* root, const QString& name) {
 		return findItem(root, [&name](QQuickItem* item) { return item->objectName() == name; });
 	};
@@ -1742,6 +1744,7 @@ void TestMainWindow::shimmerTextModelsHoverCtrlTAtomicImageAndCompletionsWork()
 	QVERIFY(window);
 	QVERIFY(QTest::qWaitForWindowExposed(window));
 	window->requestActivate();
+	QTRY_VERIFY(window->isActive());
 	QTRY_VERIFY(f.workspace->current()->composer()->variantAvailable());
 	// 2) Ctrl+T cycles thinking variant via Workspace.setVariant(sessionId, "").
 	QTest::keyClick(window, Qt::Key_T, Qt::ControlModifier);
@@ -1774,8 +1777,11 @@ void TestMainWindow::shimmerTextModelsHoverCtrlTAtomicImageAndCompletionsWork()
 	auto* composerItem = findByTypePrefix(window->contentItem(), "Composer");
 	QVERIFY(composerItem);
 	QMetaObject::invokeMethod(composerItem, "focusInput");
-	auto* textArea = qobject_cast<QQuickItem*>(window->activeFocusItem());
-	QVERIFY(textArea);
+	QQuickItem* textArea = nullptr;
+	QTRY_VERIFY([&] {
+		textArea = qobject_cast<QQuickItem*>(window->activeFocusItem());
+		return textArea != nullptr && textArea->hasActiveFocus();
+	}());
 	QImage img(4, 4, QImage::Format_RGB32);
 	img.fill(Qt::red);
 	QGuiApplication::clipboard()->setImage(img);
@@ -1836,6 +1842,7 @@ void TestMainWindow::splitJumpToEndResizeBlurFadeAndSidebarDragWork()
 	QVERIFY(window);
 	QVERIFY(QTest::qWaitForWindowExposed(window));
 	window->requestActivate();
+	QTRY_VERIFY(window->isActive());
 	// 1) Resizable sidebar: drag handle wider, then double-click to reset.
 	auto* sidebar = findByTypePrefix(window->contentItem(), "Sidebar_QMLTYPE");
 	auto* handle = findItem(window->contentItem(), [](QQuickItem* item) { return item->objectName() == u"sidebarResizeHandle"_s; });
@@ -1847,7 +1854,7 @@ void TestMainWindow::splitJumpToEndResizeBlurFadeAndSidebarDragWork()
 	QTest::mouseMove(window, hCenter + QPoint(80, 0));
 	QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, hCenter + QPoint(80, 0));
 	QTRY_VERIFY(f.workspace->settings()->sidebarWidth() > 300);
-	QCOMPARE(qRound(sidebar->width()), f.workspace->settings()->sidebarWidth());
+	QTRY_COMPARE(qRound(sidebar->width()), f.workspace->settings()->sidebarWidth());
 	const QPoint hNewCenter = handle->mapToScene(QPointF(handle->width() / 2.0, handle->height() / 2.0)).toPoint();
 	QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, hNewCenter);
 	QTRY_COMPARE(f.workspace->settings()->sidebarWidth(), 264);
@@ -1935,7 +1942,7 @@ void TestMainWindow::sidebarSectionsCollapseExpandAndResizeWithoutOscillation()
 	QVERIFY(window);
 	QVERIFY(QTest::qWaitForWindowExposed(window));
 	window->requestActivate();
-
+	QTRY_VERIFY(window->isActive());
 	const auto findByName = [](QQuickItem* root, const QString& name) {
 		return findItem(root, [&name](QQuickItem* item) { return item->objectName() == name; });
 	};
@@ -1950,11 +1957,11 @@ void TestMainWindow::sidebarSectionsCollapseExpandAndResizeWithoutOscillation()
 	QTest::mouseMove(window, hCenter + QPoint(10, 0));
 	QTRY_COMPARE(f.workspace->settings()->sidebarWidth(), 274);
 	QTest::mouseMove(window, hCenter + QPoint(20, 0));
-	QCOMPARE(f.workspace->settings()->sidebarWidth(), 284);
+	QTRY_COMPARE(f.workspace->settings()->sidebarWidth(), 284);
 	QTest::mouseMove(window, hCenter + QPoint(21, 0));
-	QCOMPARE(f.workspace->settings()->sidebarWidth(), 285);
+	QTRY_COMPARE(f.workspace->settings()->sidebarWidth(), 285);
 	QTest::mouseMove(window, hCenter + QPoint(80, 0));
-	QCOMPARE(f.workspace->settings()->sidebarWidth(), 344);
+	QTRY_COMPARE(f.workspace->settings()->sidebarWidth(), 344);
 	QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, hCenter + QPoint(80, 0));
 	QTRY_COMPARE(qRound(sidebar->width()), 344);
 
@@ -2083,12 +2090,16 @@ void TestMainWindow::composerUndoRedoSyncsAttachmentsAndHistoryAvoidsCollision()
 	QVERIFY(window);
 	QVERIFY(QTest::qWaitForWindowExposed(window));
 	window->requestActivate();
+	QTRY_VERIFY(window->isActive());
 
 	auto* composerItem = findByTypePrefix(window->contentItem(), "Composer");
 	QVERIFY(composerItem);
 	QMetaObject::invokeMethod(composerItem, "focusInput");
-	auto* textArea = qobject_cast<QQuickItem*>(window->activeFocusItem());
-	QVERIFY(textArea);
+	QQuickItem* textArea = nullptr;
+	QTRY_VERIFY([&] {
+		textArea = qobject_cast<QQuickItem*>(window->activeFocusItem());
+		return textArea != nullptr && textArea->hasActiveFocus();
+	}());
 	auto* composer = f.workspace->current()->composer();
 	QVERIFY(composer);
 
@@ -2226,6 +2237,8 @@ void TestMainWindow::composerUndoRedoSyncsAttachmentsAndHistoryAvoidsCollision()
 	QVERIFY(menuPaste->property("enabled").toBool());
 	QMetaObject::invokeMethod(menuUndo, "triggered");
 	QMetaObject::invokeMethod(contextMenu, "close");
+	QTRY_VERIFY(!contextMenu->property("visible").toBool());
+	QTRY_VERIFY(textArea->hasActiveFocus());
 	QCOMPARE(composer->text(), u"[Image 1] "_s);
 	QCOMPARE(textArea->property("text").toString(), u"[Image 1] "_s);
 	QCOMPARE(composer->attachments()->rowCount(), 1);
@@ -2236,6 +2249,7 @@ void TestMainWindow::composerUndoRedoSyncsAttachmentsAndHistoryAvoidsCollision()
 	QMetaObject::invokeMethod(menuUndo, "triggered");
 	QCOMPARE(composer->text(), u"[Image 1] "_s);
 	QCOMPARE(composer->attachments()->rowCount(), 1);
+	QVERIFY(textArea->hasActiveFocus());
 	QTest::keyClick(window, Qt::Key_End);
 	QMetaObject::invokeMethod(menuPaste, "triggered");
 	QCOMPARE(composer->text(), u"[Image 1] [Image 2] "_s);
@@ -2243,12 +2257,14 @@ void TestMainWindow::composerUndoRedoSyncsAttachmentsAndHistoryAvoidsCollision()
 
 	// 5) ShellMode + attachment undo/redo round-trip end-to-end in Composer.qml.
 	composer->clearDraft();
+	QVERIFY(textArea->hasActiveFocus());
 	typeText(u"!make"_s);
 	QVERIFY(composer->shellMode());
 	QVERIFY(composer->submit());
 	QVERIFY(!composer->shellMode());
 	QVERIFY(composer->pasteFromClipboard());
 	QCOMPARE(composer->attachments()->rowCount(), 1);
+	QVERIFY(textArea->hasActiveFocus());
 	QTest::keyClick(window, Qt::Key_Home);
 	QTest::keyClick(window, Qt::Key_Up);
 	QVERIFY(composer->shellMode());
