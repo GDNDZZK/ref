@@ -3,10 +3,13 @@
 
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
+import { clamp } from '../clamp.ts'
+import { metrics } from '../theme/generated/theme.ts'
 import { useSettingsStore } from './settings.ts'
 
 const NARROW_BELOW_PX = 800
 const FRACTIONAL_PX_EPSILON = 0.02 // so the query does not match at exactly NARROW_BELOW_PX
+const MAX_SIDEBAR_RATIO = 0.45
 
 export const useLayoutStore = defineStore('layout', () => {
   const settings = useSettingsStore()
@@ -15,9 +18,35 @@ export const useLayoutStore = defineStore('layout', () => {
   const narrow = ref(query.matches)
   query.addEventListener('change', (event) => (narrow.value = event.matches))
 
+  const windowWidth = ref(window.innerWidth)
+  window.addEventListener('resize', () => (windowWidth.value = window.innerWidth))
+
   const drawerOpen = ref(false) // the drawer starts closed and is not remembered
   // Whether the sidebar is on screen: the saved setting in a wide window, the drawer in a narrow one.
   const sidebarVisible = computed(() => (narrow.value ? drawerOpen.value : settings.settings.sidebarOpen))
+  const maxSidebarWidth = computed(() =>
+    Math.max(
+      metrics.sidebarMinWidth,
+      Math.floor(Math.min(metrics.sidebarMaxWidth, windowWidth.value * MAX_SIDEBAR_RATIO)),
+    ),
+  )
+  const sidebarWidth = computed(() => clampWidth(settings.settings.sidebarWidth))
+
+  function clampWidth(value: number): number {
+    return clamp(Math.round(value), metrics.sidebarMinWidth, maxSidebarWidth.value)
+  }
+
+  function setSidebarWidth(value: number): void {
+    if (!Number.isFinite(value)) return
+    const next = clampWidth(value)
+    if (next === settings.settings.sidebarWidth) return
+    settings.update((draft) => (draft.sidebarWidth = next))
+  }
+
+  function resetSidebarWidth(): void {
+    if (settings.settings.sidebarWidth === metrics.sidebarWidth) return
+    settings.update((draft) => (draft.sidebarWidth = metrics.sidebarWidth))
+  }
 
   function toggleSidebar(): void {
     if (narrow.value) drawerOpen.value = !drawerOpen.value
@@ -29,5 +58,13 @@ export const useLayoutStore = defineStore('layout', () => {
     drawerOpen.value = false
   }
 
-  return { narrow, sidebarVisible, toggleSidebar, closeDrawer }
+  return {
+    narrow,
+    sidebarVisible,
+    sidebarWidth,
+    setSidebarWidth,
+    resetSidebarWidth,
+    toggleSidebar,
+    closeDrawer,
+  }
 })
