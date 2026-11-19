@@ -464,7 +464,7 @@ impl ChatState {
     fn on_chunk(&mut self, asm: &mut Assembler<'_>, chunk: &Value) -> Result<(), LlmError> {
         if let Some(err) = chunk.get("error").filter(|e| !e.is_null()) {
             let (code, message) = error_fields(err);
-            return Err(stream_error_json(code.as_deref(), &message, chunk));
+            return Err(stream_error_json(code.as_deref(), &message, err, &[chunk]));
         }
         let choice = chunk
             .get("choices")

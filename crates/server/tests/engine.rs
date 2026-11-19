@@ -2229,6 +2229,7 @@ async fn retry_honors_retry_after_in_http_body_and_sse_error() {
         let (hub, work) = hub(config(&m.url), tag);
         let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
         let conn = attached_conn(&hub, &s).await;
+        let start_ms = ref_proto::now_ms();
         let start = std::time::Instant::now();
         prompt(&hub, &s, "go");
         wait_idle(&s).await;
@@ -2239,7 +2240,7 @@ async fn retry_honors_retry_after_in_http_body_and_sse_error() {
         let retrying = events(&conn).into_iter().any(|ev| {
             matches!(
                 ev,
-                SessionEvent::Info { info } if matches!(info.status, SessionStatus::Retrying { next_at, .. } if next_at > 0)
+                SessionEvent::Info { info } if matches!(info.status, SessionStatus::Retrying { next_at, .. } if next_at >= start_ms + 140)
             )
         });
         assert!(retrying, "{tag}: expected SessionStatus::Retrying event");

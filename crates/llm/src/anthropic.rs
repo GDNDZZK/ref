@@ -660,7 +660,7 @@ impl AnthropicState {
             "error" => {
                 let err = ev.get("error").unwrap_or(ev);
                 let (code, message) = error_fields(err);
-                return Err(stream_error_json(code.as_deref(), &message, ev));
+                return Err(stream_error_json(code.as_deref(), &message, err, &[ev]));
             }
             _ => {} // ping and future events
         }
