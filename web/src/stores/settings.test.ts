@@ -54,4 +54,12 @@ describe('settings store', () => {
     store.update((draft) => (draft.notifications.enabled = false))
     expect(store.notifyKinds).toEqual([])
   })
+
+  it('persists sidebarWidth and clamps out-of-range stored values', () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ sidebarWidth: 999 }))
+    const store = useSettingsStore()
+    expect(store.settings.sidebarWidth).toBe(480)
+    store.update((draft) => (draft.sidebarWidth = 340))
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({ sidebarWidth: 340 })
+  })
 })

@@ -8,9 +8,10 @@ import type { ToastLevel } from '../proto/generated'
 import type { ComposerApi, ComposerHost } from './sessionComposer.ts'
 
 const COMMANDS: SlashCommand[] = [
-  { name: 'undo', aliases: [], title: 'Undo', takesArgs: false, custom: false },
-  { name: 'rename', aliases: [], title: 'Rename', takesArgs: true, custom: false },
-  { name: 'review', aliases: [], title: 'Review', takesArgs: true, custom: true },
+  { name: 'undo', aliases: [], title: 'Undo', requiresArgs: false, custom: false },
+  { name: 'rename', aliases: [], title: 'Rename', requiresArgs: true, custom: false },
+  { name: 'sessions', aliases: [], title: 'Sessions', requiresArgs: false, custom: false },
+  { name: 'review', aliases: [], title: 'Review', requiresArgs: false, custom: true },
 ]
 
 function setup(options: { busy?: boolean; delayed?: boolean } = {}) {
@@ -239,6 +240,61 @@ describe('completion', () => {
     expect(host.runSlash).toHaveBeenCalledWith('/rename')
   })
 
+  it('completes standalone-capable commands without trailing space on Tab and runs partial ones on Enter', async () => {
+    const { composer, host, api, pushed } = setup()
+    type(composer, '/ses')
+    const caret = composer.acceptCompletion(false)
+    expect(composer.draft.text).toBe('/sessions')
+    expect(caret).toBe('/sessions'.length)
+    expect(composer.completion).toBeUndefined()
+    expect(host.runSlash).not.toHaveBeenCalled()
+
+    type(composer, '/ses')
+    expect(composer.acceptCompletion(true)).toBeUndefined()
+    expect(host.runSlash).toHaveBeenCalledWith('/sessions')
+    expect(pushed).toEqual(['/sessions'])
+    expect(composer.draft.text).toBe('')
+
+    // Custom commands with optional args also execute standalone on Enter from a partial token.
+    type(composer, '/rev')
+    expect(composer.acceptCompletion(true)).toBeUndefined()
+    await Promise.resolve()
+    expect(api.expandCommand).toHaveBeenCalledWith('review', '', '/work')
+
+    // Partial required-arg command completes with space on Enter instead of executing.
+    type(composer, '/ren')
+    expect(composer.acceptCompletion(true)).toBe('/rename '.length)
+    expect(composer.draft.text).toBe('/rename ')
+    expect(host.runSlash).toHaveBeenCalledTimes(1)
+  })
+
+  it('replaces only the mid-text slash token without submitting or stripping surrounding text', () => {
+    const { composer, host, api } = setup()
+    composer.input('please run /un in chat', 14)
+    const tabCaret = composer.acceptCompletion(false)
+    expect(composer.draft.text).toBe('please run /undo in chat')
+    expect(tabCaret).toBe('please run /undo'.length)
+    expect(composer.completion).toBeUndefined()
+    expect(host.runSlash).not.toHaveBeenCalled()
+    expect(api.prompt).not.toHaveBeenCalled()
+
+    composer.input('please run /un', 14)
+    const enterCaret = composer.acceptCompletion(true)
+    expect(composer.draft.text).toBe('please run /undo')
+    expect(enterCaret).toBe('please run /undo'.length)
+    expect(composer.completion).toBeUndefined()
+    expect(host.runSlash).not.toHaveBeenCalled()
+    expect(api.prompt).not.toHaveBeenCalled()
+    composer.input('please /ren Work', 11)
+    const midSpaceCaret = composer.acceptCompletion(true)
+    expect(composer.draft.text).toBe('please /rename Work')
+    expect(midSpaceCaret).toBe('please /rename '.length)
+
+    composer.input('/ren Work', 4)
+    const leadSpaceCaret = composer.acceptCompletion(false)
+    expect(composer.draft.text).toBe('/rename Work')
+    expect(leadSpaceCaret).toBe('/rename '.length)
+  })
   it('replaces the mention with the chosen file', async () => {
     vi.useFakeTimers()
     const { composer, api } = setup()

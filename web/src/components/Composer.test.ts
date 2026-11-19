@@ -16,8 +16,8 @@ import Composer from './Composer.vue'
 import { useWorkspaceStore } from '../stores/workspace.ts'
 
 const COMMANDS: SlashCommand[] = [
-  { name: 'undo', aliases: [], title: 'Undo the last prompt', takesArgs: false, custom: false },
-  { name: 'rename', aliases: [], title: 'Rename the session', takesArgs: true, custom: false },
+  { name: 'undo', aliases: [], title: 'Undo the last prompt', requiresArgs: false, custom: false },
+  { name: 'rename', aliases: [], title: 'Rename the session', requiresArgs: true, custom: false },
 ]
 
 function setup(
@@ -297,7 +297,9 @@ describe('Composer', () => {
   it('never cycles agent on Tab in shell mode and enforces free-form Enter on shell and /cd completions', async () => {
     vi.useFakeTimers()
     const { wrapper, api, host, pinia } = setup({
-      extraCommands: [{ name: 'cd', aliases: [], title: 'Change directory', takesArgs: true, custom: false }],
+      extraCommands: [
+        { name: 'cd', aliases: [], title: 'Change directory', requiresArgs: false, custom: false },
+      ],
     })
     const workspace = useWorkspaceStore(pinia)
     const cycleSpy = vi.spyOn(workspace, 'cycleAgent').mockResolvedValue(undefined)
@@ -336,6 +338,53 @@ describe('Composer', () => {
     expect(wrapper.findAll('[role=option]').map((r) => r.text())).toEqual(['src/'])
     await press(wrapper, 'Enter')
     expect(runSlash).toHaveBeenCalledWith('/cd s')
+    vi.useRealTimers()
+  })
+
+  it('handles standalone-capable slash completion on Tab vs Enter and mid-text slash completion', async () => {
+    const { wrapper, host, api } = setup({
+      extraCommands: [
+        { name: 'sessions', aliases: [], title: 'Sessions', requiresArgs: false, custom: false },
+      ],
+    })
+    const runSlash = vi.spyOn(host, 'runSlash')
+
+    await type(wrapper, '/ses')
+    await wrapper.get('textarea').trigger('input')
+    await press(wrapper, 'Tab')
+    await wrapper.get('textarea').trigger('keyup', { key: 'Tab' })
+    expect(value(wrapper)).toBe('/sessions')
+    expect(wrapper.find('[role=option]').exists()).toBe(false)
+    expect(runSlash).not.toHaveBeenCalled()
+
+    await type(wrapper, '/ses')
+    await wrapper.get('textarea').trigger('input')
+    await press(wrapper, 'Enter')
+    expect(runSlash).toHaveBeenCalledWith('/sessions')
+    expect(value(wrapper)).toBe('')
+
+    // Mid-text `/un` completes in place on Enter without submitting, then the next Enter sends.
+    await type(wrapper, 'explain /un')
+    await wrapper.get('textarea').trigger('input')
+    expect(wrapper.findAll('[role=option]').map((r) => r.text())).toEqual(['/undoUndo the last prompt'])
+    await press(wrapper, 'Enter')
+    expect(value(wrapper)).toBe('explain /undo')
+    expect(api.prompt).not.toHaveBeenCalled()
+    await press(wrapper, 'Enter')
+    expect(api.prompt).toHaveBeenCalledWith('s1', 'explain /undo', [])
+  })
+
+  it('completes binaries after shell wrappers without matching full-line history', async () => {
+    vi.useFakeTimers()
+    const { wrapper, api } = setup({ history: ['!cargo test'] })
+    await press(wrapper, '!')
+    await type(wrapper, 'sudo car')
+    await wrapper.get('textarea').trigger('input')
+    await vi.advanceTimersByTimeAsync(100)
+    expect(api.listBinaries).toHaveBeenCalledWith('car', 50)
+    expect(wrapper.findAll('[role=option]').map((r) => r.text())).toEqual(['cargo', 'cargo-fmt'])
+    await press(wrapper, 'Tab')
+    expect(value(wrapper)).toBe('sudo cargo ')
     vi.useRealTimers()
   })
 })

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The sidebar (Sidebar.qml): running sessions, searchable history, MCP status and settings.
 // The content keeps its width and is clipped by the frame, so collapsing slides it out to the left.
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import lockupDark from '../../../assets/app/ref-lockup-small-dark.svg'
 import lockupLight from '../../../assets/app/ref-lockup-small-light.svg'
@@ -73,10 +73,58 @@ function reloadConfig(): void {
     }),
   )
 }
+
+const sidebarStyle = computed(() =>
+  layout.narrow ? undefined : { '--sidebar-width': `${layout.sidebarWidth}px` },
+)
+
+const showResizeHandle = computed(() => !layout.narrow && layout.sidebarVisible)
+const resizing = ref(false)
+let dragPointerId: number | undefined
+let dragStartX = 0
+let dragStartWidth = 0
+
+function resetDragState(): void {
+  resizing.value = false
+  dragPointerId = undefined
+}
+
+watch(showResizeHandle, (shown) => {
+  if (!shown) resetDragState()
+})
+
+function startResize(event: PointerEvent): void {
+  if (event.button !== 0) return
+  event.preventDefault()
+  const handle = event.currentTarget as HTMLElement | null
+  dragPointerId = event.pointerId
+  dragStartX = event.clientX
+  dragStartWidth = layout.sidebarWidth
+  resizing.value = true
+  handle?.setPointerCapture?.(event.pointerId)
+}
+
+function moveResize(event: PointerEvent): void {
+  if (!resizing.value || event.pointerId !== dragPointerId) return
+  layout.setSidebarWidth(dragStartWidth + (event.clientX - dragStartX))
+}
+
+function stopResize(event: PointerEvent): void {
+  if (!resizing.value || event.pointerId !== dragPointerId) return
+  const handle = event.currentTarget as HTMLElement | null
+  if (handle?.hasPointerCapture?.(event.pointerId)) {
+    handle.releasePointerCapture(event.pointerId)
+  }
+  resetDragState()
+}
 </script>
 
 <template>
-  <aside class="sidebar" :class="{ open: layout.sidebarVisible, drawer: layout.narrow }">
+  <aside
+    class="sidebar"
+    :class="{ open: layout.sidebarVisible, drawer: layout.narrow, resizing }"
+    :style="sidebarStyle"
+  >
     <div class="content" :inert="!layout.sidebarVisible || undefined">
       <header class="header">
         <img
@@ -204,6 +252,19 @@ function reloadConfig(): void {
         </div>
       </footer>
     </div>
+    <div
+      v-if="showResizeHandle"
+      class="resize-handle"
+      role="separator"
+      aria-orientation="vertical"
+      :aria-label="t('sidebar.resize')"
+      @pointerdown="startResize"
+      @pointermove="moveResize"
+      @pointerup="stopResize"
+      @pointercancel="stopResize"
+      @lostpointercapture="stopResize"
+      @dblclick="layout.resetSidebarWidth()"
+    />
   </aside>
 </template>
 
@@ -226,12 +287,21 @@ function reloadConfig(): void {
   border-right-color: var(--border);
 }
 
+.sidebar.resizing {
+  transition: none;
+  user-select: none;
+}
+
 /* Narrow windows: over the content instead of beside it. */
 .sidebar.drawer {
   position: fixed;
   z-index: 15;
   left: 0;
   top: 0;
+}
+
+.sidebar.drawer.open {
+  width: min(var(--sidebar-width), 85vw);
 }
 
 .content {
@@ -243,6 +313,38 @@ function reloadConfig(): void {
   flex-direction: column;
   width: var(--sidebar-width);
   padding: 0 var(--sidebar-padding);
+}
+
+.sidebar.drawer .content {
+  width: min(var(--sidebar-width), 85vw);
+}
+
+.resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent-text);
+  opacity: 0;
+  transition: opacity var(--motion-quick) var(--motion-ease);
+}
+
+.resize-handle:hover::after,
+.sidebar.resizing .resize-handle::after {
+  opacity: 0.65;
 }
 
 .header {
@@ -384,6 +486,9 @@ function reloadConfig(): void {
   position: absolute;
   width: calc(var(--sidebar-width) - 2 * var(--sidebar-padding));
   transition-timing-function: var(--motion-exit-ease);
+}
+.sidebar.drawer .session-leave-active {
+  width: calc(min(var(--sidebar-width), 85vw) - 2 * var(--sidebar-padding));
 }
 
 .session-enter-from,

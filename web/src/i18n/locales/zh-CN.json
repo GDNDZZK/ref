@@ -239,7 +239,8 @@
     "sessions": "会话",
     "needsAnswer": "等待你的回答",
     "config": "配置 (ref.json)",
-    "reloadConfig": "重新加载配置"
+    "reloadConfig": "重新加载配置",
+    "resize": "调整侧边栏宽度"
   },
   "workspace": {
     "empty": "未打开会话"

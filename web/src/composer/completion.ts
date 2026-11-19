@@ -13,7 +13,7 @@ export interface SlashCommand {
   name: string // canonical, without the slash
   aliases: string[]
   title: string
-  takesArgs: boolean
+  requiresArgs: boolean
   custom: boolean // from the user's configuration; the built-in ones rank slightly higher
 }
 
@@ -85,6 +85,7 @@ export interface ShellContext {
   tokenStart: number
   token: string
   isPath: boolean
+  atLineStart: boolean
 }
 
 interface PathRequestSpec {
@@ -109,6 +110,125 @@ export const FILE_QUERY_DELAY_MS = 80
 const BUILTIN_BONUS = 5
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
 
+interface WrapperSpec {
+  flagArgs: ReadonlySet<string>
+  positionalArgs?: number
+  noPositionalIfFlag?: ReadonlySet<string>
+}
+
+const WRAPPERS = new Map<string, WrapperSpec>([
+  [
+    'sudo',
+    {
+      flagArgs: new Set([
+        '-C',
+        '-c',
+        '-D',
+        '-g',
+        '-h',
+        '-p',
+        '-R',
+        '-r',
+        '-t',
+        '-T',
+        '-U',
+        '-u',
+        '--close-from',
+        '--login-class',
+        '--chdir',
+        '--group',
+        '--host',
+        '--prompt',
+        '--chroot',
+        '--role',
+        '--type',
+        '--command-timeout',
+        '--other-user',
+        '--user',
+      ]),
+    },
+  ],
+  ['doas', { flagArgs: new Set(['-a', '-C', '-u']) }],
+  ['env', { flagArgs: new Set(['-a', '-C', '-S', '-u', '--argv0', '--chdir', '--split-string', '--unset']) }],
+  ['nohup', { flagArgs: new Set() }],
+  ['time', { flagArgs: new Set(['-f', '-o', '--format', '--output']) }],
+  ['nice', { flagArgs: new Set(['-n', '--adjustment']) }],
+  ['ionice', { flagArgs: new Set(['-c', '-n', '--class', '--classdata']) }],
+  ['timeout', { flagArgs: new Set(['-k', '-s', '--kill-after', '--signal']), positionalArgs: 1 }],
+  ['setsid', { flagArgs: new Set() }],
+  [
+    'strace',
+    { flagArgs: new Set(['-a', '-b', '-e', '-E', '-I', '-o', '-O', '-p', '-P', '-s', '-S', '-u', '-U']) },
+  ],
+  [
+    'ltrace',
+    { flagArgs: new Set(['-A', '-a', '-D', '-e', '-F', '-l', '-n', '-o', '-p', '-s', '-S', '-u', '-x']) },
+  ],
+  ['chrt', { flagArgs: new Set(), positionalArgs: 1 }],
+  [
+    'taskset',
+    {
+      flagArgs: new Set(['-c', '--cpu-list']),
+      positionalArgs: 1,
+      noPositionalIfFlag: new Set(['-c', '--cpu-list', '-p', '--pid']),
+    },
+  ],
+  ['stdbuf', { flagArgs: new Set(['-i', '-o', '-e', '--input', '--output', '--error']) }],
+  ['watch', { flagArgs: new Set(['-n', '--interval']) }],
+  ['command', { flagArgs: new Set() }],
+  ['exec', { flagArgs: new Set(['-a']) }],
+  ['builtin', { flagArgs: new Set() }],
+  [
+    'xargs',
+    {
+      flagArgs: new Set([
+        '-a',
+        '-d',
+        '-E',
+        '-e',
+        '-I',
+        '-i',
+        '-L',
+        '-l',
+        '-n',
+        '-P',
+        '-s',
+        '--arg-file',
+        '--delimiter',
+        '--eof',
+        '--replace',
+        '--max-lines',
+        '--max-args',
+        '--max-procs',
+        '--max-chars',
+        '--process-slot-var',
+      ]),
+    },
+  ],
+  ['caffeinate', { flagArgs: new Set(['-t', '-w']) }],
+  ['pkexec', { flagArgs: new Set(['-u', '--user']) }],
+])
+
+interface SlashToken {
+  start: number
+  end: number
+  query: string
+}
+
+function slashTokenAt(text: string, cursor: number): SlashToken | undefined {
+  let tokenStart = cursor
+  while (tokenStart > 0 && !/\s/.test(text[tokenStart - 1]!)) tokenStart--
+  if (cursor <= tokenStart || text[tokenStart] !== SLASH_PREFIX) return undefined
+
+  let end = cursor
+  while (end < text.length && !/\s/.test(text[end]!)) end++
+
+  const tokenBody = text.slice(tokenStart + 1, end)
+  if (tokenBody.includes('/') || tokenBody.includes('\\')) return undefined
+
+  return { start: tokenStart, end, query: text.slice(tokenStart + 1, cursor) }
+}
+
 export function slashItems(commands: readonly SlashCommand[], query: string): CompletionItem[] {
   const scored: { score: number; item: CompletionItem }[] = []
   for (const command of commands) {
@@ -125,9 +245,10 @@ export function slashItems(commands: readonly SlashCommand[], query: string): Co
         ? `${SLASH_PREFIX}${command.name}`
         : `${SLASH_PREFIX}${best.name} → ${SLASH_PREFIX}${command.name}`
     const bonus = command.custom ? 0 : BUILTIN_BONUS
+    const suffix = command.requiresArgs ? ' ' : ''
     scored.push({
       score: best.score + bonus,
-      item: { value: `${SLASH_PREFIX}${command.name} `, label, description: command.title },
+      item: { value: `${SLASH_PREFIX}${command.name}${suffix}`, label, description: command.title },
     })
   }
   scored.sort((a, b) => b.score - a.score)
@@ -207,6 +328,118 @@ function buildPathItems(spec: PathRequestSpec, entry: { dirs: string[]; files: s
   return items.slice(0, MAX_ITEMS)
 }
 
+function splitShellWords(input: string): string[] {
+  const words: string[] = []
+  let current = ''
+  let quote: "'" | '"' | null = null
+  let hasToken = false
+
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i]!
+    if (quote) {
+      if (ch === '\\' && quote === '"' && i + 1 < input.length) current += input[++i]!
+      else if (ch === quote) quote = null
+      else current += ch
+      hasToken = true
+      continue
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch
+      hasToken = true
+      continue
+    }
+    if (ch === '\\' && i + 1 < input.length) {
+      current += input[++i]!
+      hasToken = true
+      continue
+    }
+    if (/\s/.test(ch)) {
+      if (hasToken) {
+        words.push(current)
+        current = ''
+        hasToken = false
+      }
+      continue
+    }
+    current += ch
+    hasToken = true
+  }
+  if (hasToken) words.push(current)
+  return words
+}
+
+function wrapperKey(word: string): string {
+  const cut = Math.max(word.lastIndexOf('/'), word.lastIndexOf('\\'))
+  return cut >= 0 ? word.slice(cut + 1) : word
+}
+
+function flagName(word: string): string {
+  const eq = word.indexOf('=')
+  return eq >= 0 ? word.slice(0, eq) : word
+}
+
+function clearsPositional(flags: ReadonlySet<string>, word: string): boolean {
+  if (flags.has(flagName(word))) return true
+  if (!word.startsWith('-') || word.startsWith('--') || word.includes('=')) return false
+  return [...word.slice(1)].some((ch) => flags.has(`-${ch}`))
+}
+
+function flagConsumesNextWord(spec: WrapperSpec, word: string): boolean {
+  if (spec.flagArgs.has(word)) return true
+  if (!word.startsWith('-') || word.startsWith('--') || word.length <= 2 || word.includes('=')) {
+    return false
+  }
+  for (let i = 1; i < word.length; i++) {
+    if (spec.flagArgs.has(`-${word[i]!}`)) return i === word.length - 1
+  }
+  return false
+}
+
+function classifyShellRole(priorWords: readonly string[]): 'command' | 'wrapper-arg' | 'arg' {
+  let activeWrapper: WrapperSpec | undefined
+  let expectFlagArg = false
+  let endOfOptions = false
+  let remainingPositional = 0
+
+  for (const word of priorWords) {
+    if (expectFlagArg) {
+      expectFlagArg = false
+      continue
+    }
+    if (activeWrapper) {
+      if (!endOfOptions && word === '--') {
+        endOfOptions = true
+        continue
+      }
+      if (!endOfOptions && word.startsWith('-')) {
+        if (activeWrapper.noPositionalIfFlag && clearsPositional(activeWrapper.noPositionalIfFlag, word)) {
+          remainingPositional = 0
+        }
+        if (flagConsumesNextWord(activeWrapper, word)) expectFlagArg = true
+        continue
+      }
+      if (ENV_ASSIGNMENT.test(word) && remainingPositional === 0) continue
+      if (remainingPositional > 0) {
+        remainingPositional--
+        continue
+      }
+      activeWrapper = undefined
+      endOfOptions = false
+    }
+    if (ENV_ASSIGNMENT.test(word)) continue
+    const spec = WRAPPERS.get(wrapperKey(word))
+    if (spec) {
+      activeWrapper = spec
+      endOfOptions = false
+      remainingPositional = spec.positionalArgs ?? 0
+      continue
+    }
+    return 'arg'
+  }
+  if (expectFlagArg || remainingPositional > 0) return 'wrapper-arg'
+  return 'command'
+}
+
 export function parseShellContext(text: string, cursor: number): ShellContext | undefined {
   if (text === '') return undefined
   const before = text.slice(0, cursor)
@@ -251,20 +484,22 @@ export function parseShellContext(text: string, cursor: number): ShellContext | 
   const tokenMatch = /(\S*)$/.exec(segment)!
   const token = tokenMatch[1]!
   const tokenStart = cursor - token.length
+  const atLineStart = segmentIndex === 0 && tokenStart === 0
   const prior = segment.slice(0, segment.length - token.length).trim()
-  const priorWords = prior === '' ? [] : prior.split(/\s+/)
-  const nonEnvPrior = priorWords.filter((word) => !ENV_ASSIGNMENT.test(word))
-  const isCommand = nonEnvPrior.length === 0
+  const priorWords = prior === '' ? [] : splitShellWords(prior)
+  const role = classifyShellRole(priorWords)
 
-  if (isCommand) {
-    if (token === '') return undefined
+  if (role === 'wrapper-arg') return undefined
+
+  if (role === 'command') {
+    if (token === '' || token.startsWith('-') || ENV_ASSIGNMENT.test(token)) return undefined
     const isPath =
       token.includes('/') || token.includes('\\') || token.startsWith('.') || token.startsWith('~')
-    return { role: 'command', segmentIndex, tokenStart, token, isPath }
+    return { role: 'command', segmentIndex, tokenStart, token, isPath, atLineStart }
   }
 
   if (token.startsWith('-')) return undefined
-  return { role: 'arg', segmentIndex, tokenStart, token, isPath: true }
+  return { role: 'arg', segmentIndex, tokenStart, token, isPath: true, atLineStart }
 }
 
 function rankEnumItems(
@@ -342,12 +577,13 @@ export class CompletionController {
       return
     }
 
-    const query = text.slice(SLASH_PREFIX.length)
-    const typingCommand = text.startsWith(SLASH_PREFIX) && !/\s/.test(query) && cursor === text.length
-    if (typingCommand) return this.showCommands(query)
-
     if (text.startsWith(SLASH_PREFIX) && this.trySlashArgument(text, cursor, edited)) return
 
+    const slash = slashTokenAt(text, cursor)
+    if (slash) {
+      this.showCommands(slash.query, slash.start, slash.end)
+      return
+    }
     this.mention = mentionAt(text, cursor)
     if (!this.mention) return this.close()
     if (this.current.value?.kind !== 'file') this.close()
@@ -589,7 +825,13 @@ export class CompletionController {
       return
     }
 
-    this.requestShellCommandCompletion(context.token, context.tokenStart, cursor, context.segmentIndex)
+    this.requestShellCommandCompletion(
+      context.token,
+      context.tokenStart,
+      cursor,
+      context.segmentIndex,
+      context.atLineStart,
+    )
   }
 
   private requestPathCompletion(
@@ -673,8 +915,8 @@ export class CompletionController {
     }
   }
 
-  private shellHistoryItems(query: string, segmentIndex: number, start: number): CompletionItem[] {
-    if (segmentIndex !== 0 || start !== 0) return []
+  private shellHistoryItems(query: string, atLineStart: boolean): CompletionItem[] {
+    if (!atLineStart) return []
     const entries = this.deps.shellHistory?.() ?? []
     const lower = query.toLowerCase()
     const seen = new Set<string>()
@@ -698,10 +940,10 @@ export class CompletionController {
     start: number,
     end: number,
     segmentIndex: number,
+    atLineStart: boolean,
   ): void {
-    const historyItems = this.shellHistoryItems(query, segmentIndex, start)
+    const historyItems = this.shellHistoryItems(query, atLineStart)
     this.activeBinaryQuery = { query, start, end, segmentIndex }
-
     if (historyItems.length > 0) {
       this.current.value = {
         kind: 'shell',
@@ -761,20 +1003,21 @@ export class CompletionController {
     }
   }
 
-  private showCommands(query: string): void {
+  private showCommands(query: string, start: number, end: number): void {
     const items = slashItems(this.deps.commands(), query)
     if (items.length === 0) return this.close()
 
     const previous = this.current.value
-    const sameQuery = previous?.kind === 'slash' && this.slashQuery === query
-    const keep = sameQuery ? previous.selected : 0
+    const sameToken = previous?.kind === 'slash' && previous.start === start && this.slashQuery === query
+    const keep = sameToken ? previous.selected : 0
     this.slashQuery = query
     this.current.value = {
       kind: 'slash',
       items,
       selected: Math.min(keep, items.length - 1),
-      explicitlySelected: sameQuery ? previous.explicitlySelected : false,
-      start: 0,
+      explicitlySelected: sameToken ? previous.explicitlySelected : false,
+      start,
+      end,
     }
   }
 

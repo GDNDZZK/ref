@@ -90,6 +90,8 @@ QtObject {
 	readonly property int windowMinWidth: 640
 	readonly property int windowMinHeight: 420
 	readonly property int sidebarWidth: 264
+	readonly property int sidebarMinWidth: 210
+	readonly property int sidebarMaxWidth: 480
 	readonly property int sidebarPadding: 8
 	readonly property int sidebarHeaderHeight: 52
 	readonly property int sidebarRowHeight: 56
