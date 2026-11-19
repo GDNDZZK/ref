@@ -1,7 +1,7 @@
 //! OpenAI Chat Completions (`POST {base}/chat/completions`) and the many
 //! OpenAI-compatible hosts (DeepSeek, GLM, Qwen, Kimi, OpenRouter, vLLM, ...).
 
-use crate::error::stream_error;
+use crate::error::stream_error_json;
 use crate::sse::{SseEvent, data_values, is_done};
 use crate::util::{
     Assembler, CLIENT_OPTION_KEYS, DEFAULT_OPENAI_BASE, IMAGE_OMITTED, NO_TOOL_OUTPUT,
@@ -464,7 +464,7 @@ impl ChatState {
     fn on_chunk(&mut self, asm: &mut Assembler<'_>, chunk: &Value) -> Result<(), LlmError> {
         if let Some(err) = chunk.get("error").filter(|e| !e.is_null()) {
             let (code, message) = error_fields(err);
-            return Err(stream_error(code.as_deref(), &message));
+            return Err(stream_error_json(code.as_deref(), &message, chunk));
         }
         let choice = chunk
             .get("choices")

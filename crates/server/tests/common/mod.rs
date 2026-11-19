@@ -39,6 +39,8 @@ pub enum Reply {
     Tools(Vec<(String, String, String)>),
     Status(u16, String),
     StatusWithHeaders(u16, Vec<(String, String)>, String),
+    /// 200 OK SSE stream carrying a single `{"error": ...}` chunk.
+    StreamError(Value),
     /// Send one text delta then stall (for abort tests).
     Hang(String),
 }
@@ -93,6 +95,10 @@ fn sse(reply: &Reply) -> String {
             s.push_str(&chunk(
                 json!({"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}),
             ));
+        }
+        Reply::StreamError(err) => {
+            s.push_str(&chunk(json!({"error": err})));
+            return s;
         }
         Reply::Status(..) | Reply::StatusWithHeaders(..) | Reply::Hang(_) => {}
     }

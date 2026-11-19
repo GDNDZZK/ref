@@ -2198,3 +2198,50 @@ async fn export_expands_tilde_and_backslash_tilde() {
         );
     }
 }
+
+#[tokio::test]
+async fn retry_honors_retry_after_in_http_body_and_sse_error() {
+    let cases = [
+        (
+            "body-hint",
+            Reply::Status(
+                429,
+                r#"{"error":{"message":"Rate limit reached. Please try again in 0.15s"}}"#.into(),
+            ),
+        ),
+        (
+            "sse-hint",
+            Reply::StreamError(json!({
+                "code": "rate_limit_exceeded",
+                "message": "Server busy, retry after 0.15s",
+            })),
+        ),
+    ];
+    for (tag, err_reply) in cases {
+        let m = mock(Arc::new(move |n, _| {
+            if n == 0 {
+                err_reply.clone()
+            } else {
+                Reply::Text(format!("ok-{tag}"))
+            }
+        }))
+        .await;
+        let (hub, work) = hub(config(&m.url), tag);
+        let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
+        let conn = attached_conn(&hub, &s).await;
+        let start = std::time::Instant::now();
+        prompt(&hub, &s, "go");
+        wait_idle(&s).await;
+        let elapsed = start.elapsed();
+        assert_eq!(last_text(&s), format!("ok-{tag}"), "{tag}");
+        assert_eq!(m.count(), 2, "{tag}");
+        assert!(elapsed >= Duration::from_millis(150), "{tag}: {elapsed:?}");
+        let retrying = events(&conn).into_iter().any(|ev| {
+            matches!(
+                ev,
+                SessionEvent::Info { info } if matches!(info.status, SessionStatus::Retrying { next_at, .. } if next_at > 0)
+            )
+        });
+        assert!(retrying, "{tag}: expected SessionStatus::Retrying event");
+    }
+}
