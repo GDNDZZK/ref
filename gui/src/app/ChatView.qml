@@ -263,8 +263,8 @@ ListView {
 			loadOlderRequested()
 	}
 
-	// The view keeps the rows it shows where they are when earlier ones are added above them.
-	// The end stays on the bottom edge when the view changes height (a tile's input box comes or goes).
+	// The end stays on the bottom edge when the view changes height (a tile's input box comes or goes);
+	// a non-following view clamps to the new end when growing so no blank gap appears below the messages.
 	onSessionIdChanged: stopScrollMotion()
 	Connections {
 		target: view.model ? view.model : null
@@ -273,8 +273,13 @@ ListView {
 		}
 	}
 	onHeightChanged: {
-		if (following && previousHeight > 0)
-			contentY -= height - previousHeight
+		if (previousHeight > 0) {
+			const boundedMax = Math.max(minContentY, originY + contentHeight - height)
+			if (following)
+				contentY = Math.max(minContentY, Math.min(boundedMax, contentY - (height - previousHeight)))
+			else if (height > previousHeight && contentY > boundedMax)
+				contentY = boundedMax
+		}
 		previousHeight = height
 	}
 	onContentYChanged: loadOlderIfNear()

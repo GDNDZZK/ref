@@ -218,6 +218,7 @@ Window {
 			preferredWidth: Workspace.settings.sidebarWidth
 			maxAllowed: Math.max(Theme.sidebarMinWidth, Math.min(Theme.sidebarMaxWidth, (page.width > 0 ? page.width : Workspace.settings.windowWidth) - page.minAreaWidth))
 			width: Workspace.settings.sidebarVisible ? contentWidth : 0
+			visible: width > 0
 			headerLeftInset: window.isMac ? window.macTrafficLightInset : 0
 			dragEnabled: !dialogs.visible
 			onCollapseRequested: Commands.run(CommandId.sidebar)
