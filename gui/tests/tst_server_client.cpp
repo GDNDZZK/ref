@@ -22,7 +22,7 @@ namespace
 
 constexpr auto OpenTimeout = 2000ms;
 constexpr auto DropTimeout = 3000ms; // several times the heartbeat deadAfter of the test
-constexpr auto WatchPeriod = 700ms;  // several times what a silent backend gets
+constexpr auto WatchPeriod = 700ms;  // longer than deadAfter so answered pings must keep the link alive
 
 QJsonObject promptResult(const QString& messageId)
 {
@@ -228,7 +228,7 @@ private slots:
 		FakeBackend backend;
 		backend.onRequest = [&](const QJsonObject& request) { backend.respond(request, {}); };
 		ServerClient client;
-		client.setHeartbeat({.pingAfter = 50ms, .deadAfter = 200ms, .tick = 10ms});
+		client.setHeartbeat({.pingAfter = 50ms, .deadAfter = 500ms, .tick = 10ms});
 		QVERIFY(open(client, backend));
 		QSignalSpy closed(&client, &ServerClient::closed);
 

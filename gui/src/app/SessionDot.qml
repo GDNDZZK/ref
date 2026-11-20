@@ -45,7 +45,7 @@ Item {
 
 	Pulse {
 		target: dot
-		running: root.working
+		running: root.working && root.visible
 	}
 
 	onWorkingChanged: if (!working && !hasError) flourish.play()

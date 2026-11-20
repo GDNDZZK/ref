@@ -221,11 +221,17 @@ Item {
 				anchors { left: parent.left; leftMargin: 30; right: status.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
 				height: parent.height
 
+				TextMetrics {
+					id: titleMetrics
+					font: titleText.font
+					text: titleText.text
+				}
+
 				Text {
 					id: titleText
 					textFormat: Text.PlainText
 					anchors { left: parent.left; verticalCenter: parent.verticalCenter }
-					width: rootChip.visible ? Math.min(implicitWidth, Math.max(0, parent.width - rootChip.width - 8)) : parent.width
+					width: rootChip.visible ? Math.min(Math.ceil(titleMetrics.width), Math.max(0, parent.width - rootChip.width - 8)) : parent.width
 					text: tile.facts.displayTitle ?? ""
 					color: Theme.text
 					font.pixelSize: Theme.compactFontSize

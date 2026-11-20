@@ -219,7 +219,8 @@ Item {
 
 	Loader {
 		id: composerLoader
-		anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: pane.margin }
+		objectName: "composerLoader"
+		anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: composerLoader.height > 0 ? pane.margin : 0 }
 		width: chat.columnWidth
 		active: pane.composerShown || pane.session.composer.queueCount > 0
 		readonly property real sendButtonCenterX: item ? (item as Composer).sendButtonCenterX : width - pane.sendButtonFallbackInset

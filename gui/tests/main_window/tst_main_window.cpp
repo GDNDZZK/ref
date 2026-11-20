@@ -68,6 +68,8 @@ public:
 		m_sessions.insert(id, sessionInfoJson(id, {.title = u"Session "_s + id, .createdAt = created}));
 	}
 
+	void setSession(const QString& id, const QJsonObject& info) { m_sessions.insert(id, info); }
+	void broadcastSessions() { m_fake.send({{u"kind"_s, u"sessions"_s}, {u"sessions"_s, list()}}); }
 	void setMessages(const QString& id, const QJsonArray& messages) { m_messages.insert(id, messages); }
 	void setTodos(const QString& id, const QJsonArray& todos) { m_sessions[id][u"todos"_s] = todos; }
 	QString savedConfigRawText() const { return m_configRawText; }
@@ -413,6 +415,7 @@ private slots:
 	void sidebarVerticalSplittersResizePersistAndReset();
 	void tileEnlargeKeepsResizingLayoutUntilWidthAnimationSettles();
 	void composerAndUserBlockHighlightImageTokensAndAgentVariantSelects();
+	void splitUnfocusClampsScrollAndTileHeaderHasNoBindingLoop();
 };
 
 void TestMainWindow::initTestCase()
@@ -3272,6 +3275,92 @@ void TestMainWindow::composerAndUserBlockHighlightImageTokensAndAgentVariantSele
 	QCOMPARE(variantSelect->property("value").toString(), u"high"_s);
 	QCOMPARE(f.workspace->configEditor()->valueAt({u"agent"_s, u"build"_s, u"variant"_s}).toString(), u"high"_s);
 	QVERIFY2(warningSpy.isEmpty(), "Image token highlighting or agent variant SelectField emitted QML warnings");
+}
+
+void TestMainWindow::splitUnfocusClampsScrollAndTileHeaderHasNoBindingLoop()
+{
+	MainFixture f;
+	const QString longTitle = u"Very long split tile session title that forces header text elision beside the root chip"_s;
+	f.stub.setSession(u"ses_a"_s, sessionInfoJson(u"ses_a"_s, {.title = longTitle, .createdAt = 1, .attached = 1}));
+	f.stub.setSession(u"ses_b"_s, sessionInfoJson(u"ses_b"_s, {.title = longTitle, .createdAt = 2, .parent = u"ses_a"_s}));
+	f.stub.setSession(u"ses_c"_s, sessionInfoJson(u"ses_c"_s, {.title = longTitle, .createdAt = 3}));
+	f.stub.setMessages(u"ses_c"_s, manyMessagesJson());
+	f.stub.broadcastSessions();
+	QTRY_COMPARE(f.workspace->sessions()->count(), 3);
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	window->resize(1200, 720);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+
+	f.workspace->toggleSplit();
+	QTRY_VERIFY(f.workspace->isSplitView());
+	QQuickItem* tileGrid = findByTypePrefix(window->contentItem(), "TileGrid");
+	QVERIFY(tileGrid);
+	QQuickItem* tileB = nullptr;
+	QQuickItem* tileC = nullptr;
+	QTRY_VERIFY([&] {
+		QList<QQuickItem*> tiles;
+		collectTiles(tileGrid, tiles);
+		tileB = nullptr;
+		tileC = nullptr;
+		for(QQuickItem* candidate : tiles)
+		{
+			const QString id = candidate->property("sessionId").toString();
+			if(id == u"ses_b"_s && candidate->property("arrived").toBool())
+			{
+				tileB = candidate;
+			}
+			else if(id == u"ses_c"_s && candidate->property("arrived").toBool())
+			{
+				tileC = candidate;
+			}
+		}
+		return tileB != nullptr && tileC != nullptr;
+	}());
+
+	QQuickItem* paneB = findByTypePrefix(tileB, "SessionPane");
+	QQuickItem* chatB = findByTypePrefix(tileB, "ChatView");
+	QQuickItem* statusLineB = findByTypePrefix(tileB, "StatusLine");
+	QQuickItem* composerLoaderB = findItem(paneB, [](QQuickItem* item) { return item->objectName() == u"composerLoader"_s; });
+	QQuickItem* chatC = findByTypePrefix(tileC, "ChatView");
+	QVERIFY(paneB && chatB && statusLineB && composerLoaderB && chatC);
+	QTRY_VERIFY(tileB->property("hasRoot").toBool() && tileB->property("rootName").toString() == longTitle);
+	QTRY_VERIFY(chatB->property("maxContentY").toReal() > chatB->property("minContentY").toReal() + 100.0);
+	QTRY_VERIFY(chatC->property("maxContentY").toReal() > chatC->property("minContentY").toReal() + 100.0);
+
+	f.workspace->focusTile(u"ses_b"_s);
+	QTRY_COMPARE(f.workspace->focusedTileId(), u"ses_b"_s);
+	QTRY_VERIFY(paneB->property("composerShown").toBool() && composerLoaderB->height() > 0.0);
+	QTRY_VERIFY(chatB->property("maxContentY").toReal() > chatB->property("minContentY").toReal() + 100.0);
+	const qreal maxYBefore = chatB->property("maxContentY").toReal();
+	chatB->setProperty("following", false);
+	chatB->setProperty("contentY", maxYBefore);
+	QTRY_VERIFY(!chatB->property("following").toBool());
+	QTRY_VERIFY(qFuzzyCompare(chatB->property("contentY").toReal(), maxYBefore));
+
+	// Unfocusing tile B must collapse composerLoader margin and clamp chatB scroll to the grown viewport.
+	f.workspace->focusTile(u"ses_c"_s);
+	QTRY_COMPARE(f.workspace->focusedTileId(), u"ses_c"_s);
+	QTRY_VERIFY(!paneB->property("composerShown").toBool());
+	QTRY_COMPARE(composerLoaderB->height(), 0.0);
+	QObject* composerAnchors = composerLoaderB->property("anchors").value<QObject*>();
+	QVERIFY(composerAnchors);
+	QCOMPARE(composerAnchors->property("bottomMargin").toReal(), 0.0);
+	QTRY_VERIFY(std::abs((statusLineB->y() + statusLineB->height()) - paneB->height()) <= 0.5);
+	QTRY_VERIFY(chatB->property("contentY").toReal() <= chatB->property("maxContentY").toReal() + 1.0);
+	QTRY_VERIFY(chatB->property("contentY").toReal() >= chatB->property("minContentY").toReal() - 0.5);
+	QVERIFY2(warningSpy.isEmpty(), "Split unfocus scroll clamp or Tile header with root chip emitted QML warnings");
 }
 
 QTEST_MAIN(TestMainWindow)
