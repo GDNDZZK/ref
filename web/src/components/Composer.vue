@@ -10,6 +10,7 @@ import { useI18n } from 'vue-i18n'
 import { fileUriToPath, parseFileUris } from '../composer/sessionComposer.ts'
 import type { SessionComposer } from '../composer/sessionComposer.ts'
 import type { ChatSession } from '../model/chatSession.ts'
+import { hasImageTokens, splitImageTokens } from '../model/imageTokens.ts'
 import { useCommandsStore } from '../stores/commands.ts'
 import { useConnectionStore } from '../stores/connection.ts'
 import { useDialogsStore } from '../stores/dialogs.ts'
@@ -49,6 +50,7 @@ const notices = useNoticesStore()
 
 const draft = computed(() => props.composer.draft)
 const input = useTemplateRef<HTMLTextAreaElement>('input')
+const backdrop = useTemplateRef<HTMLElement>('backdrop')
 const root = useTemplateRef<HTMLElement>('root')
 const inputHeight = ref(SEND_BUTTON_SIZE)
 const dragDepth = ref(0) // drag events of the children come in pairs; the box is hovered while > 0
@@ -59,21 +61,30 @@ const boxHeight = computed(
   () => 2 * PADDING + stripHeight.value + inputHeight.value + TEXT_TAG_GAP + TAG_ROW_HEIGHT,
 )
 const interruptHint = computed(() => props.composer.interruptArmed.value)
+const showImageBackdrop = computed(() => hasImageTokens(draft.value.text))
+const textSegments = computed(() => (showImageBackdrop.value ? splitImageTokens(draft.value.text) : []))
 const placeholder = computed(() => {
   if (connection.state !== 'open') return t('composer.placeholderWaiting')
   if (draft.value.shell) return t('composer.placeholderShell')
   return props.session.busy ? t('composer.placeholderQueue') : t('composer.placeholder')
 })
 
+function syncBackdropScroll(): void {
+  if (backdrop.value && input.value) {
+    backdrop.value.scrollTop = input.value.scrollTop
+  }
+}
+
 function measure(): void {
   const area = input.value
   if (!area) return
-  // Vue owns the inline height; put it back so a measure without a change leaves it alone.
+  // Temporarily collapse height to measure scrollHeight, then restore any inline style.
   const applied = area.style.height
   area.style.height = '0'
   const wanted = Math.max(SEND_BUTTON_SIZE, area.scrollHeight)
   area.style.height = applied
   inputHeight.value = Math.min(wanted, MAX_INPUT_HEIGHT)
+  syncBackdropScroll()
 }
 
 // The composer moves the caret too (history, completion, restored drafts).
@@ -85,6 +96,7 @@ async function showCaret(): Promise<void> {
   if (area && document.activeElement === area && area.selectionStart !== caret) {
     area.setSelectionRange(caret, caret)
   }
+  syncBackdropScroll()
 }
 
 watch(() => draft.value.text, showCaret)
@@ -96,9 +108,12 @@ function sync(): void {
 
 function onInput(): void {
   sync()
-  requestAnimationFrame(measure)
+  syncBackdropScroll()
+  requestAnimationFrame(() => {
+    measure()
+    syncBackdropScroll()
+  })
 }
-
 function submit(): void {
   if (!canSend.value) return
   emit('submitted')
@@ -370,20 +385,30 @@ defineExpose({ focus: () => input.value?.focus() })
               @remove="(token) => composer.removeAttachment(token)"
             />
           </div>
-          <textarea
-            ref="input"
-            class="input"
-            rows="1"
-            :value="draft.text"
-            :placeholder="placeholder"
-            :aria-label="t('composer.label')"
-            :style="{ height: `${inputHeight}px`, marginLeft: `${TEXT_LEFT_EXTRA}px` }"
-            @input="onInput"
-            @keydown="onKeydown"
-            @keyup="onCaretMoved"
-            @click="onCaretMoved"
-            @paste="onPaste"
-          />
+          <div class="input-wrap" :style="{ height: `${inputHeight}px`, marginLeft: `${TEXT_LEFT_EXTRA}px` }">
+            <div v-if="showImageBackdrop" ref="backdrop" class="input-backdrop" aria-hidden="true">
+              <template v-for="(segment, index) in textSegments" :key="index">
+                <span v-if="segment.isImageToken" class="image-token">{{ segment.text }}</span>
+                <template v-else>{{ segment.text }}</template>
+              </template>
+              <span v-if="draft.text.endsWith('\n')" aria-hidden="true">&#8203;</span>
+            </div>
+            <textarea
+              ref="input"
+              class="input"
+              :class="{ 'has-image-tokens': showImageBackdrop }"
+              rows="1"
+              :value="draft.text"
+              :placeholder="placeholder"
+              :aria-label="t('composer.label')"
+              @input="onInput"
+              @scroll="syncBackdropScroll"
+              @keydown="onKeydown"
+              @keyup="onCaretMoved"
+              @click="onCaretMoved"
+              @paste="onPaste"
+            />
+          </div>
           <div class="tag-row" :style="{ height: `${TAG_ROW_HEIGHT}px` }">
             <ComposerTags
               :session="session"
@@ -466,23 +491,57 @@ defineExpose({ focus: () => input.value?.focus() })
   transition: height var(--motion-standard) var(--motion-ease);
 }
 
-.input {
+.input-wrap {
+  position: relative;
   flex: none;
   min-width: 0;
-  resize: none;
-  border: 0;
-  outline: 0;
+}
+
+.input-backdrop,
+.input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
   padding: 5px 0;
-  background: transparent;
-  color: var(--text);
+  border: 0;
   font: inherit;
   line-height: 22px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.input-backdrop {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  scrollbar-color: transparent transparent;
+  color: var(--text);
+  pointer-events: none;
+  user-select: none;
+}
+
+.input-backdrop .image-token {
+  color: var(--accent-text);
+}
+
+.input {
+  position: relative;
+  display: block;
+  min-width: 0;
+  resize: none;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+}
+
+.input.has-image-tokens {
+  color: transparent;
+  caret-color: var(--text);
 }
 
 .input::placeholder {
   color: var(--text-muted);
 }
-
 .tag-row {
   display: flex;
   flex: none;

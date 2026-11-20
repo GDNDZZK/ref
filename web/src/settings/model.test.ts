@@ -26,6 +26,8 @@ describe('parseSettings', () => {
       sidebarRunningExpanded: false,
       sidebarHistoryExpanded: false,
       sidebarRunningOrder: ['s2', 's1'],
+      sidebarTodoHeight: 160,
+      sidebarRunningHeight: 220,
     }
     expect(parseSettings(JSON.stringify(stored))).toEqual({ settings: stored, corrupt: false })
   })
@@ -67,6 +69,36 @@ describe('parseSettings', () => {
       parseSettings(JSON.stringify({ sidebarRunningOrder: ['s2', '', 42, null, 's1', 's2', 's3', false] }))
         .settings.sidebarRunningOrder,
     ).toEqual(['s2', 's1', 's3'])
+  })
+
+  it('parses sidebarTodoHeight and sidebarRunningHeight as non-negative integers and falls back to 0 on invalid values', () => {
+    expect(defaultSettings().sidebarTodoHeight).toBe(0)
+    expect(defaultSettings().sidebarRunningHeight).toBe(0)
+    expect(
+      parseSettings(JSON.stringify({ sidebarTodoHeight: 145.6, sidebarRunningHeight: 210.4 })).settings,
+    ).toMatchObject({
+      sidebarTodoHeight: 146,
+      sidebarRunningHeight: 210,
+    })
+    expect(
+      parseSettings(JSON.stringify({ sidebarTodoHeight: -10, sidebarRunningHeight: -0 })).settings,
+    ).toMatchObject({
+      sidebarTodoHeight: 0,
+      sidebarRunningHeight: 0,
+    })
+    expect(
+      parseSettings(JSON.stringify({ sidebarTodoHeight: 'tall', sidebarRunningHeight: null })).settings,
+    ).toMatchObject({
+      sidebarTodoHeight: 0,
+      sidebarRunningHeight: 0,
+    })
+    expect(
+      parseSettings(JSON.stringify({ sidebarTodoHeight: -Infinity, sidebarRunningHeight: Number.NaN }))
+        .settings,
+    ).toMatchObject({
+      sidebarTodoHeight: 0,
+      sidebarRunningHeight: 0,
+    })
   })
 })
 

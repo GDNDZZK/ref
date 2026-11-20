@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { describe, expect, it, vi } from 'vitest'
@@ -386,5 +388,35 @@ describe('Composer', () => {
     await press(wrapper, 'Tab')
     expect(value(wrapper)).toBe('sudo cargo ')
     vi.useRealTimers()
+  })
+
+  it('renders synchronized font-color-only backdrop for [Image N] tokens and omits it when absent', async () => {
+    const { wrapper } = setup()
+    const area = wrapper.get('textarea')
+    expect(wrapper.find('.input-backdrop').exists()).toBe(false)
+    expect(area.classes()).not.toContain('has-image-tokens')
+
+    await type(wrapper, 'plain text without tokens')
+    expect(wrapper.find('.input-backdrop').exists()).toBe(false)
+    expect(area.classes()).not.toContain('has-image-tokens')
+
+    await type(wrapper, 'Look at [Image 1] and [Image 2]\n')
+    await flushPromises()
+    const backdrop = wrapper.get('.input-backdrop')
+    expect(backdrop.attributes('aria-hidden')).toBe('true')
+    expect(area.classes()).toContain('has-image-tokens')
+    expect(backdrop.findAll('span.image-token').map((el) => el.text())).toEqual(['[Image 1]', '[Image 2]'])
+    expect(backdrop.text()).toContain('Look at [Image 1] and [Image 2]')
+
+    ;(area.element as HTMLTextAreaElement).scrollTop = 42
+    await area.trigger('scroll')
+    expect((backdrop.element as HTMLElement).scrollTop).toBe(42)
+
+    await type(wrapper, 'cleared')
+    await flushPromises()
+    expect(wrapper.find('.input-backdrop').exists()).toBe(false)
+    expect(area.classes()).not.toContain('has-image-tokens')
+    const source = readFileSync(resolve(process.cwd(), 'src/components/Composer.vue'), 'utf8')
+    expect(source).toMatch(/\.input-backdrop\s+\.image-token\s*\{\s*color:\s*var\(--accent-text\);\s*\}/)
   })
 })

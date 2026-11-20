@@ -535,4 +535,155 @@ describe('Sidebar', () => {
       }
     })
   })
+
+  describe('vertical section resizers', () => {
+    function mockVerticalRects(heights: { body: number; lists: number; todo: number; running: number }) {
+      const origRect = HTMLElement.prototype.getBoundingClientRect
+      return vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement,
+      ) {
+        const makeRect = (height: number): DOMRect =>
+          ({
+            top: 0,
+            left: 0,
+            x: 0,
+            y: 0,
+            width: 248,
+            height,
+            right: 248,
+            bottom: height,
+            toJSON: () => ({}),
+          }) as DOMRect
+        if (this.classList.contains('body')) return makeRect(heights.body)
+        if (this.classList.contains('lists')) return makeRect(heights.lists)
+        if (this.classList.contains('todo-slot')) return makeRect(heights.todo)
+        if (this.classList.contains('running-slot')) return makeRect(heights.running)
+        return origRect.call(this)
+      })
+    }
+
+    it('drags Todo<->Running and Running<->History resizers, clamps, persists, and resets on double-click', async () => {
+      const rectSpy = mockVerticalRects({ body: 600, lists: 440, todo: 120, running: 160 })
+      try {
+        const { workspace, wrapper } = mountSidebar()
+        const layout = useLayoutStore()
+        if (!layout.sidebarVisible) layout.toggleSidebar()
+        workspace.onFrame({
+          kind: 'sessions',
+          sessions: [info({ id: 's1', name: 'alpha', todos: [{ content: 'step 1', status: 'pending' }] })],
+        })
+        workspace.currentId = 's1'
+        await nextTick()
+
+        const aside = wrapper.get('aside.sidebar')
+        const splitters = wrapper.findAll('.section-resizer[role="separator"][aria-orientation="horizontal"]')
+        expect(splitters).toHaveLength(2)
+        const [todoSplitter, runningSplitter] = splitters as [
+          (typeof splitters)[number],
+          (typeof splitters)[number],
+        ]
+
+        // Drag Todo <-> Running from auto (measured 120px) down by 80px -> 200px.
+        await todoSplitter.trigger('pointerdown', { button: 0, pointerId: 1, clientY: 120 })
+        expect(aside.classes()).toContain('resizing-sections')
+        expect(todoSplitter.classes()).toContain('active')
+        await todoSplitter.trigger('pointermove', { pointerId: 1, clientY: 200 })
+        await nextTick()
+        expect(layout.sidebarTodoHeight).toBe(200)
+        expect(wrapper.get('.todo-slot').classes()).toContain('custom-height')
+        expect(wrapper.get('.todo-slot').attributes('style')).toContain('--todo-height: 200px')
+        expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({ sidebarTodoHeight: 200 })
+
+        // Clamps to min (66px) and max (600 - (28*2 + 6 + 56 + 6 + 32 + 4 + 44) = 396px).
+        await todoSplitter.trigger('pointermove', { pointerId: 1, clientY: -200 })
+        expect(layout.sidebarTodoHeight).toBe(66)
+        await todoSplitter.trigger('pointermove', { pointerId: 1, clientY: 900 })
+        expect(layout.sidebarTodoHeight).toBe(396)
+        await todoSplitter.trigger('pointerup', { pointerId: 1 })
+        expect(aside.classes()).not.toContain('resizing-sections')
+
+        // Double-click resets Todo height back to 0 (auto).
+        await todoSplitter.trigger('dblclick')
+        await nextTick()
+        expect(layout.sidebarTodoHeight).toBe(0)
+        expect(wrapper.get('.todo-slot').classes()).not.toContain('custom-height')
+
+        // Drag Running <-> History from auto (measured 160px) down by 50px -> 210px.
+        await runningSplitter.trigger('pointerdown', { button: 0, pointerId: 2, clientY: 300 })
+        expect(aside.classes()).toContain('resizing-sections')
+        expect(runningSplitter.classes()).toContain('active')
+        await runningSplitter.trigger('pointermove', { pointerId: 2, clientY: 350 })
+        await nextTick()
+        expect(layout.sidebarRunningHeight).toBe(210)
+        expect(wrapper.get('.running-slot').classes()).toContain('custom-height')
+        expect(wrapper.get('.running-slot').attributes('style')).toContain('--running-height: 210px')
+        expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({ sidebarRunningHeight: 210 })
+
+        // Clamps to min (56px) and max (440 - (28*2 + 6 + 32 + 4 + 44) = 298px).
+        await runningSplitter.trigger('pointermove', { pointerId: 2, clientY: -100 })
+        expect(layout.sidebarRunningHeight).toBe(metrics.sidebarRowHeight)
+        await runningSplitter.trigger('pointermove', { pointerId: 2, clientY: 900 })
+        expect(layout.sidebarRunningHeight).toBe(298)
+        await runningSplitter.trigger('pointerup', { pointerId: 2 })
+        expect(aside.classes()).not.toContain('resizing-sections')
+
+        // Double-click resets Running height back to 0 (auto).
+        await runningSplitter.trigger('dblclick')
+        await nextTick()
+        expect(layout.sidebarRunningHeight).toBe(0)
+        expect(wrapper.get('.running-slot').classes()).not.toContain('custom-height')
+        wrapper.unmount()
+      } finally {
+        rectSpy.mockRestore()
+      }
+    })
+
+    it('works in narrow drawer mode and cleans up drag state on pointercancel, lostpointercapture, and collapse', async () => {
+      const rectSpy = mockVerticalRects({ body: 500, lists: 380, todo: 100, running: 140 })
+      try {
+        const { workspace, wrapper } = mountSidebar()
+        const layout = useLayoutStore()
+        layout.narrow = true
+        layout.toggleSidebar() // opens drawer in narrow mode
+        workspace.onFrame({
+          kind: 'sessions',
+          sessions: [info({ id: 's1', name: 'alpha', todos: [{ content: 'step 1', status: 'pending' }] })],
+        })
+        workspace.currentId = 's1'
+        await nextTick()
+
+        const aside = wrapper.get('aside.sidebar')
+        const splitters = wrapper.findAll('.section-resizer')
+        expect(splitters).toHaveLength(2)
+        const todoSplitter = splitters[0]!
+        const runningSplitter = splitters[1]!
+        await todoSplitter.trigger('pointerdown', { button: 0, pointerId: 1, clientY: 100 })
+        expect(aside.classes()).toContain('resizing-sections')
+        await todoSplitter.trigger('pointercancel', { pointerId: 1 })
+        expect(aside.classes()).not.toContain('resizing-sections')
+
+        // lostpointercapture clears resizing-sections.
+        await runningSplitter.trigger('pointerdown', { button: 0, pointerId: 2, clientY: 200 })
+        expect(aside.classes()).toContain('resizing-sections')
+        await runningSplitter.trigger('lostpointercapture', { pointerId: 2 })
+        expect(aside.classes()).not.toContain('resizing-sections')
+
+        // Collapsing History mid-drag hides Running<->History splitter and cleans up drag state.
+        await runningSplitter.trigger('pointerdown', { button: 0, pointerId: 3, clientY: 200 })
+        expect(aside.classes()).toContain('resizing-sections')
+        layout.toggleSidebarHistory()
+        await nextTick()
+        expect(aside.classes()).not.toContain('resizing-sections')
+        expect(wrapper.findAll('.section-resizer')).toHaveLength(1) // only Todo<->Running remains
+
+        // Collapsing Running as well hides Todo<->Running splitter too.
+        layout.toggleSidebarRunning()
+        await nextTick()
+        expect(wrapper.findAll('.section-resizer')).toHaveLength(0)
+        wrapper.unmount()
+      } finally {
+        rectSpy.mockRestore()
+      }
+    })
+  })
 })

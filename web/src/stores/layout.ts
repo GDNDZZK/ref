@@ -34,6 +34,8 @@ export const useLayoutStore = defineStore('layout', () => {
   const sidebarTodoExpanded = computed(() => settings.settings.sidebarTodoExpanded)
   const sidebarRunningExpanded = computed(() => settings.settings.sidebarRunningExpanded)
   const sidebarHistoryExpanded = computed(() => settings.settings.sidebarHistoryExpanded)
+  const sidebarTodoHeight = computed(() => settings.settings.sidebarTodoHeight)
+  const sidebarRunningHeight = computed(() => settings.settings.sidebarRunningHeight)
   function clampWidth(value: number): number {
     return clamp(Math.round(value), metrics.sidebarMinWidth, maxSidebarWidth.value)
   }
@@ -50,6 +52,29 @@ export const useLayoutStore = defineStore('layout', () => {
     settings.update((draft) => (draft.sidebarWidth = metrics.sidebarWidth))
   }
 
+  function setSidebarTodoHeight(px: number): void {
+    if (!Number.isFinite(px)) return
+    const next = Math.max(0, Math.round(px)) || 0
+    if (next === settings.settings.sidebarTodoHeight) return
+    settings.update((draft) => (draft.sidebarTodoHeight = next))
+  }
+
+  function resetSidebarTodoHeight(): void {
+    if (settings.settings.sidebarTodoHeight === 0) return
+    settings.update((draft) => (draft.sidebarTodoHeight = 0))
+  }
+
+  function setSidebarRunningHeight(px: number): void {
+    if (!Number.isFinite(px)) return
+    const next = Math.max(0, Math.round(px)) || 0
+    if (next === settings.settings.sidebarRunningHeight) return
+    settings.update((draft) => (draft.sidebarRunningHeight = next))
+  }
+
+  function resetSidebarRunningHeight(): void {
+    if (settings.settings.sidebarRunningHeight === 0) return
+    settings.update((draft) => (draft.sidebarRunningHeight = 0))
+  }
   function toggleSidebar(): void {
     if (narrow.value) drawerOpen.value = !drawerOpen.value
     else settings.update((draft) => (draft.sidebarOpen = !draft.sidebarOpen))
@@ -78,8 +103,14 @@ export const useLayoutStore = defineStore('layout', () => {
     sidebarTodoExpanded,
     sidebarRunningExpanded,
     sidebarHistoryExpanded,
+    sidebarTodoHeight,
+    sidebarRunningHeight,
     setSidebarWidth,
     resetSidebarWidth,
+    setSidebarTodoHeight,
+    resetSidebarTodoHeight,
+    setSidebarRunningHeight,
+    resetSidebarRunningHeight,
     toggleSidebar,
     toggleSidebarTodo,
     toggleSidebarRunning,

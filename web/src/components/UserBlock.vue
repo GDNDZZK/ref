@@ -7,6 +7,7 @@ import { renderMarkdown } from '../markdown/markdown.ts'
 import { cssEasing } from '../motion/cssEasing.ts'
 import { prefersReducedMotion } from '../motion/reducedMotion.ts'
 import type { UserBlock } from '../model/blocks.ts'
+import { splitImageTokens } from '../model/imageTokens.ts'
 import { motion } from '../theme/generated/motion.ts'
 import Icon from './Icon.vue'
 import ImageThumbs from './ImageThumbs.vue'
@@ -29,7 +30,9 @@ const caption = computed(() => {
   return undefined
 })
 const shellHtml = computed(() => (props.block.source === 'shell' ? renderMarkdown(props.block.text) : ''))
-
+const textSegments = computed(() =>
+  props.block.source === 'shell' ? [] : splitImageTokens(props.block.text),
+)
 // Draws the divider across only for a freshly sent message.
 onMounted(() => {
   if (!props.fresh || prefersReducedMotion()) return
@@ -50,7 +53,12 @@ onMounted(() => {
       </div>
       <!-- eslint-disable-next-line vue/no-v-html -->
       <div v-if="shellHtml" class="text shell prose" v-html="shellHtml" />
-      <div v-else class="text">{{ block.text }}</div>
+      <div v-else class="text">
+        <template v-for="(segment, index) in textSegments" :key="index">
+          <span v-if="segment.isImageToken" class="image-token">{{ segment.text }}</span>
+          <template v-else>{{ segment.text }}</template>
+        </template>
+      </div>
     </div>
     <ImageThumbs v-if="block.images.length > 0" :images="block.images" :height="USER_THUMBNAIL_HEIGHT" />
   </div>
@@ -91,6 +99,9 @@ onMounted(() => {
   overflow-wrap: anywhere;
 }
 
+.image-token {
+  color: var(--accent-text);
+}
 .caption {
   display: flex;
   align-items: center;
