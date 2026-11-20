@@ -222,6 +222,7 @@ Item {
 		objectName: "composerLoader"
 		anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: composerLoader.height > 0 ? pane.margin : 0 }
 		width: chat.columnWidth
+		height: item ? item.height : 0
 		active: pane.composerShown || pane.session.composer.queueCount > 0
 		readonly property real sendButtonCenterX: item ? (item as Composer).sendButtonCenterX : width - pane.sendButtonFallbackInset
 
