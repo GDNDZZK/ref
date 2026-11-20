@@ -240,7 +240,9 @@
     "needsAnswer": "等待你的回答",
     "config": "配置 (ref.json)",
     "reloadConfig": "重新加载配置",
-    "resize": "调整侧边栏宽度"
+    "resize": "调整侧边栏宽度",
+    "resizeTodo": "调整待办区域高度",
+    "resizeRunning": "调整运行中区域高度"
   },
   "workspace": {
     "empty": "未打开会话"
@@ -619,6 +621,8 @@
         "mode": "模式",
         "model": "覆盖模型",
         "variant": "默认变体",
+        "variantDefaultPlaceholder": "默认",
+        "variantCustomPlaceholder": "例如 high、max",
         "color": "强调色",
         "creatable": "可选择 / 可创建",
         "canSpawn": "允许创建子会话",

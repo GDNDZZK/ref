@@ -240,7 +240,9 @@
     "needsAnswer": "Waiting for your answer",
     "config": "Configuration (ref.json)",
     "reloadConfig": "Reload configuration",
-    "resize": "Resize sidebar"
+    "resize": "Resize sidebar",
+    "resizeTodo": "Resize Todo section",
+    "resizeRunning": "Resize Running section"
   },
   "workspace": {
     "empty": "No session open"
@@ -619,6 +621,8 @@
         "mode": "Mode",
         "model": "Model override",
         "variant": "Default variant",
+        "variantDefaultPlaceholder": "Default",
+        "variantCustomPlaceholder": "e.g. high, max",
         "color": "Accent color",
         "creatable": "Selectable / creatable",
         "canSpawn": "Can spawn sub-sessions",

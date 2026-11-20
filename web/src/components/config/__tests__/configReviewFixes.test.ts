@@ -3,7 +3,8 @@ import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LOCALES, createAppI18n } from '../../../i18n/index.ts'
 import type { JsonObject } from '../../../config/jsonPatch.ts'
-import type { ConfigFilesInfo } from '../../../proto/generated'
+import { configuredVariantOptions } from '../../../config/sectionHelpers.ts'
+import type { ConfigFilesInfo, ModelInfo } from '../../../proto/generated'
 import { useConnectionStore } from '../../../stores/connection.ts'
 import { useDialogsStore } from '../../../stores/dialogs.ts'
 import { useWorkspaceStore } from '../../../stores/workspace.ts'
@@ -678,5 +679,124 @@ describe('Dead i18n keys removal and disabled PermissionRulesEditor inertness', 
     await radios[0]!.trigger('click')
     await radios[2]!.trigger('click')
     expect(onUpdate).not.toHaveBeenCalled()
+  })
+})
+
+describe('Agents Default variant dropdown from configured and server model variants', () => {
+  const serverModels: ModelInfo[] = [
+    {
+      provider: 'anthropic',
+      provider_name: 'Anthropic',
+      id: 'claude-sonnet-4-5',
+      name: 'Claude Sonnet 4.5',
+      context: 200000,
+      output: 8192,
+      images: true,
+      reasoning: true,
+      variants: ['medium', 'high', 'max'],
+    },
+    {
+      provider: 'openrouter',
+      provider_name: 'OpenRouter',
+      id: 'anthropic/claude-opus-4',
+      name: 'Claude Opus 4',
+      context: 200000,
+      output: 8192,
+      images: true,
+      reasoning: true,
+      variants: ['low', 'high'],
+    },
+  ]
+
+  it('resolves variants from doc + serverModels, strips #variant, and splits on first slash', () => {
+    const doc: JsonObject = {
+      model: 'anthropic/claude-sonnet-4-5#high',
+      provider: {
+        anthropic: {
+          models: {
+            'claude-sonnet-4-5': { variants: { custom: {}, high: {} } },
+          },
+        },
+      },
+    }
+
+    expect(configuredVariantOptions(doc, '', serverModels)).toEqual([
+      { value: 'custom', label: 'custom' },
+      { value: 'high', label: 'high' },
+      { value: 'medium', label: 'medium' },
+      { value: 'max', label: 'max' },
+    ])
+    expect(configuredVariantOptions(doc, 'openrouter/anthropic/claude-opus-4#low', serverModels)).toEqual([
+      { value: 'low', label: 'low' },
+      { value: 'high', label: 'high' },
+    ])
+    expect(configuredVariantOptions({}, 'invalid-model-ref', serverModels)).toEqual([])
+  })
+
+  it('renders SelectField + custom input + Reset for built-in and custom agents and syncs changes cleanly', async () => {
+    let doc: JsonObject = {
+      model: 'anthropic/claude-sonnet-4-5',
+      provider: {
+        openai: { models: { 'gpt-5': { variants: { minimal: {}, reasoning: {} } } } },
+      },
+      agent: {
+        reviewer: { description: 'Reviewer', model: 'openai/gpt-5' },
+      },
+    }
+
+    const wrapper = mount(AgentsSection, {
+      props: {
+        doc,
+        serverModels,
+        'onUpdate:doc': (next: JsonObject) => {
+          doc = next
+          void wrapper.setProps({ doc: next })
+        },
+      },
+      global: i18nGlobal(),
+    })
+
+    const cards = wrapper.findAll('.card')
+    const buildCard = cards[0]!
+    const reviewerCard = cards[cards.length - 1]!
+    await buildCard.get('.expand-btn').trigger('click')
+    await reviewerCard.get('.expand-btn').trigger('click')
+
+    // Built-in `build` inherits top-level `anthropic/claude-sonnet-4-5` -> variants from serverModels.
+    const buildVariantSelect = buildCard.get('select[aria-label="Default variant"]')
+    expect(buildVariantSelect.findAll('option').map((o) => o.attributes('value'))).toEqual([
+      '',
+      'medium',
+      'high',
+      'max',
+    ])
+    await buildVariantSelect.setValue('high')
+    expect((doc.agent as JsonObject).build).toEqual({ variant: 'high' })
+    expect((buildCard.get('input[aria-label="Default variant"]').element as HTMLInputElement).value).toBe(
+      'high',
+    )
+
+    // Reset button clears variant override on built-in agent and prunes empty agent entry.
+    const buildVariantRow = buildCard
+      .findAll('.form-row')
+      .find((row) => row.text().includes('Default variant'))!
+    await buildVariantRow.get('.text-button').trigger('click')
+    expect((doc.agent as JsonObject).build).toBeUndefined()
+    expect(buildVariantRow.find('.text-button').exists()).toBe(false)
+
+    // Custom `reviewer` uses its own model override `openai/gpt-5` -> variants from doc, plus custom entry & reset.
+    const reviewerVariantSelect = reviewerCard.get('select[aria-label="Default variant"]')
+    expect(reviewerVariantSelect.findAll('option').map((o) => o.attributes('value'))).toEqual([
+      '',
+      'minimal',
+      'reasoning',
+    ])
+    await reviewerCard.get('input[aria-label="Default variant"]').setValue('ultra')
+    expect(((doc.agent as JsonObject).reviewer as JsonObject).variant).toBe('ultra')
+    const reviewerVariantRow = reviewerCard
+      .findAll('.form-row')
+      .find((row) => row.text().includes('Default variant'))!
+    await reviewerVariantRow.get('.text-button').trigger('click')
+    expect(((doc.agent as JsonObject).reviewer as JsonObject).variant).toBeUndefined()
   })
 })

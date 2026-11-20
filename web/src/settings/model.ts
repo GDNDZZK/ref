@@ -23,6 +23,8 @@ export interface Settings {
   sidebarRunningExpanded: boolean
   sidebarHistoryExpanded: boolean
   sidebarRunningOrder: string[]
+  sidebarTodoHeight: number
+  sidebarRunningHeight: number
 }
 
 export const STORAGE_KEY = 'ref.settings'
@@ -41,9 +43,10 @@ export function defaultSettings(): Settings {
     sidebarRunningExpanded: true,
     sidebarHistoryExpanded: true,
     sidebarRunningOrder: [],
+    sidebarTodoHeight: 0,
+    sidebarRunningHeight: 0,
   }
 }
-
 function pick<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   return allowed.includes(value as T) ? (value as T) : fallback
 }
@@ -55,6 +58,10 @@ function flag(value: unknown, fallback: boolean): boolean {
 function width(value: unknown, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
   return clamp(Math.round(value), metrics.sidebarMinWidth, metrics.sidebarMaxWidth)
+}
+function nonNegativeInt(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return 0
+  return Math.round(value) || 0
 }
 function record(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {}
@@ -102,6 +109,8 @@ export function parseSettings(raw: string | null): { settings: Settings; corrupt
     sidebarRunningExpanded: flag(stored['sidebarRunningExpanded'], defaults.sidebarRunningExpanded),
     sidebarHistoryExpanded: flag(stored['sidebarHistoryExpanded'], defaults.sidebarHistoryExpanded),
     sidebarRunningOrder: stringList(stored['sidebarRunningOrder']),
+    sidebarTodoHeight: nonNegativeInt(stored['sidebarTodoHeight']),
+    sidebarRunningHeight: nonNegativeInt(stored['sidebarRunningHeight']),
   }
   return { settings, corrupt: false }
 }

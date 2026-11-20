@@ -8,6 +8,7 @@ import {
   getAt,
   getObjectAt,
   getStringArrayAt,
+  getStringAt,
   isPlainObject,
   setAt,
   setOwn,
@@ -68,6 +69,36 @@ export function configuredModelOptions(
   return [...seen.entries()].map(([value, label]) => ({ value, label }))
 }
 
+export function configuredVariantOptions(
+  doc: JsonObject,
+  modelRef: string,
+  serverModels: readonly ModelInfo[] = [],
+): SelectOption[] {
+  const effectiveModel = modelRef.trim() || getStringAt(doc, ['model'])?.trim() || ''
+  const baseModel = (effectiveModel.split('#')[0] ?? '').trim()
+  const slashIndex = baseModel.indexOf('/')
+  if (slashIndex <= 0 || slashIndex === baseModel.length - 1) return []
+
+  const providerId = baseModel.slice(0, slashIndex)
+  const modelId = baseModel.slice(slashIndex + 1)
+  const names = new Set<string>()
+
+  const docVariants = getObjectAt(doc, ['provider', providerId, 'models', modelId, 'variants'])
+  if (docVariants) {
+    for (const key of Object.keys(docVariants)) {
+      if (key.trim() !== '') names.add(key)
+    }
+  }
+
+  for (const model of serverModels) {
+    if (model.provider !== providerId || model.id !== modelId) continue
+    for (const variant of model.variants) {
+      if (variant.trim() !== '') names.add(variant)
+    }
+  }
+
+  return [...names].map((value) => ({ value, label: value }))
+}
 export function configuredAgentOptions(
   doc: JsonObject,
   serverAgents: readonly AgentInfo[] = [],

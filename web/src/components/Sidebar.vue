@@ -8,7 +8,7 @@ import lockupDark from '../../../assets/app/ref-lockup-small-dark.svg'
 import lockupLight from '../../../assets/app/ref-lockup-small-light.svg'
 import { clamp } from '../clamp.ts'
 import { useTheme } from '../composables/useTheme.ts'
-import { isWorkingSession, matchesQuery } from '../shell/sessionRow.ts'
+import { isWorkingSession, matchesQuery, todoProgress } from '../shell/sessionRow.ts'
 import { metrics } from '../theme/generated/theme.ts'
 import { useCommandsStore } from '../stores/commands.ts'
 import { useConnectionStore } from '../stores/connection.ts'
@@ -28,6 +28,13 @@ const LOCKUP_HEIGHT = 24
 const RUNNING_ROW_GAP = 2
 const AUTO_SCROLL_EDGE_PX = 24
 const AUTO_SCROLL_MAX_STEP_PX = 8
+const SECTION_RESIZER_HEIGHT = 6
+const SEARCH_HEIGHT = 32
+const SEARCH_GAP = 4
+const TODO_MIN_BODY_HEIGHT = 38 // 4px section margin + 2px list padding + 6px ul padding + 26px todo row
+const MIN_TODO_HEIGHT = metrics.sidebarSectionHeight + TODO_MIN_BODY_HEIGHT
+const MIN_RUNNING_HEIGHT = metrics.sidebarRowHeight
+const MIN_HISTORY_HEIGHT = SEARCH_HEIGHT + SEARCH_GAP + metrics.sidebarHistoryRowHeight
 const { t } = useI18n()
 const { isDark } = useTheme()
 const workspace = useWorkspaceStore()
@@ -42,7 +49,7 @@ const query = ref('')
 
 // The session on screen: the open one, or the focused tile in split view.
 const todos = computed(() => (workspace.focusedId ? workspace.infoOf(workspace.focusedId)?.todos : undefined))
-
+const hasTodo = computed(() => todoProgress(todos.value) !== undefined)
 const liveIds = computed(() => new Set(workspace.live.map((session) => session.id)))
 const history = computed(() =>
   workspace.history.filter((session) => !liveIds.value.has(session.id) && matchesQuery(session, query.value)),
@@ -123,7 +130,120 @@ function stopResize(event: PointerEvent): void {
   resetDragState()
 }
 
-// --- Running session long-press reorder.
+// --- Vertical section splitters (Todo <-> Running, Running <-> History).
+type SectionDragKind = 'todo' | 'running'
+const bodyEl = useTemplateRef<HTMLElement>('body')
+const listsEl = useTemplateRef<HTMLElement>('lists')
+const runningSlotEl = useTemplateRef<HTMLElement>('runningSlot')
+const activeSectionDrag = ref<SectionDragKind>()
+let sectionDragPointerId: number | undefined
+let sectionDragStartY = 0
+let sectionDragStartHeight = 0
+
+const showTodoResizer = computed(
+  () =>
+    hasTodo.value &&
+    layout.sidebarTodoExpanded &&
+    (layout.sidebarRunningExpanded || layout.sidebarHistoryExpanded),
+)
+const showRunningResizer = computed(() => layout.sidebarRunningExpanded && layout.sidebarHistoryExpanded)
+const runningCustomActive = computed(() => layout.sidebarRunningHeight > 0 && showRunningResizer.value)
+const runningSlotStyle = computed(() =>
+  runningCustomActive.value ? { '--running-height': `${layout.sidebarRunningHeight}px` } : undefined,
+)
+const todoMaxHeightCss = computed(() => {
+  const reserved = [
+    '2 * var(--sidebar-section-height)',
+    ...(showTodoResizer.value ? ['var(--section-resizer-height)'] : []),
+    ...(layout.sidebarRunningExpanded ? ['var(--sidebar-row-height)'] : []),
+    ...(showRunningResizer.value ? ['var(--section-resizer-height)'] : []),
+    ...(layout.sidebarHistoryExpanded
+      ? ['var(--search-height)', 'var(--search-gap)', 'var(--sidebar-history-row-height)']
+      : []),
+  ]
+  return `max(${MIN_TODO_HEIGHT}px, calc(100% - ${reserved.join(' - ')}))`
+})
+
+function resetSectionDragState(): void {
+  activeSectionDrag.value = undefined
+  sectionDragPointerId = undefined
+}
+
+watch(
+  [showTodoResizer, showRunningResizer, () => layout.sidebarVisible],
+  ([todoShown, runningShown, visible]) => {
+    if (!visible) {
+      resetSectionDragState()
+      return
+    }
+    if (activeSectionDrag.value === 'todo' && !todoShown) resetSectionDragState()
+    if (activeSectionDrag.value === 'running' && !runningShown) resetSectionDragState()
+  },
+)
+
+function tryCapturePointer(target: HTMLElement | null, pointerId: number): void {
+  if (!target?.setPointerCapture) return
+  try {
+    target.setPointerCapture(pointerId)
+  } catch (error) {
+    if (!(error instanceof DOMException && error.name === 'NotFoundError')) throw error
+  }
+}
+
+function startSectionResize(kind: SectionDragKind, event: PointerEvent): void {
+  if (event.button !== 0) return
+  event.preventDefault()
+  const sectionEl =
+    kind === 'todo' ? bodyEl.value?.querySelector<HTMLElement>('.todo-slot') : runningSlotEl.value
+  const measured = sectionEl?.getBoundingClientRect().height ?? 0
+  const fallback =
+    kind === 'todo'
+      ? layout.sidebarTodoHeight || MIN_TODO_HEIGHT
+      : layout.sidebarRunningHeight || MIN_RUNNING_HEIGHT
+  activeSectionDrag.value = kind
+  sectionDragPointerId = event.pointerId
+  sectionDragStartY = event.clientY
+  sectionDragStartHeight = measured > 0 ? measured : fallback
+  tryCapturePointer(event.currentTarget as HTMLElement | null, event.pointerId)
+}
+
+function moveSectionResize(event: PointerEvent): void {
+  if (!activeSectionDrag.value || event.pointerId !== sectionDragPointerId) return
+  const deltaY = event.clientY - sectionDragStartY
+  if (activeSectionDrag.value === 'todo') {
+    const bodyHeight = bodyEl.value?.getBoundingClientRect().height ?? 0
+    const reservedBelow =
+      2 * metrics.sidebarSectionHeight +
+      SECTION_RESIZER_HEIGHT +
+      (layout.sidebarRunningExpanded ? MIN_RUNNING_HEIGHT : 0) +
+      (showRunningResizer.value ? SECTION_RESIZER_HEIGHT : 0) +
+      (layout.sidebarHistoryExpanded ? MIN_HISTORY_HEIGHT : 0)
+    const maxTodo =
+      bodyHeight > 0
+        ? Math.max(MIN_TODO_HEIGHT, Math.floor(bodyHeight - reservedBelow))
+        : Number.POSITIVE_INFINITY
+    layout.setSidebarTodoHeight(clamp(Math.round(sectionDragStartHeight + deltaY), MIN_TODO_HEIGHT, maxTodo))
+    return
+  }
+  const listsHeight = listsEl.value?.getBoundingClientRect().height ?? 0
+  const reservedInLists = 2 * metrics.sidebarSectionHeight + SECTION_RESIZER_HEIGHT + MIN_HISTORY_HEIGHT
+  const maxRunning =
+    listsHeight > 0
+      ? Math.max(MIN_RUNNING_HEIGHT, Math.floor(listsHeight - reservedInLists))
+      : Number.POSITIVE_INFINITY
+  layout.setSidebarRunningHeight(
+    clamp(Math.round(sectionDragStartHeight + deltaY), MIN_RUNNING_HEIGHT, maxRunning),
+  )
+}
+
+function stopSectionResize(event: PointerEvent): void {
+  if (!activeSectionDrag.value || event.pointerId !== sectionDragPointerId) return
+  const handle = event.currentTarget as HTMLElement | null
+  if (handle?.hasPointerCapture?.(event.pointerId)) {
+    handle.releasePointerCapture(event.pointerId)
+  }
+  resetSectionDragState()
+}
 const runningRef = useTemplateRef<ComponentPublicInstance>('running')
 const draggingId = ref<string>()
 const dragOffset = ref(0)
@@ -271,13 +391,21 @@ watch(
   },
 )
 
-onBeforeUnmount(endSessionDrag)
+onBeforeUnmount(() => {
+  endSessionDrag()
+  resetDragState()
+  resetSectionDragState()
+})
 </script>
-
 <template>
   <aside
     class="sidebar"
-    :class="{ open: layout.sidebarVisible, drawer: layout.narrow, resizing }"
+    :class="{
+      open: layout.sidebarVisible,
+      drawer: layout.narrow,
+      resizing,
+      'resizing-sections': activeSectionDrag !== undefined,
+    }"
     :style="sidebarStyle"
   >
     <div class="content" :inert="!layout.sidebarVisible || undefined">
@@ -316,13 +444,29 @@ onBeforeUnmount(endSessionDrag)
         </button>
       </div>
 
-      <div class="body">
+      <div ref="body" class="body">
         <SidebarTodo
           :todos="todos"
           :expanded="layout.sidebarTodoExpanded"
+          :height="layout.sidebarTodoHeight"
+          :max-height="todoMaxHeightCss"
           @toggle="layout.toggleSidebarTodo()"
         />
-        <div class="lists" :class="{ 'history-collapsed': !layout.sidebarHistoryExpanded }">
+        <div
+          v-if="showTodoResizer"
+          class="section-resizer"
+          :class="{ active: activeSectionDrag === 'todo' }"
+          role="separator"
+          aria-orientation="horizontal"
+          :aria-label="t('sidebar.resizeTodo')"
+          @pointerdown="startSectionResize('todo', $event)"
+          @pointermove="moveSectionResize"
+          @pointerup="stopSectionResize"
+          @pointercancel="stopSectionResize"
+          @lostpointercapture="stopSectionResize"
+          @dblclick="layout.resetSidebarTodoHeight()"
+        />
+        <div ref="lists" class="lists" :class="{ 'history-collapsed': !layout.sidebarHistoryExpanded }">
           <h2 class="section">
             <button
               type="button"
@@ -335,8 +479,10 @@ onBeforeUnmount(endSessionDrag)
             </button>
           </h2>
           <div
+            ref="runningSlot"
             class="running-slot"
-            :class="{ open: layout.sidebarRunningExpanded }"
+            :class="{ open: layout.sidebarRunningExpanded, 'custom-height': runningCustomActive }"
+            :style="runningSlotStyle"
             :inert="!layout.sidebarRunningExpanded || undefined"
           >
             <div class="fold">
@@ -362,7 +508,20 @@ onBeforeUnmount(endSessionDrag)
               </TransitionGroup>
             </div>
           </div>
-
+          <div
+            v-if="showRunningResizer"
+            class="section-resizer"
+            :class="{ active: activeSectionDrag === 'running' }"
+            role="separator"
+            aria-orientation="horizontal"
+            :aria-label="t('sidebar.resizeRunning')"
+            @pointerdown="startSectionResize('running', $event)"
+            @pointermove="moveSectionResize"
+            @pointerup="stopSectionResize"
+            @pointercancel="stopSectionResize"
+            @lostpointercapture="stopSectionResize"
+            @dblclick="layout.resetSidebarRunningHeight()"
+          />
           <h2 class="section">
             <button
               type="button"
@@ -493,6 +652,15 @@ onBeforeUnmount(endSessionDrag)
   user-select: none;
 }
 
+.sidebar.resizing-sections {
+  user-select: none;
+}
+
+.sidebar.resizing-sections :deep(.todo-slot),
+.sidebar.resizing-sections .running-slot,
+.sidebar.resizing-sections .history-slot {
+  transition: none;
+}
 /* Narrow windows: over the content instead of beside it. */
 .sidebar.drawer {
   position: fixed;
@@ -628,6 +796,9 @@ onBeforeUnmount(endSessionDrag)
 
 .body {
   --sidebar-todo-share: 3; /* the Todo section takes at most this fraction of the column */
+  --search-height: 32px;
+  --search-gap: 4px;
+  --section-resizer-height: 6px;
 
   display: flex;
   flex: 1;
@@ -637,13 +808,36 @@ onBeforeUnmount(endSessionDrag)
 
 /* What is left under the Todo section: the percentages of Running count against this. */
 .lists {
-  --search-height: 32px;
-  --search-gap: 4px;
-
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 0;
+}
+
+.section-resizer {
+  position: relative;
+  flex: none;
+  height: var(--section-resizer-height);
+  cursor: row-resize;
+  touch-action: none;
+}
+
+.section-resizer::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  right: 0;
+  left: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent-text);
+  opacity: 0;
+  transition: opacity var(--motion-quick) var(--motion-ease);
+}
+
+.section-resizer:hover::after,
+.section-resizer.active::after {
+  opacity: 0.65;
 }
 
 .section {
@@ -722,6 +916,18 @@ onBeforeUnmount(endSessionDrag)
   opacity: 1;
 }
 
+.running-slot.open.custom-height {
+  height: var(--running-height);
+  min-height: var(--sidebar-row-height);
+  max-height: max(
+    var(--sidebar-row-height),
+    calc(
+      100% - 2 * var(--sidebar-section-height) - var(--section-resizer-height) - var(--search-height) -
+        var(--search-gap) - var(--sidebar-history-row-height)
+    )
+  );
+}
+
 .lists.history-collapsed .running-slot {
   max-height: calc(100% - 2 * var(--sidebar-section-height));
 }
@@ -734,6 +940,10 @@ onBeforeUnmount(endSessionDrag)
   gap: 2px;
   min-height: 0;
   overflow-y: auto;
+}
+
+.running-slot.open.custom-height .running {
+  flex: 1 1 auto;
 }
 .session-enter-active,
 .session-leave-active {

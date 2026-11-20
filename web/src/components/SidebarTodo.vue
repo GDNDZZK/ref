@@ -8,19 +8,32 @@ import { todoProgress } from '../shell/sessionRow.ts'
 import Chevron from './Chevron.vue'
 import TodoList from './TodoList.vue'
 
-const props = withDefaults(defineProps<{ todos: readonly Todo[] | undefined; expanded?: boolean }>(), {
-  expanded: true,
-})
+const props = withDefaults(
+  defineProps<{
+    todos: readonly Todo[] | undefined
+    expanded?: boolean
+    height?: number
+    maxHeight?: string
+  }>(),
+  { expanded: true, height: 0, maxHeight: undefined },
+)
 const emit = defineEmits<{ toggle: [] }>()
 
 const { t } = useI18n()
 const progress = computed(() => todoProgress(props.todos))
 const list = computed(() => [...(props.todos ?? [])])
+const customHeight = computed(() => props.expanded && props.height > 0)
+const slotStyle = computed(() => {
+  if (!customHeight.value) return undefined
+  return {
+    '--todo-height': `${props.height}px`,
+    ...(props.maxHeight ? { '--todo-max-height': props.maxHeight } : {}),
+  }
+})
 </script>
-
 <template>
   <Transition name="todo-fold">
-    <div v-if="progress" class="todo-slot">
+    <div v-if="progress" class="todo-slot" :class="{ 'custom-height': customHeight }" :style="slotStyle">
       <div class="todo-fold">
         <section class="todo-section" :aria-label="t('sidebar.todo')">
           <h2 class="heading">
@@ -55,6 +68,12 @@ const list = computed(() => [...(props.todos ?? [])])
   transition:
     grid-template-rows var(--motion-standard) var(--motion-ease),
     opacity var(--motion-standard) var(--motion-ease);
+}
+
+.todo-slot.custom-height {
+  height: var(--todo-height);
+  min-height: calc(var(--sidebar-section-height) + 38px);
+  max-height: var(--todo-max-height, calc(100% - 2 * var(--sidebar-section-height)));
 }
 
 .todo-fold {
