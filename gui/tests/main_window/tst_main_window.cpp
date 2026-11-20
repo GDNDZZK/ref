@@ -337,6 +337,15 @@ bool tilesOnTheGrid(QQuickItem* windowContent, QQuickItem* grid)
 	return any;
 }
 
+void typeAsciiText(QQuickWindow* window, const QString& text)
+{
+	for(const QChar ch : text)
+	{
+		const Qt::Key key = ch.isLetter() ? static_cast<Qt::Key>(ch.toUpper().unicode()) : static_cast<Qt::Key>(ch.unicode());
+		QTest::keyClick(window, key);
+	}
+}
+
 struct MainFixture
 {
 	MainFixture()
@@ -1809,13 +1818,7 @@ void TestMainWindow::shimmerTextModelsHoverCtrlTAtomicImageAndCompletionsWork()
 	QVERIFY(f.workspace->current()->composer()->pasteFromClipboard());
 	QCOMPARE(f.workspace->current()->composer()->text(), u"[Image 1] "_s);
 	f.workspace->current()->composer()->clearDraft();
-	const auto typeText = [&](const QString& text) {
-		for(const QChar ch : text)
-		{
-			const Qt::Key k = ch.isLetter() ? static_cast<Qt::Key>(ch.toUpper().unicode()) : static_cast<Qt::Key>(ch.unicode());
-			QTest::keyClick(window, k);
-		}
-	};
+	const auto typeText = [&](const QString& text) { typeAsciiText(window, text); };
 	// Standalone `/mod` Tab completes without trailing space.
 	typeText(u"/mod"_s);
 	QTest::keyClick(window, Qt::Key_Tab);
@@ -2756,7 +2759,7 @@ void TestMainWindow::uiZoomSettingsShortcutsResizeAndPopupsScaleCleanly()
 	scaleInput->forceActiveFocus();
 	QTRY_VERIFY(scaleInput->hasActiveFocus());
 	QMetaObject::invokeMethod(scaleInput, "selectAll");
-	QTest::keyClicks(window, u"135"_s);
+	typeAsciiText(window, u"135"_s);
 	QTest::keyClick(window, Qt::Key_Return);
 	QTRY_VERIFY(qFuzzyCompare(f.workspace->settings()->uiScale(), 1.35));
 	QTRY_VERIFY(qFuzzyCompare(scaledRoot->scale(), 1.35));
@@ -2764,7 +2767,7 @@ void TestMainWindow::uiZoomSettingsShortcutsResizeAndPopupsScaleCleanly()
 	scaleInput->forceActiveFocus();
 	QTRY_VERIFY(scaleInput->hasActiveFocus());
 	QMetaObject::invokeMethod(scaleInput, "selectAll");
-	QTest::keyClicks(window, u"250"_s);
+	typeAsciiText(window, u"250"_s);
 	QTest::keyClick(window, Qt::Key_Return);
 	QTRY_VERIFY(qFuzzyCompare(f.workspace->settings()->uiScale(), 2.5));
 	QTRY_VERIFY(qFuzzyCompare(scaledRoot->scale(), 2.5));
@@ -3207,7 +3210,7 @@ void TestMainWindow::composerAndUserBlockHighlightImageTokensAndAgentVariantSele
 	img.fill(Qt::green);
 	QGuiApplication::clipboard()->setImage(img);
 	QVERIFY(f.workspace->current()->composer()->pasteFromClipboard());
-	QTest::keyClicks(window, u"hello"_s);
+	typeAsciiText(window, u"hello"_s);
 	QCOMPARE(f.workspace->current()->composer()->text(), u"[Image 1] hello"_s);
 	auto* composerDocWrap = textArea->property("textDocument").value<QQuickTextDocument*>();
 	QVERIFY(composerDocWrap);
