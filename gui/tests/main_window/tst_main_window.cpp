@@ -3017,27 +3017,33 @@ void TestMainWindow::sidebarVerticalSplittersResizePersistAndReset()
 	auto* runningHandle = findByName(sidebar, u"runningResizeHandle"_s);
 	QVERIFY(sidebar && todoSection && runningList && todoHandle && runningHandle);
 	QTRY_VERIFY(todoHandle->isVisible() && runningHandle->isVisible());
+	QTRY_VERIFY(todoSection->height() > 0.0 && qFuzzyCompare(todoSection->height(), sidebar->property("todoHeight").toReal()));
+	QTRY_VERIFY(runningList->height() > 0.0 && qFuzzyCompare(runningList->height(), sidebar->property("runningTargetHeight").toReal()));
 
 	const qreal initialTodoH = todoSection->height();
 	const QPoint todoPt = todoHandle->mapToScene(QPointF(todoHandle->width() / 2.0, todoHandle->height() / 2.0)).toPoint();
+	QTest::mouseMove(window, todoPt);
 	QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, todoPt);
 	QTest::mouseMove(window, todoPt + QPoint(0, 15));
 	QTest::mouseMove(window, todoPt + QPoint(0, 40));
 	QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, todoPt + QPoint(0, 40));
 	QTRY_VERIFY(f.workspace->settings()->sidebarTodoHeight() > 0);
-	QVERIFY(std::abs(f.workspace->settings()->sidebarTodoHeight() - qRound(initialTodoH + 40.0)) <= 2);
+	QVERIFY2(std::abs(f.workspace->settings()->sidebarTodoHeight() - qRound(initialTodoH + 40.0)) <= 2,
+	         qPrintable(u"todoHeight=%1 initial=%2"_s.arg(f.workspace->settings()->sidebarTodoHeight()).arg(initialTodoH)));
 	QTRY_COMPARE(qRound(todoSection->height()), f.workspace->settings()->sidebarTodoHeight());
+	QTRY_VERIFY(qFuzzyCompare(runningList->height(), sidebar->property("runningTargetHeight").toReal()));
 
 	const qreal initialRunningH = runningList->height();
 	const QPoint runPt = runningHandle->mapToScene(QPointF(runningHandle->width() / 2.0, runningHandle->height() / 2.0)).toPoint();
+	QTest::mouseMove(window, runPt);
 	QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, runPt);
 	QTest::mouseMove(window, runPt + QPoint(0, -15));
 	QTest::mouseMove(window, runPt + QPoint(0, -40));
 	QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, runPt + QPoint(0, -40));
 	QTRY_VERIFY(f.workspace->settings()->sidebarRunningHeight() > 0);
-	QVERIFY(std::abs(f.workspace->settings()->sidebarRunningHeight() - qRound(initialRunningH - 40.0)) <= 2);
+	QVERIFY2(std::abs(f.workspace->settings()->sidebarRunningHeight() - qRound(initialRunningH - 40.0)) <= 2,
+	         qPrintable(u"runningHeight=%1 initial=%2"_s.arg(f.workspace->settings()->sidebarRunningHeight()).arg(initialRunningH)));
 	QTRY_COMPARE(qRound(runningList->height()), f.workspace->settings()->sidebarRunningHeight());
-
 	// Double-click resets each section height to 0 (auto).
 	const QPoint todoNewPt = todoHandle->mapToScene(QPointF(todoHandle->width() / 2.0, todoHandle->height() / 2.0)).toPoint();
 	QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, todoNewPt);
@@ -3069,7 +3075,7 @@ void TestMainWindow::tileEnlargeKeepsResizingLayoutUntilWidthAnimationSettles()
 	QVERIFY2(created, qPrintable(component.errorString()));
 	auto* window = qobject_cast<QQuickWindow*>(created.get());
 	QVERIFY(window);
-	window->resize(960, 560);
+	window->resize(1200, 720);
 	QVERIFY(QTest::qWaitForWindowExposed(window));
 
 	f.workspace->toggleSplit();
@@ -3109,12 +3115,14 @@ void TestMainWindow::tileEnlargeKeepsResizingLayoutUntilWidthAnimationSettles()
 void TestMainWindow::composerAndUserBlockHighlightImageTokensAndAgentVariantSelects()
 {
 	MainFixture f;
-	f.stub.setMessages(u"ses_a"_s, QJsonArray{
+	f.stub.setMessages(u"ses_b"_s, QJsonArray{
 		QJsonObject{{u"id"_s, u"u_img"_s},
 		            {u"role"_s, u"user"_s},
 		            {u"time"_s, 1},
 		            {u"parts"_s, QJsonArray{QJsonObject{{u"type"_s, u"text"_s}, {u"text"_s, u"[Image 1] inspect this"_s}, {u"time"_s, 1}}}}},
 	});
+	f.workspace->openSession(u"ses_b"_s);
+	QTRY_COMPARE(f.workspace->currentId(), u"ses_b"_s);
 	f.stub.setModels(QJsonArray{
 		QJsonObject{{u"provider"_s, u"p"_s},
 		            {u"provider_name"_s, u"Provider"_s},
