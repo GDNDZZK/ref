@@ -65,8 +65,8 @@ The window has a sidebar on the left and the content on the right: one session, 
 - A running session is labelled with the name you gave it, else its title, else the name of its directory. A session in the history is labelled with its title (on one line), else its name, else the name of its directory, as in the terminal UI. The *Running* list is as tall as its rows and scrolls only when *History* would get fewer than three rows.
 - The *New session* button creates a session in the workspace's default directory. The folder button next to it, or *New session in folder…* / *New session in another folder…*, asks for a directory first and updates the workspace's default directory to that folder.
 - Closing a session that is still working asks for confirmation first (including from the sidebar and the *Sessions* dialog); its conversation stays in history. Closing the last open session returns to *No session open* instead of starting a new one (and in split view, closing the held foreground session clears it without pulling a background tile out of the grid).
-- The sidebar can be hidden and shown again (Ctrl+Shift+B) and resized by dragging its right border (210–480 px; double-click the edge to reset to 264 px). Click a *Todo*, *Running*, or *History* header (or press Space / Return / Enter when focused) to collapse or expand that section; collapsed sections give their vertical space to the remaining expanded ones. Sidebar visibility, width, and section fold states are remembered.
-- At the top of the sidebar, above *Running*, the *Todo* section shows the to-do list of the session you are looking at (in the split view, of the focused tile) with the number of items done, like *Todo 2/5*; cancelled items count in neither number. Long items wrap, the list scrolls when it takes more than a third of the sidebar, and the section is hidden while the session has no to-do list.
+- The sidebar can be hidden and shown again (Ctrl+Shift+B) and resized by dragging its right border (210–480 px; double-click the edge to reset to 264 px). Click a *Todo*, *Running*, or *History* header (or press Space / Return / Enter when focused) to collapse or expand that section; collapsed sections give their vertical space to the remaining expanded ones. Drag the horizontal divider between *Todo* and *Running* or between *Running* and *History* vertically to adjust section heights (double-click a divider to return to automatic sizing). Sidebar visibility, width, section fold states, and custom section heights are remembered.
+- At the top of the sidebar, above *Running*, the *Todo* section shows the to-do list of the session you are looking at (in the split view, of the focused tile) with the number of items done, like *Todo 2/5*; cancelled items count in neither number. Long items wrap, the list scrolls once it reaches its height limit (a third of the sidebar by default, or the custom dragged height), and the section is hidden while the session has no to-do list.
 - The command palette (Ctrl+P) lists every command and filters as you type. Commands that take no argument run at once; choosing *Rename the session*, *Change this session's working directory*, *Export transcript as markdown*, *Set or cycle model variant* or *Close live sessions* opens its dedicated dialog directly, and pressing Esc while entering custom-command arguments returns to the command list. It holds the same commands as the `/` list in the input box, including your [custom commands](configuration.md) (group *Custom*). Without a shortcut: *New session in another folder…*, *Move session to background* (`/detach`), *Rename the session*, *Change this session's working directory*, *Close live sessions*, the `peers` commands, *MCP servers*, *Configuration* (`/config`) and *Reload configuration* (`/reload`). There are no `/editor` and `/exit` commands.
 - *Configuration* (`/config` or `/configuration`, the configuration button in the sidebar footer, or *Settings* → *Edit ref.json…*) opens the 860 px six-section visual and raw JSONC editor for global `ref.json`, with multi-profile switching (`ref.json.<n>.bak`) and Ctrl+S to save; `/reload` (`/reload-config`, or the reload button) hot-reloads configuration across live sessions and MCP servers. See [Graphical editor and profiles](configuration.md#graphical-editor-and-profiles).
 - If the running backend is older than the GUI, a banner at the top of the content offers *Restart backend*. The button is disabled while a session is running or waiting for permission. The restart stops the backend; the GUI then starts the installed one again.
@@ -192,11 +192,11 @@ Open them with Ctrl+Shift+S or the settings button at the bottom of the sidebar.
 
 - **Theme:** System, Light or Dark.
 - **Language:** System, English or 简体中文. The conversation area and the dialogs are translated.
-- **Interface zoom:** `70%`–`150%` in `10%` steps (`−` / `+` / *Reset* buttons, Command Palette, or `Ctrl+=` / `Ctrl+-` / `Ctrl+0`; `Cmd` on macOS).
+- **Interface zoom:** `50%`–`400%` (`−` / `+` / *Reset* buttons, Command Palette, or `Ctrl+=` / `Ctrl+-` / `Ctrl+0` in `5%` steps, or type any percentage directly; `Cmd` on macOS). Restart `ref-gui` after changing zoom for native `QT_SCALE_FACTOR` sharpness.
 - **Notifications:** the master switch and the three kinds described [above](#notifications).
 - **Configuration:** *Reload configuration* and *Edit ref.json…* (see [Graphical editor and profiles](configuration.md#graphical-editor-and-profiles)).
 
-They are saved in `gui.json` in the state directory ([Files and directories](cli.md#files-and-directories)), together with `uiScale` (interface zoom factor), whether the sidebar is shown, its width, section fold states, running session order (`sidebar.runningOrder`), and the size of the window:
+They are saved in `gui.json` in the state directory ([Files and directories](cli.md#files-and-directories)), together with `uiScale` (interface zoom factor), whether the sidebar is shown, its width, section fold states, custom section heights (`sidebar.todoHeight` / `sidebar.runningHeight`), running session order (`sidebar.runningOrder`), and the size of the window:
 
 ```json
 {
@@ -204,11 +204,11 @@ They are saved in `gui.json` in the state directory ([Files and directories](cli
   "language": "system",
   "uiScale": 1,
   "notifications": { "enabled": true, "permission": true, "turnDone": true, "turnError": true },
-  "sidebar": { "visible": true, "todoExpanded": true, "runningExpanded": true, "historyExpanded": true, "width": 264, "runningOrder": [] }
+  "sidebar": { "visible": true, "todoExpanded": true, "runningExpanded": true, "historyExpanded": true, "width": 264, "todoHeight": 0, "runningHeight": 0, "runningOrder": [] }
 }
 ```
 
-`theme` is `system`, `light` or `dark`; `language` is `system`, `en` or `zh_CN`; `uiScale` is `0.7`–`1.5` (default `1`). The file is written on every change. If it cannot be read, it is renamed to `gui.json.bad`, the defaults are used, and the settings dialog and a message in the corner say so. Values that are wrong are ignored one by one and keep their defaults.
+`theme` is `system`, `light` or `dark`; `language` is `system`, `en` or `zh_CN`; `uiScale` is `0.5`–`4` (default `1`); `sidebar.todoHeight` and `sidebar.runningHeight` are `0` (automatic) or a height in pixels. The file is written on every change. If it cannot be read, it is renamed to `gui.json.bad`, the defaults are used, and the settings dialog and a message in the corner say so. Values that are wrong are ignored one by one and keep their defaults.
 
 ## Known limits
 
