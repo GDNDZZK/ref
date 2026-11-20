@@ -26,6 +26,7 @@ Workspace::Workspace(refgui::cli::LaunchOptions options, QString settingsPath, Q
 	, m_options(std::move(options))
 	, m_cwd(m_options.directory)
 	, m_settings(std::move(settingsPath))
+	, m_startupUiScale(m_settings.uiScale())
 	, m_connection(m_options.source, m_cwd)
 {
 	connect(&m_connection, &refgui::workspace::Connection::stateChanged, this, [this] {

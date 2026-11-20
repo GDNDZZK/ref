@@ -136,6 +136,13 @@ refgui_add_test(tst_link_colorizer
 target_include_directories(tst_link_colorizer PRIVATE ${PROJECT_SOURCE_DIR}/src) # links no library that brings it
 set_tests_properties(tst_link_colorizer PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+refgui_add_test(tst_system_fonts
+	SOURCES ${PROJECT_SOURCE_DIR}/src/app/system_fonts.h
+	LIBS Qt6::Gui Qt6::Qml
+)
+target_include_directories(tst_system_fonts PRIVATE ${PROJECT_SOURCE_DIR}/src)
+set_tests_properties(tst_system_fonts PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 # Text from the model must not reach the network. Compiles the program's network policy.
 refgui_add_test(tst_network_policy
 	SOURCES ${PROJECT_SOURCE_DIR}/src/app/local_only_network.cpp ${PROJECT_SOURCE_DIR}/src/app/local_only_network.h

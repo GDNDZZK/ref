@@ -28,11 +28,13 @@ Item {
 	readonly property int rows: Math.ceil(count / columns)
 	readonly property real tileHeight: rows === 0 ? 0 : Math.max(Theme.tileMinHeight, (height - contentTop - padding - (rows - 1) * gap) / rows)
 	readonly property real gridHeight: rows === 0 ? 0 : contentTop + padding + rows * tileHeight + (rows - 1) * gap
+	readonly property real pixelScale: Math.max(1, (Screen.devicePixelRatio || 1) * UiScale.factor)
 
 	clip: true
 	opacity: Workspace.splitView ? 1 : 0
 	layer.enabled: !Workspace.splitView && visible
 	layer.smooth: true
+	layer.textureSize: Qt.size(Math.max(1, Math.ceil(width * grid.pixelScale)), Math.max(1, Math.ceil(height * grid.pixelScale)))
 
 	Behavior on opacity {
 		NumberAnimation {

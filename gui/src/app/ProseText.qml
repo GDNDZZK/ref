@@ -7,6 +7,7 @@ TextEdit {
 	id: prose
 
 	property bool streaming: false
+	property bool highlightImageTokens: false
 
 	readOnly: true
 	textFormat: TextEdit.PlainText // Markdown items say so; text from outside is never read as markup
@@ -23,6 +24,7 @@ TextEdit {
 		document: prose.textDocument
 		color: Theme.accentText
 		streaming: prose.streaming
+		highlightImageTokens: prose.highlightImageTokens
 	}
 
 	HoverHandler {

@@ -8,6 +8,7 @@
 #include "icons/app_icon.h"
 #include "icons/icon_provider.h"
 #include "notify/notifier.h"
+#include "workspace/settings.h"
 #include "workspace/state_paths.h"
 
 #include <QDir>
@@ -22,6 +23,7 @@
 #include <QTimer>
 
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 
 using namespace Qt::StringLiterals;
@@ -35,6 +37,26 @@ constexpr std::chrono::milliseconds SmokeTimeout = 30s;
 // After the session opened, the window gets this long to create its rows, so that QML
 // warnings about them show up on stderr before the program exits.
 constexpr std::chrono::milliseconds SmokeSettle = 400ms;
+
+constexpr auto ScaleFactorEnvVar = "QT_SCALE_FACTOR";
+constexpr double UiScaleEpsilon = 1e-6;
+
+void applyStartupUiScale(const QString& settingsPath)
+{
+	const double startupUiScale = refgui::workspace::Settings::readUiScaleOnly(settingsPath);
+	if(qAbs(startupUiScale - refgui::workspace::Settings::DefaultUiScale) <= UiScaleEpsilon)
+	{
+		return;
+	}
+	double combined = startupUiScale;
+	bool ok = false;
+	const double base = qEnvironmentVariable(ScaleFactorEnvVar).toDouble(&ok);
+	if(ok && std::isfinite(base) && base > 0.0)
+	{
+		combined = base * startupUiScale;
+	}
+	qputenv(ScaleFactorEnvVar, QByteArray::number(combined, 'g', 6));
+}
 
 void print(QTextStream& stream, const QString& text)
 {
@@ -92,6 +114,9 @@ void connectNotifications(Workspace& workspace, refgui::notify::NotificationCent
 
 int main(int argc, char* argv[])
 {
+	const QString settingsPath = refgui::workspace::stateFilePath(u"gui.json"_s);
+	applyStartupUiScale(settingsPath);
+
 	QGuiApplication app(argc, argv);
 	QQuickStyle::setStyle(u"Basic"_s); // the same look on every platform
 	QGuiApplication::setApplicationName(u"ref-gui"_s);
@@ -123,7 +148,7 @@ int main(int argc, char* argv[])
 	int exitCode = EXIT_FAILURE;
 	{
 		// Outlives the engine, whose window refers to it.
-		Workspace workspace(options, refgui::workspace::stateFilePath(u"gui.json"_s));
+		Workspace workspace(options, settingsPath);
 		Workspace::setInstance(&workspace);
 		const auto resetWorkspace = qScopeGuard([] { Workspace::setInstance(nullptr); });
 

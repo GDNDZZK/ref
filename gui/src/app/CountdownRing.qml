@@ -17,6 +17,7 @@ Item {
 	readonly property real almostFullTurn: 359.99 // an arc of exactly a turn is not drawn
 	readonly property real sweep: Math.min(almostFullTurn, remaining / total * fullTurn)
 	readonly property real radius: (Math.min(width, height) - strokeWidth) / 2
+	readonly property real pixelScale: Math.max(1, (Screen.devicePixelRatio || 1) * UiScale.factor)
 
 	property real now: Date.now()
 	property real total: 1 // ms; the wait when the ring started
@@ -45,7 +46,10 @@ Item {
 		readonly property real degrees: Math.PI / 180
 		readonly property real twelveOClock: -Math.PI / 2
 
-		anchors.fill: parent
+		width: Math.max(1, Math.ceil(ring.width * ring.pixelScale))
+		height: Math.max(1, Math.ceil(ring.height * ring.pixelScale))
+		transformOrigin: Item.TopLeft
+		scale: 1 / ring.pixelScale
 		renderTarget: Canvas.Image
 
 		function arc(ctx, color, cap, from, sweepDegrees) {
@@ -57,9 +61,14 @@ Item {
 			ctx.stroke()
 		}
 
+		onWidthChanged: canvas.requestPaint()
+		onHeightChanged: canvas.requestPaint()
+
 		onPaint: {
 			const ctx = getContext("2d")
-			ctx.reset()
+			ctx.setTransform(1, 0, 0, 1, 0, 0)
+			ctx.clearRect(0, 0, width, height)
+			ctx.setTransform(ring.pixelScale, 0, 0, ring.pixelScale, 0, 0)
 			arc(ctx, Theme.border, "butt", 0, ring.almostFullTurn)
 			arc(ctx, ring.color, "round", twelveOClock, ring.sweep)
 		}
@@ -68,6 +77,7 @@ Item {
 			target: ring
 			function onSweepChanged() { canvas.requestPaint() }
 			function onColorChanged() { canvas.requestPaint() }
+			function onPixelScaleChanged() { canvas.requestPaint() }
 		}
 
 		Connections {

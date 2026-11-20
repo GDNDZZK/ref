@@ -934,6 +934,48 @@ QVariantList ConfigEditorController::agentOptions() const
 	return options;
 }
 
+QVariantList ConfigEditorController::variantOptions(const QString& modelRef) const
+{
+	QString effectiveModel = modelRef.trimmed();
+	if(effectiveModel.isEmpty())
+	{
+		effectiveModel = valueAt({u"model"_s}).toString().trimmed();
+	}
+	const qsizetype hash = effectiveModel.indexOf(u'#');
+	if(hash >= 0)
+	{
+		effectiveModel = effectiveModel.left(hash).trimmed();
+	}
+	const qsizetype slash = effectiveModel.indexOf(u'/');
+	if(slash <= 0 || slash + 1 >= effectiveModel.size())
+	{
+		return {};
+	}
+	const QString providerId = effectiveModel.left(slash);
+	const QString modelId = effectiveModel.mid(slash + 1);
+
+	QVariantList options;
+	QSet<QString> seen;
+	const auto appendVariants = [&](const QStringList& variants) {
+		for(const QString& variant : variants)
+		{
+			if(variant.isEmpty() || seen.contains(variant))
+			{
+				continue;
+			}
+			seen.insert(variant);
+			options.append(QVariantMap{
+				{u"label"_s, variant},
+				{u"value"_s, variant},
+			});
+		}
+	};
+
+	appendVariants(keysAt({u"provider"_s, providerId, u"models"_s, modelId, u"variants"_s}));
+	appendVariants(m_backendConfig.variantsOf(providerId, modelId));
+	return options;
+}
+
 void ConfigEditorController::applyServerInfo(const proto::ConfigFilesInfo& info, bool resetModeOnValid)
 {
 	m_configDir = info.configDir;

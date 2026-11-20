@@ -251,7 +251,8 @@ Item {
 			onPointChanged: {
 				if (!hovered || !hoverGuard.movedTo(point.scenePosition))
 					return
-				const index = view.indexAt(point.position.x + view.contentX, point.position.y + view.contentY)
+				const local = view.mapFromItem(null, point.scenePosition.x, point.scenePosition.y)
+				const index = view.indexAt(local.x + view.contentX, local.y + view.contentY)
 				if (index >= 0) {
 					path.animateHighlight = true
 					view.currentIndex = index

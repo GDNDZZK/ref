@@ -30,9 +30,13 @@
 #include <QQmlError>
 #include <QQuickItem>
 #include <QQuickStyle>
+#include <QQuickTextDocument>
 #include <QQuickWindow>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QTextBlock>
+#include <QTextDocument>
+#include <QTextLayout>
 #include <QWheelEvent>
 #include <QtTest>
 #include <memory>
@@ -397,6 +401,9 @@ private slots:
 	void switchClicksWithHitPaddingInsideConfigFlickableAndResetButtonsClearFields();
 	void sidebarRunningRowsReorderByLongPressDragAndPersistAcrossFrames();
 	void uiZoomSettingsShortcutsResizeAndPopupsScaleCleanly();
+	void sidebarVerticalSplittersResizePersistAndReset();
+	void tileEnlargeKeepsResizingLayoutUntilWidthAnimationSettles();
+	void composerAndUserBlockHighlightImageTokensAndAgentVariantSelects();
 };
 
 void TestMainWindow::initTestCase()
@@ -2648,6 +2655,18 @@ void TestMainWindow::sidebarRunningRowsReorderByLongPressDragAndPersistAcrossFra
 void TestMainWindow::uiZoomSettingsShortcutsResizeAndPopupsScaleCleanly()
 {
 	MainFixture f;
+	QJsonArray models;
+	for(int i = 0; i < 12; ++i)
+	{
+		models.append(QJsonObject{{u"provider"_s, u"p"_s},
+		                          {u"provider_name"_s, u"Provider"_s},
+		                          {u"id"_s, u"m%1"_s.arg(i)},
+		                          {u"name"_s, u"Model %1"_s.arg(i)}});
+	}
+	f.stub.setModels(models);
+	f.workspace->reloadConfig();
+	QTRY_COMPARE(f.workspace->config()->models().size(), 12);
+
 	QQmlEngine engine;
 	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
 	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
@@ -2672,7 +2691,7 @@ void TestMainWindow::uiZoomSettingsShortcutsResizeAndPopupsScaleCleanly()
 	QVERIFY(scaledRoot && handle);
 	QVERIFY(qFuzzyCompare(scaledRoot->scale(), 1.0));
 
-	// 1) SettingsDialog zoom buttons update uiScale and scaledRoot.
+	// 1) SettingsDialog zoom buttons (5% step) and editable uiScaleInput update uiScale, scaledRoot, and Icon sourceSize.
 	f.workspace->commands()->run(u"settings"_s);
 	QQuickItem* settingsDialog = nullptr;
 	QTRY_VERIFY([&] {
@@ -2686,18 +2705,23 @@ void TestMainWindow::uiZoomSettingsShortcutsResizeAndPopupsScaleCleanly()
 	auto* outBtn = findByName(settingsDialog, u"uiScaleOutButton"_s);
 	auto* inBtn = findByName(settingsDialog, u"uiScaleInButton"_s);
 	auto* resetBtn = findByName(settingsDialog, u"uiScaleResetButton"_s);
-	auto* label = findByName(settingsDialog, u"uiScaleLabel"_s);
-	QVERIFY(outBtn && inBtn && resetBtn && label);
-	QCOMPARE(label->property("text").toString(), u"100%"_s);
+	auto* scaleInput = findByName(settingsDialog, u"uiScaleInput"_s);
+	QVERIFY(outBtn && inBtn && resetBtn && scaleInput);
+	auto scalePercentText = [scaleInput]() {
+		QString text = scaleInput->property("text").toString().trimmed();
+		text.remove(u'%');
+		return text;
+	};
+	QCOMPARE(scalePercentText(), u"100"_s);
 	QVERIFY(!resetBtn->isVisible());
 
 	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
 	                  inBtn->mapToScene(QPointF(inBtn->width() / 2.0, inBtn->height() / 2.0)).toPoint());
-	QTRY_VERIFY(qFuzzyCompare(f.workspace->settings()->uiScale(), 1.1));
-	QCOMPARE(label->property("text").toString(), u"110%"_s);
+	QTRY_VERIFY(qFuzzyCompare(f.workspace->settings()->uiScale(), 1.05));
+	QCOMPARE(scalePercentText(), u"105"_s);
 	QVERIFY(resetBtn->isVisible());
-	QVERIFY(qFuzzyCompare(scaledRoot->scale(), 1.1));
-	QVERIFY(qFuzzyCompare(scaledRoot->width(), window->width() / 1.1));
+	QVERIFY(qFuzzyCompare(scaledRoot->scale(), 1.05));
+	QVERIFY(qFuzzyCompare(scaledRoot->width(), window->width() / 1.05));
 	QPointF prevResetCenter;
 	bool hasPrevResetCenter = false;
 	QTRY_VERIFY([&] {
@@ -2726,17 +2750,44 @@ void TestMainWindow::uiZoomSettingsShortcutsResizeAndPopupsScaleCleanly()
 	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
 	                  resetBtn->mapToScene(QPointF(resetBtn->width() / 2.0, resetBtn->height() / 2.0)).toPoint());
 	QTRY_VERIFY(qFuzzyCompare(f.workspace->settings()->uiScale(), 1.0));
-	QCOMPARE(label->property("text").toString(), u"100%"_s);
+	QCOMPARE(scalePercentText(), u"100"_s);
 	QVERIFY(!resetBtn->isVisible());
 
-	// 2) Shortcuts Ctrl+= / Ctrl+- / Ctrl+0 work in SettingsDialog, and are suppressed in CommandPalette.
+	scaleInput->forceActiveFocus();
+	QTRY_VERIFY(scaleInput->hasActiveFocus());
+	QMetaObject::invokeMethod(scaleInput, "selectAll");
+	QTest::keyClicks(window, u"135"_s);
+	QTest::keyClick(window, Qt::Key_Return);
+	QTRY_VERIFY(qFuzzyCompare(f.workspace->settings()->uiScale(), 1.35));
+	QTRY_VERIFY(qFuzzyCompare(scaledRoot->scale(), 1.35));
+
+	scaleInput->forceActiveFocus();
+	QTRY_VERIFY(scaleInput->hasActiveFocus());
+	QMetaObject::invokeMethod(scaleInput, "selectAll");
+	QTest::keyClicks(window, u"250"_s);
+	QTest::keyClick(window, Qt::Key_Return);
+	QTRY_VERIFY(qFuzzyCompare(f.workspace->settings()->uiScale(), 2.5));
+	QTRY_VERIFY(qFuzzyCompare(scaledRoot->scale(), 2.5));
+
+	auto* sidebar = findByTypePrefix(window->contentItem(), "Sidebar_QMLTYPE");
+	QVERIFY(sidebar);
+	auto* sidebarIcon = findByTypePrefix(sidebar, "Icon_QMLTYPE");
+	QVERIFY(sidebarIcon);
+	const int iconSize = sidebarIcon->property("size").toInt();
+	QCOMPARE(sidebarIcon->property("sourceSize").toSize(), QSize(qRound(iconSize * 2.5), qRound(iconSize * 2.5)));
+
+	settingsDialog->forceActiveFocus();
+	QTest::keyClick(window, Qt::Key_0, Qt::ControlModifier);
+	QTRY_VERIFY(qFuzzyCompare(f.workspace->settings()->uiScale(), 1.0));
+
+	// 2) Shortcuts Ctrl+= / Ctrl+- / Ctrl+0 (5% step) work in SettingsDialog, and are suppressed in CommandPalette.
 	QTest::keyClick(window, Qt::Key_Equal, Qt::ControlModifier);
-	QTRY_VERIFY(qFuzzyCompare(f.workspace->settings()->uiScale(), 1.1));
+	QTRY_VERIFY(qFuzzyCompare(f.workspace->settings()->uiScale(), 1.05));
 	QTest::keyClick(window, Qt::Key_Minus, Qt::ControlModifier);
 	QTRY_VERIFY(qFuzzyCompare(f.workspace->settings()->uiScale(), 1.0));
 	QTest::keyClick(window, Qt::Key_Equal, Qt::ControlModifier);
 	QTest::keyClick(window, Qt::Key_Equal, Qt::ControlModifier);
-	QTRY_VERIFY(qFuzzyCompare(f.workspace->settings()->uiScale(), 1.2));
+	QTRY_VERIFY(qFuzzyCompare(f.workspace->settings()->uiScale(), 1.1));
 	QTest::keyClick(window, Qt::Key_0, Qt::ControlModifier);
 	QTRY_VERIFY(qFuzzyCompare(f.workspace->settings()->uiScale(), 1.0));
 
@@ -2748,13 +2799,13 @@ void TestMainWindow::uiZoomSettingsShortcutsResizeAndPopupsScaleCleanly()
 	f.workspace->closeDialog();
 	QTRY_VERIFY(findByTypePrefix(window->contentItem(), "CommandPalette") == nullptr);
 
-	// 3) Zoom to 1.2 and verify Sidebar resize scales delta by 1 / uiScale.
-	QTest::keyClick(window, Qt::Key_Equal, Qt::ControlModifier);
-	QTest::keyClick(window, Qt::Key_Equal, Qt::ControlModifier);
+	// 3) Zoom to 1.2 and verify Sidebar resize scales delta by 1 / UiScale.factor.
+	for(int i = 0; i < 4; ++i)
+	{
+		QTest::keyClick(window, Qt::Key_Equal, Qt::ControlModifier);
+	}
 	QTRY_VERIFY(qFuzzyCompare(f.workspace->settings()->uiScale(), 1.2));
 	QCOMPARE(f.workspace->settings()->sidebarWidth(), 264);
-	auto* sidebar = findByTypePrefix(window->contentItem(), "Sidebar_QMLTYPE");
-	QVERIFY(sidebar);
 	const QPoint hCenter = handle->mapToScene(QPointF(handle->width() / 2.0, handle->height() / 2.0)).toPoint();
 	QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, hCenter);
 	QTest::mouseMove(window, hCenter + QPoint(20, 0));
@@ -2762,7 +2813,8 @@ void TestMainWindow::uiZoomSettingsShortcutsResizeAndPopupsScaleCleanly()
 	QTest::mouseMove(window, hCenter + QPoint(60, 0));
 	QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, hCenter + QPoint(60, 0));
 	QTRY_VERIFY(std::abs(f.workspace->settings()->sidebarWidth() - 314) <= 1);
-	// 4) SelectField and ContextMenu popups scale cleanly under zoom without QML warnings.
+
+	// 4) SelectField and ContextMenu popups scale cleanly under zoom, and scrolled SelectField hover hits exact row.
 	f.workspace->commands()->run(u"config"_s);
 	QQuickItem* configDialog = nullptr;
 	QTRY_VERIFY([&] {
@@ -2790,6 +2842,46 @@ void TestMainWindow::uiZoomSettingsShortcutsResizeAndPopupsScaleCleanly()
 	QVERIFY(qFuzzyCompare(selectInner->scale(), 1.2));
 	QVERIFY(qFuzzyCompare(selectPopup->property("width").toReal(), selectInner->width() * 1.2));
 	QMetaObject::invokeMethod(selectPopup, "close");
+	QTRY_VERIFY(!selectPopup->property("opened").toBool());
+
+	QMetaObject::invokeMethod(configDialog, "selectCategory", Q_ARG(QVariant, u"agents"_s));
+	QCoreApplication::processEvents();
+	QQuickItem* agentsSection = findByName(configDialog, u"configAgentsSection"_s);
+	QVERIFY(agentsSection);
+	QMetaObject::invokeMethod(agentsSection, "setExpanded", Q_ARG(QVariant, u"builtin:build"_s), Q_ARG(QVariant, true));
+	QCoreApplication::processEvents();
+	QQuickItem* modelSelect = findItem(agentsSection, [](QQuickItem* item) {
+		return QByteArray(item->metaObject()->className()).startsWith("SelectField_QMLTYPE")
+		       && item->property("placeholderText").toString() == u"Inherit top-level model"_s;
+	});
+	QVERIFY(modelSelect);
+	QMetaObject::invokeMethod(modelSelect, "openPopup");
+	QObject* modelPopup = nullptr;
+	for(QObject* ch : modelSelect->children())
+	{
+		if(ch->objectName() == u"selectPopup"_s)
+		{
+			modelPopup = ch;
+			break;
+		}
+	}
+	QVERIFY(modelPopup);
+	QTRY_VERIFY(modelPopup->property("opened").toBool());
+	QQuickItem* modelPopupContent = modelPopup->property("contentItem").value<QQuickItem*>();
+	QVERIFY(modelPopupContent);
+	QQuickItem* modelListView = findByTypePrefix(modelPopupContent, "QQuickListView");
+	QVERIFY(modelListView);
+	QTRY_VERIFY(modelListView->property("contentHeight").toReal() > modelListView->height());
+	const qreal optRowH = modelSelect->property("optionRowHeight").toReal();
+	modelListView->setProperty("contentY", optRowH * 3.0);
+	QCoreApplication::processEvents();
+	const QPoint row4Pt = modelListView->mapToScene(QPointF(modelListView->width() / 2.0, optRowH * 1.5)).toPoint();
+	const QPoint row5Pt = modelListView->mapToScene(QPointF(modelListView->width() / 2.0, optRowH * 2.5)).toPoint();
+	QTest::mouseMove(window, row4Pt);
+	QTest::mouseMove(window, row5Pt);
+	QTRY_COMPARE(modelListView->property("currentIndex").toInt(), 5);
+	QMetaObject::invokeMethod(modelPopup, "close");
+
 	f.workspace->closeDialog();
 	QTRY_VERIFY(findByName(window->contentItem(), u"configDialog"_s) == nullptr);
 
@@ -2871,6 +2963,304 @@ void TestMainWindow::uiZoomSettingsShortcutsResizeAndPopupsScaleCleanly()
 	verifyToolTipGeometry(1.5);
 	verifyToolTipGeometry(0.7);
 	QVERIFY2(warningSpy.isEmpty(), "UI zoom test emitted QML warnings");
+}
+
+void TestMainWindow::sidebarVerticalSplittersResizePersistAndReset()
+{
+	MainFixture f;
+	const QJsonArray todos{
+		QJsonObject{{u"content"_s, u"First todo"_s}, {u"status"_s, u"completed"_s}},
+		QJsonObject{{u"content"_s, u"Second todo"_s}, {u"status"_s, u"in_progress"_s}},
+	};
+	f.stub.setTodos(u"ses_a"_s, todos);
+	QJsonArray sessions;
+	QJsonObject sesA = sessionInfoJson(u"ses_a"_s, {.title = u"Session ses_a"_s, .createdAt = 1});
+	sesA[u"todos"_s] = todos;
+	sessions.append(sesA);
+	sessions.append(sessionInfoJson(u"ses_b"_s, {.title = u"Session ses_b"_s, .createdAt = 2}));
+	for(int i = 0; i < 10; ++i)
+	{
+		const QString id = u"ses_extra_%1"_s.arg(i);
+		f.stub.add(id, 3 + i);
+		sessions.append(sessionInfoJson(id, {.title = u"Session "_s + id, .createdAt = 3 + i}));
+	}
+	f.fake.send({{u"kind"_s, u"sessions"_s}, {u"sessions"_s, sessions}});
+	f.fake.send({{u"kind"_s, u"event"_s}, {u"session_id"_s, u"ses_a"_s}, {u"event"_s, QJsonObject{{u"type"_s, u"info"_s}, {u"info"_s, sesA}}}});
+	QTRY_COMPARE(f.workspace->current()->todoTotal(), 2);
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+	window->requestActivate();
+	QTRY_VERIFY(window->isActive());
+
+	const auto findByName = [](QQuickItem* root, const QString& name) {
+		return findItem(root, [&name](QQuickItem* item) { return item->objectName() == name; });
+	};
+	auto* sidebar = findByTypePrefix(window->contentItem(), "Sidebar_QMLTYPE");
+	auto* todoSection = findByName(sidebar, u"todoSection"_s);
+	auto* runningList = findByName(sidebar, u"runningList"_s);
+	auto* todoHandle = findByName(sidebar, u"todoResizeHandle"_s);
+	auto* runningHandle = findByName(sidebar, u"runningResizeHandle"_s);
+	QVERIFY(sidebar && todoSection && runningList && todoHandle && runningHandle);
+	QTRY_VERIFY(todoHandle->isVisible() && runningHandle->isVisible());
+
+	const qreal initialTodoH = todoSection->height();
+	const QPoint todoPt = todoHandle->mapToScene(QPointF(todoHandle->width() / 2.0, todoHandle->height() / 2.0)).toPoint();
+	QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, todoPt);
+	QTest::mouseMove(window, todoPt + QPoint(0, 15));
+	QTest::mouseMove(window, todoPt + QPoint(0, 40));
+	QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, todoPt + QPoint(0, 40));
+	QTRY_VERIFY(f.workspace->settings()->sidebarTodoHeight() > 0);
+	QVERIFY(std::abs(f.workspace->settings()->sidebarTodoHeight() - qRound(initialTodoH + 40.0)) <= 2);
+	QTRY_COMPARE(qRound(todoSection->height()), f.workspace->settings()->sidebarTodoHeight());
+
+	const qreal initialRunningH = runningList->height();
+	const QPoint runPt = runningHandle->mapToScene(QPointF(runningHandle->width() / 2.0, runningHandle->height() / 2.0)).toPoint();
+	QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, runPt);
+	QTest::mouseMove(window, runPt + QPoint(0, -15));
+	QTest::mouseMove(window, runPt + QPoint(0, -40));
+	QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, runPt + QPoint(0, -40));
+	QTRY_VERIFY(f.workspace->settings()->sidebarRunningHeight() > 0);
+	QVERIFY(std::abs(f.workspace->settings()->sidebarRunningHeight() - qRound(initialRunningH - 40.0)) <= 2);
+	QTRY_COMPARE(qRound(runningList->height()), f.workspace->settings()->sidebarRunningHeight());
+
+	// Double-click resets each section height to 0 (auto).
+	const QPoint todoNewPt = todoHandle->mapToScene(QPointF(todoHandle->width() / 2.0, todoHandle->height() / 2.0)).toPoint();
+	QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, todoNewPt);
+	QTRY_COMPARE(f.workspace->settings()->sidebarTodoHeight(), 0);
+
+	const QPoint runNewPt = runningHandle->mapToScene(QPointF(runningHandle->width() / 2.0, runningHandle->height() / 2.0)).toPoint();
+	QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, runNewPt);
+	QTRY_COMPARE(f.workspace->settings()->sidebarRunningHeight(), 0);
+	QVERIFY2(warningSpy.isEmpty(), "Sidebar vertical splitter resize emitted QML warnings");
+}
+
+void TestMainWindow::tileEnlargeKeepsResizingLayoutUntilWidthAnimationSettles()
+{
+	MainFixture f;
+	for(int i = 0; i < 3; ++i)
+	{
+		f.stub.add(u"ses_extra_%1"_s.arg(i), 10 + i);
+	}
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	window->resize(960, 560);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+
+	f.workspace->toggleSplit();
+	QTRY_VERIFY(f.workspace->isSplitView());
+	QQuickItem* tileGrid = findByTypePrefix(window->contentItem(), "TileGrid");
+	QVERIFY(tileGrid);
+	QQuickItem* tileB = nullptr;
+	QTRY_VERIFY([&] {
+		QList<QQuickItem*> tiles;
+		collectTiles(tileGrid, tiles);
+		for(QQuickItem* candidate : tiles)
+		{
+			if(candidate->property("sessionId").toString() == u"ses_b"_s && candidate->property("arrived").toBool())
+			{
+				tileB = candidate;
+			}
+		}
+		return tileB != nullptr;
+	}());
+	QQuickItem* pane = findByTypePrefix(tileB, "SessionPane");
+	QVERIFY(pane);
+	QVERIFY(tileGrid->width() > pane->width() + 100.0);
+
+	// Zooming in enters resizingLayout and keeps it active past resizeSettleMs (130ms) until widthAnim (480ms) ends.
+	f.workspace->zoomTile(u"ses_b"_s);
+	QTRY_VERIFY(tileB->property("resizingLayout").toBool());
+	QTest::qWait(180);
+	QVERIFY(tileB->property("resizingLayout").toBool());
+	QVERIFY(pane->property("opacity").toReal() < 0.99);
+
+	QTRY_VERIFY_WITH_TIMEOUT(!tileB->property("resizingLayout").toBool(), 2000);
+	QVERIFY(qFuzzyCompare(tileB->property("settledLayoutWidth").toReal(), tileB->property("paneTargetWidth").toReal()));
+	QTRY_VERIFY(qFuzzyCompare(pane->property("opacity").toReal(), 1.0));
+	QVERIFY2(warningSpy.isEmpty(), "Tile enlarge transition emitted QML warnings");
+}
+
+void TestMainWindow::composerAndUserBlockHighlightImageTokensAndAgentVariantSelects()
+{
+	MainFixture f;
+	f.stub.setMessages(u"ses_a"_s, QJsonArray{
+		QJsonObject{{u"id"_s, u"u_img"_s},
+		            {u"role"_s, u"user"_s},
+		            {u"time"_s, 1},
+		            {u"parts"_s, QJsonArray{QJsonObject{{u"type"_s, u"text"_s}, {u"text"_s, u"[Image 1] inspect this"_s}, {u"time"_s, 1}}}}},
+	});
+	f.stub.setModels(QJsonArray{
+		QJsonObject{{u"provider"_s, u"p"_s},
+		            {u"provider_name"_s, u"Provider"_s},
+		            {u"id"_s, u"m1"_s},
+		            {u"name"_s, u"Model One"_s},
+		            {u"variants"_s, QJsonArray{u"low"_s, u"medium"_s, u"high"_s}}},
+	});
+	f.stub.setConfigRawText(u"{\n  \"model\": \"p/m1\",\n  \"agent\": { \"build\": { \"model\": \"p/m1\" } }\n}\n"_s);
+	f.workspace->reloadConfig();
+	QTRY_COMPARE(f.workspace->config()->models().size(), 1);
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+	window->requestActivate();
+	QTRY_VERIFY(window->isActive());
+
+	const auto hasTokenForegroundNoBg = [](const QTextDocument* doc, int pos) {
+		if(!doc)
+		{
+			return false;
+		}
+		const QTextBlock block = doc->firstBlock();
+		for(const QTextLayout::FormatRange& range : block.layout()->formats())
+		{
+			if(pos >= range.start && pos < range.start + range.length
+			   && range.format.hasProperty(QTextFormat::ForegroundBrush)
+			   && range.format.foreground().color().isValid())
+			{
+				return range.format.background().style() == Qt::NoBrush;
+			}
+		}
+		return false;
+	};
+	const auto hasAnyForeground = [](const QTextDocument* doc, int pos) {
+		if(!doc)
+		{
+			return false;
+		}
+		const QTextBlock block = doc->firstBlock();
+		for(const QTextLayout::FormatRange& range : block.layout()->formats())
+		{
+			if(pos >= range.start && pos < range.start + range.length
+			   && range.format.hasProperty(QTextFormat::ForegroundBrush))
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+
+	// 1) UserBlock highlights [Image 1] with foreground color and no background brush.
+	QQuickItem* userBlock = nullptr;
+	QQuickItem* userProse = nullptr;
+	QTRY_VERIFY([&] {
+		userBlock = findByTypePrefix(window->contentItem(), "UserBlock_QMLTYPE");
+		if(!userBlock)
+		{
+			return false;
+		}
+		userProse = findItem(userBlock, [](QQuickItem* item) {
+			return QByteArray(item->metaObject()->className()).startsWith("ProseText_QMLTYPE")
+			       && item->property("text").toString().startsWith(u"[Image 1]"_s);
+		});
+		return userProse != nullptr;
+	}());
+	auto* userDocWrap = userProse->property("textDocument").value<QQuickTextDocument*>();
+	QVERIFY(userDocWrap);
+	QTRY_VERIFY(hasTokenForegroundNoBg(userDocWrap->textDocument(), 0));
+	QVERIFY(hasTokenForegroundNoBg(userDocWrap->textDocument(), 8));
+	QVERIFY(!hasAnyForeground(userDocWrap->textDocument(), 10));
+
+	// 2) Composer highlights [Image 1] with foreground color and no background brush.
+	auto* composerItem = findByTypePrefix(window->contentItem(), "Composer");
+	QVERIFY(composerItem);
+	QMetaObject::invokeMethod(composerItem, "focusInput");
+	QQuickItem* textArea = nullptr;
+	QTRY_VERIFY([&] {
+		textArea = qobject_cast<QQuickItem*>(window->activeFocusItem());
+		return textArea != nullptr && textArea->hasActiveFocus();
+	}());
+	QImage img(4, 4, QImage::Format_RGB32);
+	img.fill(Qt::green);
+	QGuiApplication::clipboard()->setImage(img);
+	QVERIFY(f.workspace->current()->composer()->pasteFromClipboard());
+	QTest::keyClicks(window, u"hello"_s);
+	QCOMPARE(f.workspace->current()->composer()->text(), u"[Image 1] hello"_s);
+	auto* composerDocWrap = textArea->property("textDocument").value<QQuickTextDocument*>();
+	QVERIFY(composerDocWrap);
+	QTRY_VERIFY(hasTokenForegroundNoBg(composerDocWrap->textDocument(), 0));
+	QVERIFY(hasTokenForegroundNoBg(composerDocWrap->textDocument(), 8));
+	QVERIFY(!hasAnyForeground(composerDocWrap->textDocument(), 10));
+
+	// 3) ConfigAgentsSection variant SelectField populates from model variants and selects a variant.
+	const auto findByName = [](QQuickItem* root, const QString& name) {
+		return findItem(root, [&name](QQuickItem* item) { return item->objectName() == name; });
+	};
+	f.workspace->commands()->run(u"config"_s);
+	QQuickItem* configDialog = nullptr;
+	QTRY_VERIFY([&] {
+		configDialog = findByName(window->contentItem(), u"configDialog"_s);
+		return configDialog != nullptr && !f.workspace->configEditor()->isLoading();
+	}());
+	QMetaObject::invokeMethod(configDialog, "selectCategory", Q_ARG(QVariant, u"agents"_s));
+	QCoreApplication::processEvents();
+	QQuickItem* agentsSection = findByName(configDialog, u"configAgentsSection"_s);
+	QVERIFY(agentsSection);
+	QMetaObject::invokeMethod(agentsSection, "setExpanded", Q_ARG(QVariant, u"builtin:build"_s), Q_ARG(QVariant, true));
+	QCoreApplication::processEvents();
+
+	QQuickItem* variantSelect = findByName(agentsSection, u"agentVariantSelect_build"_s);
+	QVERIFY(variantSelect);
+	QCOMPARE(variantSelect->property("placeholderText").toString(), u"Default"_s);
+	const QVariantList opts = variantSelect->property("normalizedOptions").toList();
+	QStringList optionValues;
+	for(const QVariant& entry : opts)
+	{
+		optionValues.append(entry.toMap().value(u"value"_s).toString());
+	}
+	QVERIFY(optionValues.contains(u"low"_s));
+	QVERIFY(optionValues.contains(u"medium"_s));
+	QVERIFY(optionValues.contains(u"high"_s));
+
+	QMetaObject::invokeMethod(variantSelect, "openPopup");
+	QObject* variantPopup = nullptr;
+	for(QObject* ch : variantSelect->children())
+	{
+		if(ch->objectName() == u"selectPopup"_s)
+		{
+			variantPopup = ch;
+			break;
+		}
+	}
+	QVERIFY(variantPopup);
+	QTRY_VERIFY(variantPopup->property("opened").toBool());
+	QMetaObject::invokeMethod(variantSelect, "chooseOption", Q_ARG(QVariant, u"high"_s));
+	QCOMPARE(variantSelect->property("value").toString(), u"high"_s);
+	QCOMPARE(f.workspace->configEditor()->valueAt({u"agent"_s, u"build"_s, u"variant"_s}).toString(), u"high"_s);
+	QVERIFY2(warningSpy.isEmpty(), "Image token highlighting or agent variant SelectField emitted QML warnings");
 }
 
 QTEST_MAIN(TestMainWindow)

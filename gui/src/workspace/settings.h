@@ -32,10 +32,15 @@ class Settings : public QObject
 	Q_PROPERTY(bool sidebarRunningExpanded READ sidebarRunningExpanded WRITE setSidebarRunningExpanded NOTIFY sidebarRunningExpandedChanged)
 	Q_PROPERTY(bool sidebarHistoryExpanded READ sidebarHistoryExpanded WRITE setSidebarHistoryExpanded NOTIFY sidebarHistoryExpandedChanged)
 	Q_PROPERTY(int sidebarWidth READ sidebarWidth WRITE setSidebarWidth NOTIFY sidebarWidthChanged)
+	Q_PROPERTY(int sidebarTodoHeight READ sidebarTodoHeight WRITE setSidebarTodoHeight NOTIFY sidebarTodoHeightChanged)
+	Q_PROPERTY(int sidebarRunningHeight READ sidebarRunningHeight WRITE setSidebarRunningHeight NOTIFY sidebarRunningHeightChanged)
 	Q_PROPERTY(QStringList sidebarRunningOrder READ sidebarRunningOrder WRITE setSidebarRunningOrder NOTIFY sidebarRunningOrderChanged)
 	Q_PROPERTY(int windowWidth READ windowWidth WRITE setWindowWidth NOTIFY windowSizeChanged)
 	Q_PROPERTY(int windowHeight READ windowHeight WRITE setWindowHeight NOTIFY windowSizeChanged)
 	Q_PROPERTY(double uiScale READ uiScale WRITE setUiScale NOTIFY uiScaleChanged)
+	Q_PROPERTY(double minUiScale READ minUiScale CONSTANT)
+	Q_PROPERTY(double maxUiScale READ maxUiScale CONSTANT)
+	Q_PROPERTY(double uiScaleStep READ uiScaleStep CONSTANT)
 	Q_PROPERTY(QString loadProblem READ loadProblem CONSTANT)
 
 public:
@@ -52,9 +57,11 @@ public:
 	static constexpr int DefaultWindowWidth = 980;
 	static constexpr int DefaultWindowHeight = 760;
 	static constexpr double DefaultUiScale = 1.0;
-	static constexpr double MinUiScale = 0.7;
-	static constexpr double MaxUiScale = 1.5;
-	static constexpr double UiScaleStep = 0.1;
+	static constexpr double MinUiScale = 0.5;
+	static constexpr double MaxUiScale = 4.0;
+	static constexpr double UiScaleStep = 0.05;
+	// Read-only startup helper: returns normalized `uiScale`, or `DefaultUiScale` if unreadable/invalid (Settings reports errors later).
+	static double readUiScaleOnly(const QString& path);
 	// Reads `path`. A file that cannot be read keeps the defaults; see loadProblem().
 	explicit Settings(QString path, QObject* parent = nullptr);
 	~Settings() override;
@@ -73,10 +80,15 @@ public:
 	bool sidebarRunningExpanded() const { return m_sidebarRunningExpanded; }
 	bool sidebarHistoryExpanded() const { return m_sidebarHistoryExpanded; }
 	int sidebarWidth() const { return m_sidebarWidth; }
+	int sidebarTodoHeight() const { return m_sidebarTodoHeight; }
+	int sidebarRunningHeight() const { return m_sidebarRunningHeight; }
 	QStringList sidebarRunningOrder() const { return m_sidebarRunningOrder; }
 	int windowWidth() const { return m_windowWidth; }
 	int windowHeight() const { return m_windowHeight; }
 	double uiScale() const { return m_uiScale; }
+	double minUiScale() const { return MinUiScale; }
+	double maxUiScale() const { return MaxUiScale; }
+	double uiScaleStep() const { return UiScaleStep; }
 
 	// Precondition for both: a known value (see the constants above).
 	void setTheme(const QString& theme);
@@ -90,6 +102,8 @@ public:
 	void setSidebarRunningExpanded(bool expanded);
 	void setSidebarHistoryExpanded(bool expanded);
 	void setSidebarWidth(int width);
+	void setSidebarTodoHeight(int height);
+	void setSidebarRunningHeight(int height);
 	void setSidebarRunningOrder(const QStringList& order);
 	void setWindowWidth(int width);
 	void setWindowHeight(int height);
@@ -110,6 +124,8 @@ signals:
 	void sidebarRunningExpandedChanged();
 	void sidebarHistoryExpandedChanged();
 	void sidebarWidthChanged();
+	void sidebarTodoHeightChanged();
+	void sidebarRunningHeightChanged();
 	void sidebarRunningOrderChanged();
 	void windowSizeChanged();
 	void uiScaleChanged();
@@ -137,6 +153,8 @@ private:
 	bool m_sidebarRunningExpanded = true;
 	bool m_sidebarHistoryExpanded = true;
 	int m_sidebarWidth = DefaultSidebarWidth;
+	int m_sidebarTodoHeight = 0;
+	int m_sidebarRunningHeight = 0;
 	QStringList m_sidebarRunningOrder;
 	int m_windowWidth = DefaultWindowWidth;
 	int m_windowHeight = DefaultWindowHeight;

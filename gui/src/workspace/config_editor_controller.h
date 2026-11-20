@@ -118,6 +118,7 @@ public:
 	// Combined `{label, value, description}` options from both the edited JSON and live BackendConfig.
 	Q_INVOKABLE QVariantList modelOptions() const;
 	Q_INVOKABLE QVariantList agentOptions() const;
+	Q_INVOKABLE QVariantList variantOptions(const QString& modelRef) const;
 
 signals:
 	void busyStateChanged();

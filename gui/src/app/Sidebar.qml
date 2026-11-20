@@ -13,6 +13,7 @@ Rectangle {
 	property real maxAllowed: Theme.sidebarMaxWidth
 	readonly property int contentWidth: Math.max(Theme.sidebarMinWidth, Math.min(maxAllowed, preferredWidth))
 	readonly property alias resizing: resizeDrag.active
+	readonly property bool resizingSections: todoResizeDrag.active || runningResizeDrag.active
 	property string draggingSessionId: ""
 	readonly property bool reorderingRunning: draggingSessionId !== ""
 	readonly property int newRowHeight: 44
@@ -37,15 +38,26 @@ Rectangle {
 	readonly property var front: Workspace.frontSession
 	readonly property var todo: front ? front.todo : ({ items: [], done: 0, total: 0 })
 	property var shownTodo: ({ items: [], done: 0, total: 0 })
+	readonly property real minCustomTodoHeight: Theme.sidebarSectionHeight + todoList.rowHeight
+	readonly property real minCustomRunningHeight: Theme.sidebarRowHeight
+	readonly property real minCustomHistoryHeight: historyOverhead + Theme.sidebarHistoryRowHeight
 	// Up to a third of the column, and never so much that expanded lists below lose their minimum.
 	readonly property real todoCap: Math.max(0, Math.min(height / 3, bodySpace - reservedRunning - reservedHistory))
 	readonly property bool todoFits: todo.items.length > 0 && todoCap >= Theme.sidebarSectionHeight + todoList.rowHeight
 	readonly property real minTodoBodyHeight: todoList.rowHeight + 2 * todoList.verticalPadding
-	readonly property real todoExpandedHeight: Math.min(Theme.sidebarSectionHeight + Math.max(todoList.height, minTodoBodyHeight), todoCap)
+	readonly property real customTodoMax: Math.max(minCustomTodoHeight, bodySpace - running.openProgress * minCustomRunningHeight - historyBody.openProgress * minCustomHistoryHeight)
+	readonly property real customTodoHeight: Math.max(minCustomTodoHeight, Math.min(customTodoMax, Workspace.settings.sidebarTodoHeight))
+	readonly property real todoExpandedHeight: Workspace.settings.sidebarTodoHeight > 0
+		? customTodoHeight
+		: Math.min(Theme.sidebarSectionHeight + Math.max(todoList.height, minTodoBodyHeight), todoCap)
 	readonly property real todoHeight: !todoFits ? 0 : (todoExpanded ? todoExpandedHeight : Theme.sidebarSectionHeight)
 	readonly property real remainingAfterTodo: Math.max(0, bodySpace - todoSection.height)
 	readonly property real runningMaxHeight: Math.min(remainingAfterTodo, Math.max(remainingAfterTodo - reservedHistory, minRunningHeight))
-	readonly property real runningTargetHeight: Math.max(0, Math.min(running.contentHeight, runningMaxHeight))
+	readonly property real runningAutoHeight: Math.max(0, Math.min(running.contentHeight, runningMaxHeight))
+	readonly property real customRunningMax: Math.max(minCustomRunningHeight, remainingAfterTodo - minCustomHistoryHeight)
+	readonly property real runningTargetHeight: (Workspace.settings.sidebarRunningHeight > 0 && historyExpanded)
+		? Math.max(minCustomRunningHeight, Math.min(customRunningMax, Workspace.settings.sidebarRunningHeight))
+		: runningAutoHeight
 	readonly property real historySpace: Math.max(0, bodySpace - todoSection.height - running.height)
 	readonly property string emptyHistoryText: {
 		if (!Workspace.historyLoaded)
@@ -161,7 +173,7 @@ Rectangle {
 		property real startSceneX: 0
 
 		function updateWidth(sceneX) {
-			const nextWidth = resizeHandle.startWidth + (sceneX - resizeHandle.startSceneX) / Workspace.settings.uiScale
+			const nextWidth = resizeHandle.startWidth + (sceneX - resizeHandle.startSceneX) / UiScale.factor
 			Workspace.settings.sidebarWidth = Math.round(Math.max(Theme.sidebarMinWidth, Math.min(sidebar.maxAllowed, nextWidth)))
 		}
 
@@ -225,9 +237,9 @@ Rectangle {
 				y: (parent.height - height) / 2
 				width: sidebar.lockupWidth
 				height: sidebar.lockupHeight
-				sourceSize: Qt.size(width, height)
+				sourceSize: Qt.size(Math.max(1, Math.round(width * UiScale.factor)), Math.max(1, Math.round(height * UiScale.factor)))
 				source: "qrc:/app/ref-lockup-small-" + (Theme.dark ? ThemeName.dark : ThemeName.light) + ".svg"
-				smooth: Workspace.settings.uiScale !== 1
+				smooth: UiScale.factor !== 1
 				Accessible.role: Accessible.Graphic
 				Accessible.name: "ref"
 			}
@@ -314,7 +326,7 @@ Rectangle {
 			visible: height > 0
 
 			Behavior on height {
-				enabled: sidebar.ready
+				enabled: sidebar.ready && !sidebar.resizingSections
 				NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
 			}
 			Behavior on opacity {
@@ -362,6 +374,61 @@ Rectangle {
 			}
 		}
 
+		Item {
+			id: todoResizeHandle
+			objectName: "todoResizeHandle"
+			anchors { left: parent.left; right: parent.right; verticalCenter: todoSection.bottom }
+			height: 6
+			z: 5
+			visible: sidebar.todoFits && sidebar.todoExpanded && (sidebar.runningExpanded || sidebar.historyExpanded) && Workspace.settings.sidebarVisible
+			property real startHeight: todoSection.height
+			property real startSceneY: 0
+
+			function updateHeight(sceneY) {
+				const raw = todoResizeHandle.startHeight + (sceneY - todoResizeHandle.startSceneY) / UiScale.factor
+				Workspace.settings.sidebarTodoHeight = Math.round(Math.max(sidebar.minCustomTodoHeight, Math.min(sidebar.customTodoMax, raw)))
+			}
+
+			Rectangle {
+				anchors.verticalCenter: parent.verticalCenter
+				width: parent.width
+				height: 2
+				color: Theme.accentText
+				opacity: todoResizeHover.hovered || todoResizeDrag.active ? 1 : 0
+
+				Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+			}
+			HoverHandler {
+				id: todoResizeHover
+				cursorShape: Qt.SplitVCursor
+			}
+			DragHandler {
+				id: todoResizeDrag
+				enabled: sidebar.dragEnabled && todoResizeHandle.visible
+				target: null
+				xAxis.enabled: false
+				dragThreshold: 2
+				grabPermissions: PointerHandler.CanTakeOverFromAnything
+				onActiveChanged: {
+					if (active) {
+						todoResizeHandle.startHeight = todoSection.height
+						todoResizeHandle.startSceneY = centroid.scenePressPosition.y
+						todoResizeHandle.updateHeight(centroid.scenePosition.y)
+					}
+				}
+				onCentroidChanged: {
+					if (active)
+						todoResizeHandle.updateHeight(centroid.scenePosition.y)
+				}
+			}
+			TapHandler {
+				enabled: sidebar.dragEnabled && todoResizeHandle.visible
+				gesturePolicy: TapHandler.ReleaseWithinBounds
+				grabPermissions: PointerHandler.CanTakeOverFromAnything | PointerHandler.ApprovesTakeOverByHandlersOfDifferentType
+				onDoubleTapped: Workspace.settings.sidebarTodoHeight = 0
+			}
+		}
+
 		SectionHeader {
 			id: runningHeader
 			objectName: "runningSectionHeader"
@@ -399,7 +466,7 @@ Rectangle {
 			}
 
 			Behavior on openProgress {
-				enabled: sidebar.ready
+				enabled: sidebar.ready && !sidebar.resizingSections
 				NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
 			}
 
@@ -431,6 +498,61 @@ Rectangle {
 			ScrollBar.vertical: ThemedScrollBar {}
 		}
 
+		Item {
+			id: runningResizeHandle
+			objectName: "runningResizeHandle"
+			anchors { left: parent.left; right: parent.right; verticalCenter: running.bottom }
+			height: 6
+			z: 5
+			visible: sidebar.runningExpanded && sidebar.historyExpanded && Workspace.settings.sidebarVisible
+			property real startHeight: running.height
+			property real startSceneY: 0
+
+			function updateHeight(sceneY) {
+				const raw = runningResizeHandle.startHeight + (sceneY - runningResizeHandle.startSceneY) / UiScale.factor
+				Workspace.settings.sidebarRunningHeight = Math.round(Math.max(sidebar.minCustomRunningHeight, Math.min(sidebar.customRunningMax, raw)))
+			}
+
+			Rectangle {
+				anchors.verticalCenter: parent.verticalCenter
+				width: parent.width
+				height: 2
+				color: Theme.accentText
+				opacity: runningResizeHover.hovered || runningResizeDrag.active ? 1 : 0
+
+				Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+			}
+			HoverHandler {
+				id: runningResizeHover
+				cursorShape: Qt.SplitVCursor
+			}
+			DragHandler {
+				id: runningResizeDrag
+				enabled: sidebar.dragEnabled && runningResizeHandle.visible
+				target: null
+				xAxis.enabled: false
+				dragThreshold: 2
+				grabPermissions: PointerHandler.CanTakeOverFromAnything
+				onActiveChanged: {
+					if (active) {
+						runningResizeHandle.startHeight = running.height
+						runningResizeHandle.startSceneY = centroid.scenePressPosition.y
+						runningResizeHandle.updateHeight(centroid.scenePosition.y)
+					}
+				}
+				onCentroidChanged: {
+					if (active)
+						runningResizeHandle.updateHeight(centroid.scenePosition.y)
+				}
+			}
+			TapHandler {
+				enabled: sidebar.dragEnabled && runningResizeHandle.visible
+				gesturePolicy: TapHandler.ReleaseWithinBounds
+				grabPermissions: PointerHandler.CanTakeOverFromAnything | PointerHandler.ApprovesTakeOverByHandlersOfDifferentType
+				onDoubleTapped: Workspace.settings.sidebarRunningHeight = 0
+			}
+		}
+
 		SectionHeader {
 			id: historyHeader
 			objectName: "historySectionHeader"
@@ -453,7 +575,7 @@ Rectangle {
 			enabled: sidebar.historyExpanded
 
 			Behavior on openProgress {
-				enabled: sidebar.ready
+				enabled: sidebar.ready && !sidebar.resizingSections
 				NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
 			}
 

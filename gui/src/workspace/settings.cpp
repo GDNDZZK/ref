@@ -12,6 +12,7 @@
 #include <QJsonArray>
 #include <QSet>
 #include <cmath>
+#include <limits>
 using namespace Qt::StringLiterals;
 using namespace std::chrono_literals;
 
@@ -37,6 +38,8 @@ const QString TodoExpandedKey = u"todoExpanded"_s;
 const QString RunningExpandedKey = u"runningExpanded"_s;
 const QString HistoryExpandedKey = u"historyExpanded"_s;
 const QString RunningOrderKey = u"runningOrder"_s;
+const QString TodoHeightKey = u"todoHeight"_s;
+const QString RunningHeightKey = u"runningHeight"_s;
 const QString WindowKey = u"window"_s;
 const QString WidthKey = u"width"_s;
 const QString HeightKey = u"height"_s;
@@ -138,6 +141,28 @@ void readSidebarWidth(const QJsonObject& root, const QString& sectionKey, const 
 	value = std::clamp(read, Settings::MinSidebarWidth, Settings::MaxSidebarWidth);
 }
 
+void readSidebarHeight(const QJsonObject& root, const QString& sectionKey, const QString& key, int& value, Problems& problems)
+{
+	const QJsonObject fields = section(root, sectionKey);
+	if(!fields.contains(key))
+	{
+		return;
+	}
+	const QJsonValue raw = fields.value(key);
+	if(!raw.isDouble())
+	{
+		problems.add(u"%1: expected a non-negative number in pixels"_s.arg(fieldPath(sectionKey, key)));
+		return;
+	}
+	const double read = raw.toDouble();
+	if(!std::isfinite(read) || read < 0.0 || read > static_cast<double>(std::numeric_limits<int>::max()))
+	{
+		problems.add(u"%1: expected a non-negative number in pixels"_s.arg(fieldPath(sectionKey, key)));
+		return;
+	}
+	value = qRound(read);
+}
+
 QStringList deduplicateIds(const QStringList& ids)
 {
 	QStringList cleaned;
@@ -214,6 +239,32 @@ const QString Settings::Light = u"light"_s;
 const QString Settings::Dark = u"dark"_s;
 const QString Settings::English = u"en"_s;
 const QString Settings::ChineseSimplified = u"zh_CN"_s;
+
+double Settings::readUiScaleOnly(const QString& path)
+{
+	QFile file(path);
+	if(!file.exists() || !file.open(QIODevice::ReadOnly))
+	{
+		return DefaultUiScale;
+	}
+	QJsonParseError error;
+	const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &error);
+	if(error.error != QJsonParseError::NoError || !document.isObject())
+	{
+		return DefaultUiScale;
+	}
+	const QJsonValue raw = document.object().value(UiScaleKey);
+	if(!raw.isDouble())
+	{
+		return DefaultUiScale;
+	}
+	const double read = raw.toDouble();
+	if(!std::isfinite(read) || read <= 0.0)
+	{
+		return DefaultUiScale;
+	}
+	return normalizeUiScale(read);
+}
 
 Settings::Settings(QString path, QObject* parent)
 	: QObject(parent)
@@ -324,6 +375,16 @@ void Settings::setSidebarWidth(int width)
 	set(m_sidebarWidth, std::clamp(width, MinSidebarWidth, MaxSidebarWidth), &Settings::sidebarWidthChanged);
 }
 
+void Settings::setSidebarTodoHeight(int height)
+{
+	set(m_sidebarTodoHeight, std::max(0, height), &Settings::sidebarTodoHeightChanged);
+}
+
+void Settings::setSidebarRunningHeight(int height)
+{
+	set(m_sidebarRunningHeight, std::max(0, height), &Settings::sidebarRunningHeightChanged);
+}
+
 void Settings::setSidebarRunningOrder(const QStringList& order)
 {
 	set(m_sidebarRunningOrder, deduplicateIds(order), &Settings::sidebarRunningOrderChanged);
@@ -408,6 +469,8 @@ void Settings::readFields(const QJsonObject& root)
 	readFlag(root, SidebarKey, RunningExpandedKey, m_sidebarRunningExpanded, problems);
 	readFlag(root, SidebarKey, HistoryExpandedKey, m_sidebarHistoryExpanded, problems);
 	readSidebarWidth(root, SidebarKey, WidthKey, m_sidebarWidth, problems);
+	readSidebarHeight(root, SidebarKey, TodoHeightKey, m_sidebarTodoHeight, problems);
+	readSidebarHeight(root, SidebarKey, RunningHeightKey, m_sidebarRunningHeight, problems);
 	readRunningOrder(root, SidebarKey, RunningOrderKey, m_sidebarRunningOrder, problems);
 	readEdge(root, WindowKey, WidthKey, m_windowWidth, problems);
 	readEdge(root, WindowKey, HeightKey, m_windowHeight, problems);
@@ -438,6 +501,8 @@ QJsonObject Settings::toJson() const
 	sidebar.insert(RunningExpandedKey, m_sidebarRunningExpanded);
 	sidebar.insert(HistoryExpandedKey, m_sidebarHistoryExpanded);
 	sidebar.insert(WidthKey, m_sidebarWidth);
+	sidebar.insert(TodoHeightKey, m_sidebarTodoHeight);
+	sidebar.insert(RunningHeightKey, m_sidebarRunningHeight);
 	sidebar.insert(RunningOrderKey, QJsonArray::fromStringList(m_sidebarRunningOrder));
 	root.insert(SidebarKey, sidebar);
 

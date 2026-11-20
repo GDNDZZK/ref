@@ -1,11 +1,14 @@
 #include "link_colorizer.h"
 
+#include <QRegularExpression>
 #include <QScopedValueRollback>
 #include <QTextBlock>
 #include <QTextCharFormat>
 #include <QTextDocument>
 #include <QTextFragment>
 #include <QTimer>
+
+using namespace Qt::StringLiterals;
 
 LinkHighlighter::LinkHighlighter(QTextDocument* document, const QColor& color, bool streaming)
 	: QSyntaxHighlighter(document)
@@ -72,7 +75,19 @@ void LinkHighlighter::setStreaming(bool streaming)
 		runRehighlight();
 	}
 }
-void LinkHighlighter::highlightBlock(const QString&)
+
+void LinkHighlighter::setHighlightImageTokens(bool enabled)
+{
+	if(enabled == m_highlightImageTokens)
+	{
+		return;
+	}
+	m_highlightImageTokens = enabled;
+	m_timer.stop();
+	runRehighlight();
+}
+
+void LinkHighlighter::highlightBlock(const QString& text)
 {
 	const QTextBlock current = currentBlock();
 	QTextCharFormat format;
@@ -84,6 +99,17 @@ void LinkHighlighter::highlightBlock(const QString&)
 		{
 			setFormat(fragment.position() - current.position(), fragment.length(), format);
 		}
+	}
+	if(!m_highlightImageTokens || !m_color.isValid())
+	{
+		return;
+	}
+	static const QRegularExpression imageTokenPattern(u"\\[Image \\d+\\]"_s);
+	QTextCharFormat tokenFormat;
+	tokenFormat.setForeground(m_color);
+	for(const QRegularExpressionMatch& match : imageTokenPattern.globalMatch(text))
+	{
+		setFormat(static_cast<int>(match.capturedStart()), static_cast<int>(match.capturedLength()), tokenFormat);
 	}
 }
 
@@ -102,6 +128,10 @@ void LinkColorizer::setDocument(QQuickTextDocument* document)
 	if(m_document)
 	{
 		m_highlighter = new LinkHighlighter(m_document->textDocument(), m_color, m_streaming);
+		if(m_highlightImageTokens)
+		{
+			m_highlighter->setHighlightImageTokens(true);
+		}
 	}
 	emit documentChanged();
 }
@@ -132,4 +162,18 @@ void LinkColorizer::setStreaming(bool streaming)
 		m_highlighter->setStreaming(streaming);
 	}
 	emit streamingChanged();
+}
+
+void LinkColorizer::setHighlightImageTokens(bool enabled)
+{
+	if(m_highlightImageTokens == enabled)
+	{
+		return;
+	}
+	m_highlightImageTokens = enabled;
+	if(m_highlighter)
+	{
+		m_highlighter->setHighlightImageTokens(enabled);
+	}
+	emit highlightImageTokensChanged();
 }

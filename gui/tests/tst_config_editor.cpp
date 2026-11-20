@@ -37,6 +37,7 @@ public:
 	bool m_hasBackup = true;
 	bool m_activeExists = true;
 	QStringList m_warnings;
+	QStringList m_anthropicVariants;
 	QList<QJsonObject> m_requests;
 	bool m_holdReload = false;
 	std::optional<QJsonObject> m_heldReload;
@@ -122,6 +123,7 @@ private:
 					{u"provider_name"_s, u"Anthropic"_s},
 					{u"id"_s, u"claude-sonnet-4"_s},
 					{u"name"_s, u"Claude Sonnet 4"_s},
+					{u"variants"_s, QJsonArray::fromStringList(m_anthropicVariants)},
 				}}},
 			}}});
 		}
@@ -465,6 +467,69 @@ private slots:
 		QCOMPARE(countConfigFilesOps(), filesOpsBeforeSwitch + 1);
 		QCOMPARE(f.editor.selectedFile(), u"ref.json.1.bak"_s);
 		QCOMPARE(f.editor.valueAt({u"model"_s}).toString(), u"openai/gpt-5"_s);
+	}
+
+	void variantOptionsMergesEditedAndBackendVariantsAndFallsBackToTopLevelModel()
+	{
+		EditorFixture f;
+		f.stub.m_anthropicVariants = {u"medium"_s, u"high"_s, u"max"_s};
+		f.stub.m_activeRaw = u"{\n"
+		                     "  \"model\": \"anthropic/claude-sonnet-4#medium\",\n"
+		                     "  \"provider\": {\n"
+		                     "    \"anthropic\": {\n"
+		                     "      \"models\": {\n"
+		                     "        \"claude-sonnet-4\": {\n"
+		                     "          \"variants\": {\n"
+		                     "            \"custom\": {},\n"
+		                     "            \"high\": {}\n"
+		                     "          }\n"
+		                     "        },\n"
+		                     "        \"custom-only\": {\n"
+		                     "          \"variants\": {\n"
+		                     "            \"fast\": {},\n"
+		                     "            \"deep\": {}\n"
+		                     "          }\n"
+		                     "        }\n"
+		                     "      }\n"
+		                     "    }\n"
+		                     "  }\n"
+		                     "}\n"_s;
+		QTRY_VERIFY(f.connection.isConnected());
+		f.editor.open(u"/work"_s);
+		QTRY_VERIFY(!f.editor.isLoading());
+		QTRY_COMPARE(f.backendConfig.variantsOf(u"anthropic"_s, u"claude-sonnet-4"_s), (QStringList{u"medium"_s, u"high"_s, u"max"_s}));
+
+		const auto fieldOf = [](const QVariantList& list, const QString& key) {
+			QStringList result;
+			for(const QVariant& item : list)
+			{
+				result.append(item.toMap().value(key).toString());
+			}
+			return result;
+		};
+
+		// Explicit model ref strips #variant and merges JSON variants before backend variants (deduplicated).
+		const QVariantList mergedOptions = f.editor.variantOptions(u"anthropic/claude-sonnet-4#high"_s);
+		const QStringList expectedMerged{u"custom"_s, u"high"_s, u"medium"_s, u"max"_s};
+		QCOMPARE(fieldOf(mergedOptions, u"value"_s), expectedMerged);
+		QCOMPARE(fieldOf(mergedOptions, u"label"_s), expectedMerged);
+
+		// Empty modelRef falls back to top-level `model` (also stripping #variant).
+		const QVariantList fallbackOptions = f.editor.variantOptions(u"   "_s);
+		QCOMPARE(fieldOf(fallbackOptions, u"value"_s), expectedMerged);
+		QCOMPARE(fieldOf(fallbackOptions, u"label"_s), expectedMerged);
+
+		// Model defined only in edited JSON returns its variants.
+		const QVariantList customOptions = f.editor.variantOptions(u"anthropic/custom-only"_s);
+		const QStringList expectedCustom{u"fast"_s, u"deep"_s};
+		QCOMPARE(fieldOf(customOptions, u"value"_s), expectedCustom);
+		QCOMPARE(fieldOf(customOptions, u"label"_s), expectedCustom);
+
+		// Unknown or malformed models return empty.
+		QVERIFY(f.editor.variantOptions(u"anthropic/unknown"_s).isEmpty());
+		QVERIFY(f.editor.variantOptions(u"noslash"_s).isEmpty());
+		QVERIFY(f.editor.variantOptions(u"anthropic/"_s).isEmpty());
+		QVERIFY(f.editor.variantOptions(u"/model"_s).isEmpty());
 	}
 };
 

@@ -41,6 +41,15 @@ Item {
 	function focusPane() {
 		pane.focusInput()
 	}
+	function finishResizeLayout() {
+		if (!resizingLayout || resizeSettleTimer.running || widthAnim.running)
+			return
+		settledLayoutWidth = paneTargetWidth
+		resizingLayout = false
+	}
+	function canStartEnlargeResize() {
+		return expanded && arrived && !sidebarAnimating && paneTargetWidth > pane.width + 1
+	}
 
 	readonly property int targetBorderWidth: expanded ? 0 : 1
 	readonly property real targetWidth: expanded ? zoomRect.width : placedSlot.width
@@ -53,6 +62,7 @@ Item {
 	readonly property real resizeFadeOpacity: 0.15
 	readonly property int resizeBlurMax: 16
 	readonly property real resizeBlurStrength: 0.6
+	readonly property real pixelScale: Math.max(1, (Screen.devicePixelRatio || 1) * UiScale.factor)
 	x: expanded ? zoomRect.x : placedSlot.x
 	y: expanded ? zoomRect.y : placedSlot.y
 	width: targetWidth
@@ -65,10 +75,22 @@ Item {
 
 	Behavior on x { NumberAnimation { duration: tile.travelDuration; easing.type: Motion.ease } }
 	Behavior on y { NumberAnimation { duration: tile.travelDuration; easing.type: Motion.ease } }
-	Behavior on width { NumberAnimation { id: widthAnim; duration: tile.travelDuration; easing.type: Motion.ease } }
+	Behavior on width {
+		NumberAnimation {
+			id: widthAnim
+			duration: tile.travelDuration
+			easing.type: Motion.ease
+			onRunningChanged: if (!running) tile.finishResizeLayout()
+		}
+	}
 	Behavior on height { NumberAnimation { duration: tile.travelDuration; easing.type: Motion.ease } }
 	onPaneTargetWidthChanged: {
 		paneWidthFloor = pane.width > 0 ? Math.min(pane.width, paneTargetWidth) : paneTargetWidth
+		if (canStartEnlargeResize()) {
+			resizingLayout = true
+			resizeSettleTimer.restart()
+			return
+		}
 		if (!arrived || travelling || sidebarAnimating) {
 			settledLayoutWidth = paneTargetWidth
 			resizingLayout = false
@@ -93,6 +115,10 @@ Item {
 		if (expanded) {
 			unzooming = true
 			settle.stop()
+			if (canStartEnlargeResize()) {
+				resizingLayout = true
+				resizeSettleTimer.restart()
+			}
 		} else {
 			settle.restart()
 		}
@@ -111,10 +137,7 @@ Item {
 	Timer {
 		id: resizeSettleTimer
 		interval: tile.resizeSettleMs
-		onTriggered: {
-			tile.settledLayoutWidth = tile.paneTargetWidth
-			tile.resizingLayout = false
-		}
+		onTriggered: tile.finishResizeLayout()
 	}
 
 	onSidebarAnimatingChanged: {
@@ -159,6 +182,8 @@ Item {
 		border.width: tile.targetBorderWidth
 		border.color: tile.fading ? Theme.background : (tile.focused || tile.expanded ? Theme.accentText : (tile.hasRoot ? tile.rootColor : Theme.border))
 		layer.enabled: !tile.travelling && (tile.fading || tile.othersZoomed)
+		layer.smooth: true
+		layer.textureSize: Qt.size(Math.max(1, Math.ceil(width * tile.pixelScale)), Math.max(1, Math.ceil(height * tile.pixelScale)))
 
 		Behavior on radius { NumberAnimation { duration: tile.travelDuration; easing.type: Motion.ease } }
 		Behavior on border.color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
@@ -301,6 +326,13 @@ Item {
 		SessionPane {
 			id: pane
 			readonly property bool supportsBlur: GraphicsInfo.api !== GraphicsInfo.Software
+			property real resizeBlurAmount: tile.resizingLayout ? tile.resizeBlurStrength : 0
+			Behavior on resizeBlurAmount {
+				NumberAnimation {
+					duration: tile.resizingLayout ? Motion.quick : Motion.standard
+					easing.type: tile.resizingLayout ? Easing.OutCubic : Easing.OutExpo
+				}
+			}
 			anchors {
 				top: header.bottom
 				left: parent.left
@@ -332,19 +364,13 @@ Item {
 					easing.type: tile.resizingLayout ? Easing.OutCubic : Easing.OutExpo
 				}
 			}
-			layer.enabled: pane.supportsBlur && (tile.resizingLayout || resizeBlur.blur > 0.01)
+			layer.enabled: pane.supportsBlur && (tile.resizingLayout || pane.resizeBlurAmount > 0.01)
 			layer.smooth: true
+			layer.textureSize: Qt.size(Math.max(1, Math.ceil(pane.width * tile.pixelScale)), Math.max(1, Math.ceil(pane.height * tile.pixelScale)))
 			layer.effect: MultiEffect {
-				id: resizeBlur
 				blurEnabled: true
 				blurMax: tile.resizeBlurMax
-				blur: tile.resizingLayout ? tile.resizeBlurStrength : 0
-				Behavior on blur {
-					NumberAnimation {
-						duration: tile.resizingLayout ? Motion.quick : Motion.standard
-						easing.type: tile.resizingLayout ? Easing.OutCubic : Easing.OutExpo
-					}
-				}
+				blur: pane.resizeBlurAmount
 			}
 		}
 

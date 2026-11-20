@@ -113,7 +113,7 @@ Window {
 	Binding {
 		target: UiScale
 		property: "factor"
-		value: Workspace.settings.uiScale
+		value: Workspace.settings.uiScale / Workspace.startupUiScale
 	}
 
 	Connections {
@@ -197,7 +197,7 @@ Window {
 		id: scaledRoot
 		objectName: "scaledRoot"
 		transformOrigin: Item.TopLeft
-		scale: Workspace.settings.uiScale
+		scale: UiScale.factor
 		width: window.width / scale
 		height: window.height / scale
 	Item {

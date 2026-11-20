@@ -40,24 +40,33 @@ Block {
 		Canvas {
 			id: wash
 
+			readonly property real pixelScale: Math.max(1, (Screen.devicePixelRatio || 1) * UiScale.factor)
 			readonly property real centerX: badge.x + badge.width / 2
 			readonly property real centerY: badge.y + badge.height / 2
 			readonly property real startRadius: badge.width / 2
-			readonly property real endRadius: Math.hypot(Math.max(centerX, width - centerX), Math.max(centerY, height - centerY))
+			readonly property real endRadius: Math.hypot(Math.max(centerX, card.width - centerX), Math.max(centerY, card.height - centerY))
 			readonly property real radius: startRadius + block.spread * (endRadius - startRadius)
 			readonly property real reach: endRadius + 1 // gradient radius: the step stays within it
 
-			anchors.fill: parent
+			width: Math.max(1, Math.ceil(card.width * pixelScale))
+			height: Math.max(1, Math.ceil(card.height * pixelScale))
+			transformOrigin: Item.TopLeft
+			scale: 1 / pixelScale
 			renderTarget: Canvas.Image
 			visible: block.spread > 0 && block.spread < 1
 
 			onRadiusChanged: requestPaint()
 			onVisibleChanged: requestPaint()
+			onPixelScaleChanged: if (visible) requestPaint()
+			onWidthChanged: if (visible) requestPaint()
+			onHeightChanged: if (visible) requestPaint()
 			onPaint: {
 				const ctx = getContext("2d")
-				ctx.reset()
+				ctx.setTransform(1, 0, 0, 1, 0, 0)
+				ctx.clearRect(0, 0, width, height)
 				if (!visible)
 					return
+				ctx.setTransform(pixelScale, 0, 0, pixelScale, 0, 0)
 				const inset = card.border.width
 				const rounding = card.radius - inset
 				const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, reach)
@@ -65,7 +74,7 @@ Block {
 				gradient.addColorStop(Math.min(1, (radius + 1) / reach), Qt.alpha(Theme.errorSurface, 0))
 				ctx.fillStyle = gradient
 				ctx.beginPath()
-				ctx.roundedRect(inset, inset, width - 2 * inset, height - 2 * inset, rounding, rounding)
+				ctx.roundedRect(inset, inset, card.width - 2 * inset, card.height - 2 * inset, rounding, rounding)
 				ctx.fill()
 			}
 		}

@@ -17,6 +17,7 @@ Item {
 	readonly property bool failed: picture.status === Image.Error
 	readonly property real hoverDim: 0.12
 	readonly property int cornerIcon: 20
+	function scaledPx(n) { return Math.max(1, Math.round(n * UiScale.factor)) }
 
 	width: ready ? picture.paintedWidth : maxWidth
 	height: ready ? picture.paintedHeight : maxHeight
@@ -44,7 +45,7 @@ Item {
 		height: thumbnail.maxHeight
 		asynchronous: true
 		fillMode: Image.PreserveAspectFit
-		sourceSize: Qt.size(thumbnail.maxWidth, thumbnail.maxHeight) // logical: Image scales it by the device pixel ratio
+		sourceSize: Qt.size(thumbnail.scaledPx(thumbnail.maxWidth), thumbnail.scaledPx(thumbnail.maxHeight))
 		source: thumbnail.image.id ? "image://chatimage/" + thumbnail.sessionId + "/" + thumbnail.image.id : ""
 	}
 

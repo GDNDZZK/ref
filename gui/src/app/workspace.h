@@ -51,6 +51,7 @@ class Workspace : public QObject
 	Q_PROPERTY(bool windowActive READ isWindowActive WRITE setWindowActive NOTIFY windowActiveChanged)
 	// What the backend offers and the session lists.
 	Q_PROPERTY(refgui::workspace::Settings* settings READ settings CONSTANT)
+	Q_PROPERTY(double startupUiScale READ startupUiScale CONSTANT)
 	Q_PROPERTY(refgui::workspace::BackendConfig* config READ config CONSTANT)
 	Q_PROPERTY(refgui::workspace::ConfigEditorController* configEditor READ configEditor CONSTANT)
 	Q_PROPERTY(QVariantList mcpServers READ mcpServers NOTIFY mcpServersChanged)
@@ -112,6 +113,7 @@ public:
 	void setWindowActive(bool active);
 
 	refgui::workspace::Settings* settings() { return &m_settings; }
+	double startupUiScale() const { return m_startupUiScale; }
 	refgui::workspace::ConfigEditorController* configEditor() { return &m_configEditor; }
 	refgui::workspace::BackendConfig* config() { return &m_config; }
 	refgui::workspace::CommandRegistry* commands() { return &m_commands; }
@@ -297,6 +299,7 @@ private:
 	refgui::cli::LaunchOptions m_options;
 	QString m_cwd;
 	refgui::workspace::Settings m_settings;
+	double m_startupUiScale = refgui::workspace::Settings::DefaultUiScale;
 	refgui::workspace::CommandRegistry m_commands;
 	refgui::workspace::Connection m_connection;
 	// Both handle Connection::connected before the workspace does: it connects to it in its body.

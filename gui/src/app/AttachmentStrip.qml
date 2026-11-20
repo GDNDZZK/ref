@@ -16,6 +16,7 @@ ListView {
 	readonly property real enterScale: 0.8
 	readonly property int removeInset: 4
 	readonly property int tipDelay: 600
+	function scaledPx(n) { return Math.max(1, Math.round(n * UiScale.factor)) }
 
 	signal removeRequested(int row)
 
@@ -48,7 +49,7 @@ ListView {
 				source: thumb.source
 				fillMode: Image.PreserveAspectCrop
 				asynchronous: true
-				sourceSize: Qt.size(strip.thumbSize, strip.thumbSize) // logical: Image scales it by the device pixel ratio
+				sourceSize: Qt.size(strip.scaledPx(strip.thumbSize), strip.scaledPx(strip.thumbSize))
 			}
 		}
 

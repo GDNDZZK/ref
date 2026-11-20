@@ -183,6 +183,7 @@ Column {
 		property bool cardMutating: false
 		// "inherit" | "number" | "map"
 		property string delayMode: "inherit"
+		property var variantOpts: []
 
 		readonly property string pendingRenameTarget: isBuiltin ? "" : renameInput.text.trim()
 		readonly property bool hasValidationError: (!isBuiltin && renameInput.hasError)
@@ -201,6 +202,10 @@ Column {
 			|| agentPermEditor.hasUncommittedEdit
 			|| (delayMode === "number" && agentDelayNumber.hasUncommittedEdit)
 			|| (delayMode === "map" && agentDelayMap.hasUncommittedEdit)
+
+		function refreshVariantOptions() {
+			variantOpts = section.editor.variantOptions(modelSelect.value)
+		}
 
 		function cardMutate(fn) {
 			cardMutating = true
@@ -250,7 +255,8 @@ Column {
 			descField.text = strField("description")
 			modeSelect.value = strField("mode")
 			modelSelect.value = strField("model")
-			variantField.text = strField("variant")
+			variantSelect.value = strField("variant")
+			refreshVariantOptions()
 			colorPicker.value = strField("color")
 			tempField.value = numField("temperature")
 			topPField.value = numField("top_p")
@@ -374,7 +380,14 @@ Column {
 			function onParsedChanged() {
 				if (!card.cardMutating)
 					card.syncCard()
+				else
+					card.refreshVariantOptions()
 			}
+		}
+
+		Connections {
+			target: Workspace.config
+			function onChanged() { card.refreshVariantOptions() }
 		}
 
 		Item {
@@ -553,7 +566,11 @@ Column {
 				badge: "model"
 				showDivider: true
 				showReset: { void section.editor.revision; return section.editor.contains(["agent", card.agentName, "model"]) }
-				onResetClicked: card.resetKey("model")
+				onResetClicked: {
+					card.resetKey("model")
+					modelSelect.value = ""
+					card.refreshVariantOptions()
+				}
 
 				SelectField {
 					id: modelSelect
@@ -562,6 +579,7 @@ Column {
 					clearable: true
 					options: section.modelOpts
 					placeholderText: qsTr("Inherit top-level model")
+					onValueChanged: card.refreshVariantOptions()
 					onActivated: val => card.cardMutate(() => card.setAgentStringField("model", val))
 				}
 			}
@@ -571,19 +589,20 @@ Column {
 				badge: "variant"
 				showDivider: true
 				showReset: { void section.editor.revision; return section.editor.contains(["agent", card.agentName, "variant"]) }
-				onResetClicked: card.resetKey("variant")
+				onResetClicked: {
+					card.resetKey("variant")
+					variantSelect.value = ""
+				}
 
-				DialogField {
-					id: variantField
+				SelectField {
+					id: variantSelect
+					objectName: "agentVariantSelect_" + card.agentName
 					width: parent.width
-					placeholderText: qsTr("e.g. high")
-					onEdited: card.cardMutate(() => card.setAgentStringField("variant", text.trim()))
-					onEditingFinished: {
-						const trimmed = text.trim()
-						if (text !== trimmed)
-							text = trimmed
-						card.cardMutate(() => card.setAgentStringField("variant", trimmed))
-					}
+					editable: true
+					clearable: true
+					options: card.variantOpts
+					placeholderText: qsTr("Default")
+					onActivated: val => card.cardMutate(() => card.setAgentStringField("variant", val.trim()))
 				}
 			}
 
