@@ -187,10 +187,15 @@ Item {
 				font.pixelSize: Theme.fontSize
 				background: null
 				Component.onCompleted: TextEditSupport.disableUndoRedo(input.textDocument)
+				LinkColorizer {
+					document: input.textDocument
+					color: Theme.accentText
+					highlightImageTokens: true
+				}
 				Basic.ContextMenu.menu: Basic.Menu {
 					id: editMenu
 					objectName: "composerContextMenu"
-					font.pixelSize: Math.round(Theme.secondaryFontSize * Workspace.settings.uiScale)
+					font.pixelSize: Math.round(Theme.secondaryFontSize * UiScale.factor)
 					palette.window: Theme.surface
 					palette.windowText: Theme.text
 					palette.dark: Theme.border

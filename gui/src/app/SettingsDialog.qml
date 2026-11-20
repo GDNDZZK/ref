@@ -6,6 +6,11 @@ ModalDialog {
 	id: dialog
 
 	readonly property int rowHeight: 48
+	readonly property int zoomControlHeight: 28
+	readonly property int zoomInputWidth: 68
+	readonly property int zoomInputLeftMargin: 6
+	readonly property int zoomInputSuffixGap: 2
+	readonly property int zoomInputRightMargin: 8
 
 	title: qsTr("Settings")
 	dialogWidth: Theme.settingsWidth
@@ -70,80 +75,171 @@ ModalDialog {
 			}
 		}
 
-
 		Rectangle { x: Theme.dialogPadding; width: parent.width - 2 * Theme.dialogPadding; height: 1; color: Theme.border }
 
-		Item {
+		Column {
 			objectName: "uiScaleRow"
 			width: parent.width
-			height: dialog.rowHeight
+			bottomPadding: restartHint.visible ? 10 : 0
+
+			Item {
+				width: parent.width
+				height: dialog.rowHeight
+
+				Text {
+					textFormat: Text.PlainText
+					anchors { left: parent.left; leftMargin: Theme.dialogPadding; right: zoomControls.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+					text: qsTr("Interface zoom")
+					color: Theme.text
+					font.pixelSize: Theme.fontSize
+					elide: Text.ElideRight
+				}
+				Row {
+					id: zoomControls
+					anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
+					spacing: 8
+
+					TextButton {
+						objectName: "uiScaleResetButton"
+						anchors.verticalCenter: parent.verticalCenter
+						visible: Math.abs(Workspace.settings.uiScale - 1.0) > 0.001
+						text: qsTr("Reset")
+						onClicked: Commands.run(CommandId.uiZoomReset)
+					}
+					CircleButton {
+						objectName: "uiScaleOutButton"
+						anchors.verticalCenter: parent.verticalCenter
+						implicitWidth: dialog.zoomControlHeight
+						implicitHeight: dialog.zoomControlHeight
+						enabled: Workspace.settings.uiScale > Workspace.settings.minUiScale + 0.001
+						opacity: enabled ? 1 : Theme.disabledOpacity
+						Accessible.name: qsTr("Interface zoom") + " (−)"
+						onClicked: Commands.run(CommandId.uiZoomOut)
+
+						Text {
+							textFormat: Text.PlainText
+							anchors.centerIn: parent
+							text: "−"
+							color: Theme.text
+							font { pixelSize: Theme.fontSize; bold: true }
+						}
+					}
+					Rectangle {
+						id: uiScaleBox
+						anchors.verticalCenter: parent.verticalCenter
+						width: dialog.zoomInputWidth
+						height: dialog.zoomControlHeight
+						radius: Theme.radiusSmall
+						color: Theme.background
+						border.color: uiScaleInput.activeFocus ? Theme.accentText : Theme.border
+
+						Behavior on border.color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+
+						function formattedPercent() {
+							return String(Math.round(Workspace.settings.uiScale * 100))
+						}
+
+						function commit() {
+							let raw = uiScaleInput.text.trim()
+							if (raw.endsWith("%"))
+								raw = raw.slice(0, -1).trim()
+							const parsed = raw !== "" ? Number(raw) : NaN
+							if (!Number.isFinite(parsed) || parsed <= 0) {
+								uiScaleInput.text = formattedPercent()
+								return
+							}
+							const minPct = Math.round(Workspace.settings.minUiScale * 100)
+							const maxPct = Math.round(Workspace.settings.maxUiScale * 100)
+							const clamped = Math.min(maxPct, Math.max(minPct, Math.round(parsed)))
+							Workspace.settings.uiScale = clamped / 100.0
+							uiScaleInput.text = formattedPercent()
+						}
+
+						Connections {
+							target: Workspace.settings
+							function onUiScaleChanged() {
+								uiScaleInput.text = uiScaleBox.formattedPercent()
+							}
+						}
+
+						TextInput {
+							id: uiScaleInput
+							objectName: "uiScaleInput"
+							anchors { left: parent.left; leftMargin: dialog.zoomInputLeftMargin; right: percentSuffix.left; rightMargin: dialog.zoomInputSuffixGap; top: parent.top; bottom: parent.bottom }
+							horizontalAlignment: TextInput.AlignRight
+							verticalAlignment: TextInput.AlignVCenter
+							color: Theme.text
+							selectionColor: Theme.selection
+							selectedTextColor: Theme.text
+							font { family: Theme.monoFamily; pixelSize: Theme.secondaryFontSize }
+							clip: true
+							selectByMouse: true
+							Accessible.name: qsTr("Interface zoom")
+							Component.onCompleted: text = uiScaleBox.formattedPercent()
+							onAccepted: {
+								uiScaleBox.commit()
+								dialog.forceActiveFocus()
+							}
+							onEditingFinished: if (text !== uiScaleBox.formattedPercent()) uiScaleBox.commit()
+							Keys.onEscapePressed: event => {
+								text = uiScaleBox.formattedPercent()
+								dialog.forceActiveFocus()
+								event.accepted = true
+							}
+							Keys.onUpPressed: event => {
+								Commands.run(CommandId.uiZoomIn)
+								text = uiScaleBox.formattedPercent()
+								event.accepted = true
+							}
+							Keys.onDownPressed: event => {
+								Commands.run(CommandId.uiZoomOut)
+								text = uiScaleBox.formattedPercent()
+								event.accepted = true
+							}
+						}
+
+						Text {
+							id: percentSuffix
+							textFormat: Text.PlainText
+							anchors { right: parent.right; rightMargin: dialog.zoomInputRightMargin; verticalCenter: parent.verticalCenter }
+							text: "%"
+							color: Theme.textMuted
+							font { family: Theme.monoFamily; pixelSize: Theme.secondaryFontSize }
+							TapHandler { onTapped: uiScaleInput.forceActiveFocus() }
+						}
+					}
+					CircleButton {
+						objectName: "uiScaleInButton"
+						anchors.verticalCenter: parent.verticalCenter
+						implicitWidth: dialog.zoomControlHeight
+						implicitHeight: dialog.zoomControlHeight
+						enabled: Workspace.settings.uiScale < Workspace.settings.maxUiScale - 0.001
+						opacity: enabled ? 1 : Theme.disabledOpacity
+						Accessible.name: qsTr("Interface zoom") + " (+)"
+						onClicked: Commands.run(CommandId.uiZoomIn)
+
+						Text {
+							textFormat: Text.PlainText
+							anchors.centerIn: parent
+							text: "+"
+							color: Theme.text
+							font { pixelSize: Theme.fontSize; bold: true }
+						}
+					}
+				}
+			}
 
 			Text {
+				id: restartHint
+				objectName: "uiScaleRestartHint"
 				textFormat: Text.PlainText
-				anchors { left: parent.left; leftMargin: Theme.dialogPadding; right: zoomControls.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
-				text: qsTr("Interface zoom")
-				color: Theme.text
-				font.pixelSize: Theme.fontSize
-				elide: Text.ElideRight
-			}
-			Row {
-				id: zoomControls
-				anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
-				spacing: 8
-
-				TextButton {
-					objectName: "uiScaleResetButton"
-					anchors.verticalCenter: parent.verticalCenter
-					visible: Math.abs(Workspace.settings.uiScale - 1.0) > 0.001
-					text: qsTr("Reset")
-					onClicked: Commands.run(CommandId.uiZoomReset)
-				}
-				CircleButton {
-					objectName: "uiScaleOutButton"
-					anchors.verticalCenter: parent.verticalCenter
-					implicitWidth: 28
-					implicitHeight: 28
-					enabled: Workspace.settings.uiScale > 0.701
-					opacity: enabled ? 1 : Theme.disabledOpacity
-					Accessible.name: qsTr("Interface zoom") + " (−)"
-					onClicked: Commands.run(CommandId.uiZoomOut)
-
-					Text {
-						textFormat: Text.PlainText
-						anchors.centerIn: parent
-						text: "−"
-						color: Theme.text
-						font { pixelSize: Theme.fontSize; bold: true }
-					}
-				}
-				Text {
-					objectName: "uiScaleLabel"
-					textFormat: Text.PlainText
-					anchors.verticalCenter: parent.verticalCenter
-					width: 48
-					horizontalAlignment: Text.AlignHCenter
-					text: Math.round(Workspace.settings.uiScale * 100) + "%"
-					color: Theme.text
-					font { family: Theme.monoFamily; pixelSize: Theme.secondaryFontSize }
-				}
-				CircleButton {
-					objectName: "uiScaleInButton"
-					anchors.verticalCenter: parent.verticalCenter
-					implicitWidth: 28
-					implicitHeight: 28
-					enabled: Workspace.settings.uiScale < 1.499
-					opacity: enabled ? 1 : Theme.disabledOpacity
-					Accessible.name: qsTr("Interface zoom") + " (+)"
-					onClicked: Commands.run(CommandId.uiZoomIn)
-
-					Text {
-						textFormat: Text.PlainText
-						anchors.centerIn: parent
-						text: "+"
-						color: Theme.text
-						font { pixelSize: Theme.fontSize; bold: true }
-					}
-				}
+				visible: Math.abs(Workspace.settings.uiScale - Workspace.startupUiScale) > 0.001
+				x: Theme.dialogPadding
+				width: parent.width - 2 * Theme.dialogPadding
+				text: qsTr("Restart ref-gui for native sharpness")
+				color: Theme.textMuted
+				font.pixelSize: Theme.smallFontSize
+				wrapMode: Text.Wrap
 			}
 		}
 		Rectangle { x: Theme.dialogPadding; width: parent.width - 2 * Theme.dialogPadding; height: 1; color: Theme.border }

@@ -333,7 +333,8 @@ FocusScope {
 				onPointChanged: {
 					if (!hovered || !hoverGuard.movedTo(point.scenePosition))
 						return
-					const idx = listView.indexAt(point.position.x + listView.contentX, point.position.y + listView.contentY)
+					const local = listView.mapFromItem(null, point.scenePosition.x, point.scenePosition.y)
+					const idx = listView.indexAt(local.x + listView.contentX, local.y + listView.contentY)
 					if (idx >= 0) {
 						field.animateHighlight = true
 						listView.currentIndex = idx

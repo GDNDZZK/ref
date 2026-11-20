@@ -632,9 +632,8 @@
         <translation>默认变体</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="579"/>
         <source>e.g. high</source>
-        <translation>例如 high</translation>
+        <translation type="vanished">例如 high</translation>
     </message>
     <message>
         <location filename="../src/app/ConfigAgentsSection.qml" line="591"/>
@@ -3171,6 +3170,11 @@ $ARGUMENTS</translation>
         <location filename="../src/app/SettingsDialog.qml" line="98"/>
         <source>Reset</source>
         <translation>重置</translation>
+    </message>
+    <message>
+        <location filename="../src/app/SettingsDialog.qml" line="239"/>
+        <source>Restart ref-gui for native sharpness</source>
+        <translation>重启 ref-gui 以原生清晰度生效</translation>
     </message>
     <message>
         <location filename="../src/app/SettingsDialog.qml" line="84"/>

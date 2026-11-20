@@ -28,7 +28,7 @@ Image {
 			change()
 			return
 		}
-		const scale = Workspace.settings.uiScale
+		const scale = UiScale.factor * (Screen.devicePixelRatio || 1)
 		const size = Qt.size(Math.max(1, Math.round(item.width * scale)), Math.max(1, Math.round(item.height * scale)))
 		const grabbing = item.grabToImage(result => {
 			if (token !== shot.serial)

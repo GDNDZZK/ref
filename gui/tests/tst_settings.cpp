@@ -45,6 +45,8 @@ private slots:
 	void notifyKindsFollowTheSwitches();
 	void unwritableLocationIsReported();
 	void runningOrderAndUiScaleValidationAndPersistence();
+	void readUiScaleOnlyIsReadOnlyAndNormalizes();
+	void sidebarSectionHeightsPersistAndValidate();
 };
 
 void TestSettings::defaultsWithoutAFile()
@@ -60,9 +62,17 @@ void TestSettings::defaultsWithoutAFile()
 	QVERIFY(settings.sidebarRunningExpanded());
 	QVERIFY(settings.sidebarHistoryExpanded());
 	QCOMPARE(settings.sidebarWidth(), Settings::DefaultSidebarWidth);
+	QCOMPARE(settings.sidebarTodoHeight(), 0);
+	QCOMPARE(settings.sidebarRunningHeight(), 0);
 	QCOMPARE(settings.windowWidth(), Settings::DefaultWindowWidth);
 	QVERIFY(settings.sidebarRunningOrder().isEmpty());
 	QCOMPARE(settings.uiScale(), Settings::DefaultUiScale);
+	QCOMPARE(settings.minUiScale(), Settings::MinUiScale);
+	QCOMPARE(settings.maxUiScale(), Settings::MaxUiScale);
+	QCOMPARE(settings.uiScaleStep(), Settings::UiScaleStep);
+	QCOMPARE(Settings::MinUiScale, 0.5);
+	QCOMPARE(Settings::MaxUiScale, 4.0);
+	QCOMPARE(Settings::UiScaleStep, 0.05);
 	QVERIFY(settings.loadProblem().isEmpty());
 	QVERIFY(!QFile::exists(dir.filePath(u"gui.json"_s))); // nothing is written until something changes
 }
@@ -81,6 +91,8 @@ void TestSettings::savedChangesComeBack()
 		settings.setSidebarRunningExpanded(false);
 		settings.setSidebarHistoryExpanded(false);
 		settings.setSidebarWidth(340);
+		settings.setSidebarTodoHeight(140);
+		settings.setSidebarRunningHeight(220);
 		settings.setWindowWidth(1200);
 		settings.setWindowHeight(800);
 		settings.setSidebarRunningOrder({u"ses_b"_s, u"ses_a"_s, u"ses_b"_s, QString()});
@@ -97,6 +109,8 @@ void TestSettings::savedChangesComeBack()
 	QVERIFY(!again.sidebarRunningExpanded());
 	QVERIFY(!again.sidebarHistoryExpanded());
 	QCOMPARE(again.sidebarWidth(), 340);
+	QCOMPARE(again.sidebarTodoHeight(), 140);
+	QCOMPARE(again.sidebarRunningHeight(), 220);
 	QCOMPARE(again.windowWidth(), 1200);
 	QCOMPARE(again.windowHeight(), 800);
 	QCOMPARE(again.sidebarRunningOrder(), (QStringList{u"ses_b"_s, u"ses_a"_s}));
@@ -172,7 +186,7 @@ void TestSettings::unknownValuesAreIgnoredAndReported()
 {
 	QTemporaryDir dir;
 	const QString path = dir.filePath(u"gui.json"_s);
-	writeFile(path, R"({"theme":"purple","language":"zh_CN","sidebar":{"visible":"yes","todoExpanded":"no","runningExpanded":1,"historyExpanded":{},"width":"wide"},"window":{"width":5,"height":700}})");
+	writeFile(path, R"({"theme":"purple","language":"zh_CN","sidebar":{"visible":"yes","todoExpanded":"no","runningExpanded":1,"historyExpanded":{},"width":"wide","todoHeight":"tall","runningHeight":-5},"window":{"width":5,"height":700}})");
 	const Settings settings(path);
 	QCOMPARE(settings.theme(), Settings::System);
 	QCOMPARE(settings.language(), Settings::ChineseSimplified); // the valid fields still count
@@ -181,6 +195,8 @@ void TestSettings::unknownValuesAreIgnoredAndReported()
 	QVERIFY(settings.sidebarRunningExpanded());
 	QVERIFY(settings.sidebarHistoryExpanded());
 	QCOMPARE(settings.sidebarWidth(), Settings::DefaultSidebarWidth);
+	QCOMPARE(settings.sidebarTodoHeight(), 0);
+	QCOMPARE(settings.sidebarRunningHeight(), 0);
 	QCOMPARE(settings.windowWidth(), Settings::DefaultWindowWidth);
 	QCOMPARE(settings.windowHeight(), 700);
 	const QString problem = settings.loadProblem();
@@ -190,6 +206,8 @@ void TestSettings::unknownValuesAreIgnoredAndReported()
 	QVERIFY(problem.contains(u"sidebar.runningExpanded"_s));
 	QVERIFY(problem.contains(u"sidebar.historyExpanded"_s));
 	QVERIFY(problem.contains(u"sidebar.width"_s));
+	QVERIFY(problem.contains(u"sidebar.todoHeight: expected a non-negative number in pixels"_s));
+	QVERIFY(problem.contains(u"sidebar.runningHeight: expected a non-negative number in pixels"_s));
 	QVERIFY(problem.contains(u"window.width"_s));
 }
 
@@ -237,7 +255,7 @@ void TestSettings::runningOrderAndUiScaleValidationAndPersistence()
 
 		settings.setUiScale(0.2);
 		QCOMPARE(settings.uiScale(), Settings::MinUiScale);
-		settings.setUiScale(3.0);
+		settings.setUiScale(5.0);
 		QCOMPARE(settings.uiScale(), Settings::MaxUiScale);
 		settings.setUiScale(0.0);
 		settings.setUiScale(-1.0);
@@ -281,5 +299,69 @@ void TestSettings::runningOrderAndUiScaleValidationAndPersistence()
 	}
 }
 
+void TestSettings::readUiScaleOnlyIsReadOnlyAndNormalizes()
+{
+	QTemporaryDir dir;
+	const QString missingPath = dir.filePath(u"missing.json"_s);
+	QCOMPARE(Settings::readUiScaleOnly(missingPath), Settings::DefaultUiScale);
+	QVERIFY(!QFile::exists(missingPath));
+
+	const QString brokenPath = dir.filePath(u"broken.json"_s);
+	writeFile(brokenPath, "{ not json");
+	QCOMPARE(Settings::readUiScaleOnly(brokenPath), Settings::DefaultUiScale);
+	QVERIFY(QFile::exists(brokenPath));
+	QVERIFY(!QFile::exists(brokenPath + u".bad"_s));
+
+	const QString arrayPath = dir.filePath(u"array.json"_s);
+	writeFile(arrayPath, "[1, 2]");
+	QCOMPARE(Settings::readUiScaleOnly(arrayPath), Settings::DefaultUiScale);
+	QVERIFY(!QFile::exists(arrayPath + u".bad"_s));
+
+	const QString invalidScalePath = dir.filePath(u"invalid.json"_s);
+	writeFile(invalidScalePath, R"({"uiScale":-2.0})");
+	QCOMPARE(Settings::readUiScaleOnly(invalidScalePath), Settings::DefaultUiScale);
+
+	const QString lowScalePath = dir.filePath(u"low.json"_s);
+	writeFile(lowScalePath, R"({"uiScale":0.2})");
+	QCOMPARE(Settings::readUiScaleOnly(lowScalePath), Settings::MinUiScale);
+
+	const QString highScalePath = dir.filePath(u"high.json"_s);
+	writeFile(highScalePath, R"({"uiScale":5.0})");
+	QCOMPARE(Settings::readUiScaleOnly(highScalePath), Settings::MaxUiScale);
+
+	const QString preciseScalePath = dir.filePath(u"precise.json"_s);
+	writeFile(preciseScalePath, R"({"uiScale":1.554})");
+	QCOMPARE(Settings::readUiScaleOnly(preciseScalePath), 1.55);
+}
+
+void TestSettings::sidebarSectionHeightsPersistAndValidate()
+{
+	QTemporaryDir dir;
+	const QString path = dir.filePath(u"gui.json"_s);
+	Settings settings(path);
+	QSignalSpy todoSpy(&settings, &Settings::sidebarTodoHeightChanged);
+	QSignalSpy runningSpy(&settings, &Settings::sidebarRunningHeightChanged);
+
+	settings.setSidebarTodoHeight(-25);
+	settings.setSidebarRunningHeight(-1);
+	QCOMPARE(settings.sidebarTodoHeight(), 0);
+	QCOMPARE(settings.sidebarRunningHeight(), 0);
+	QCOMPARE(todoSpy.count(), 0);
+	QCOMPARE(runningSpy.count(), 0);
+
+	settings.setSidebarTodoHeight(160);
+	settings.setSidebarRunningHeight(240);
+	QCOMPARE(todoSpy.count(), 1);
+	QCOMPARE(runningSpy.count(), 1);
+	settings.save();
+
+	const QJsonObject sidebar = readJson(path).value(u"sidebar"_s).toObject();
+	QCOMPARE(sidebar.value(u"todoHeight"_s).toInt(), 160);
+	QCOMPARE(sidebar.value(u"runningHeight"_s).toInt(), 240);
+
+	settings.setSidebarTodoHeight(-10);
+	QCOMPARE(settings.sidebarTodoHeight(), 0);
+	QCOMPARE(todoSpy.count(), 2);
+}
 QTEST_GUILESS_MAIN(TestSettings)
 #include "tst_settings.moc"

@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 import RefGui
 
 // Text with an angled multi-stop highlight sweep across the glyphs while work continues.
@@ -12,8 +13,16 @@ Item {
 	property alias font: baseText.font
 
 	readonly property int shimmerPeriod: 1600 // ms for one sweep
-	readonly property real sweepAngleRad: 18 * Math.PI / 180
+	readonly property real sweepAngleDeg: 18
+	readonly property real sweepAngleRad: sweepAngleDeg * Math.PI / 180
+	readonly property int minSweepSpan: 72
+	readonly property real spanWidthRatio: 1.4
+	readonly property real midStopRatio: 0.28
+	readonly property real midColorWeight: 0.3
+	readonly property real rotatedHeightMultiplier: 1.5
 	readonly property bool active: running && visible && width > 0 && height > 0 && label !== ""
+	readonly property bool useGpuEffect: GraphicsInfo.api !== GraphicsInfo.Software && GraphicsInfo.api !== GraphicsInfo.Null
+	readonly property real pixelScale: Math.max(1, (Screen.devicePixelRatio || 1) * UiScale.factor)
 	property real phase: 0
 
 	implicitWidth: baseText.implicitWidth
@@ -47,10 +56,16 @@ Item {
 		return style + weight + px + "px " + family
 	}
 
-	onLabelChanged: if (active) canvas.requestPaint()
-	onColorChanged: if (active) canvas.requestPaint()
-	onHighlightChanged: if (active) canvas.requestPaint()
-	onActiveChanged: if (active) canvas.requestPaint()
+	function requestFallbackPaint() {
+		if (active && !useGpuEffect)
+			canvas.requestPaint()
+	}
+
+	onLabelChanged: requestFallbackPaint()
+	onColorChanged: requestFallbackPaint()
+	onHighlightChanged: requestFallbackPaint()
+	onActiveChanged: requestFallbackPaint()
+	onPixelScaleChanged: requestFallbackPaint()
 
 	Text {
 		id: baseText
@@ -58,7 +73,7 @@ Item {
 		textFormat: Text.PlainText
 		text: shimmer.label
 		color: shimmer.color
-		visible: !shimmer.active
+		visible: !shimmer.active || shimmer.useGpuEffect
 	}
 
 	FontMetrics {
@@ -70,45 +85,115 @@ Item {
 		running: shimmer.active
 		onTriggered: {
 			shimmer.phase = (shimmer.phase + frameTime * Format.msPerSecond / shimmer.shimmerPeriod) % 1
-			canvas.requestPaint()
+			if (!shimmer.useGpuEffect)
+				canvas.requestPaint()
 		}
+	}
+
+	Item {
+		id: brightSource
+		visible: false
+		width: Math.max(1, Math.ceil(shimmer.width * UiScale.factor))
+		height: Math.max(1, Math.ceil(shimmer.height * UiScale.factor))
+
+		Text {
+			transformOrigin: Item.TopLeft
+			scale: UiScale.factor
+			width: shimmer.width
+			height: shimmer.height
+			textFormat: Text.PlainText
+			text: shimmer.label
+			font: baseText.font
+			color: shimmer.highlight
+		}
+	}
+
+	Item {
+		id: maskSource
+		visible: false
+		layer.enabled: shimmer.active && shimmer.useGpuEffect
+		layer.smooth: true
+		width: brightSource.width
+		height: brightSource.height
+
+		Rectangle {
+			readonly property real span: Math.max(shimmer.width * shimmer.spanWidthRatio, shimmer.minSweepSpan)
+			readonly property real travel: shimmer.width + span
+			readonly property real centerX: (-span * 0.5 + shimmer.phase * travel) * UiScale.factor
+
+			x: centerX - width / 2
+			y: (parent.height - height) / 2
+			width: span * UiScale.factor
+			height: Math.hypot(parent.width, parent.height) * shimmer.rotatedHeightMultiplier
+			rotation: shimmer.sweepAngleDeg
+			antialiasing: true
+			gradient: Gradient {
+				orientation: Gradient.Horizontal
+				GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0) }
+				GradientStop { position: shimmer.midStopRatio; color: Qt.rgba(1, 1, 1, shimmer.midColorWeight) }
+				GradientStop { position: 0.5; color: Qt.rgba(1, 1, 1, 1) }
+				GradientStop { position: 1 - shimmer.midStopRatio; color: Qt.rgba(1, 1, 1, shimmer.midColorWeight) }
+				GradientStop { position: 1.0; color: Qt.rgba(1, 1, 1, 0) }
+			}
+		}
+	}
+
+	MultiEffect {
+		visible: shimmer.active && shimmer.useGpuEffect
+		width: brightSource.width
+		height: brightSource.height
+		transformOrigin: Item.TopLeft
+		scale: 1 / UiScale.factor
+		source: brightSource
+		maskEnabled: true
+		maskSource: maskSource
+		maskThresholdMin: 0.5
+		maskSpreadAtMin: 1.0
+		autoPaddingEnabled: false
 	}
 
 	Canvas {
 		id: canvas
-		anchors.fill: parent
-		visible: shimmer.active
+		width: Math.max(1, Math.ceil(shimmer.width * shimmer.pixelScale))
+		height: Math.max(1, Math.ceil(shimmer.height * shimmer.pixelScale))
+		transformOrigin: Item.TopLeft
+		scale: 1 / shimmer.pixelScale
+		visible: shimmer.active && !shimmer.useGpuEffect
 
-		onWidthChanged: if (shimmer.active) requestPaint()
-		onHeightChanged: if (shimmer.active) requestPaint()
+		onWidthChanged: shimmer.requestFallbackPaint()
+		onHeightChanged: shimmer.requestFallbackPaint()
 
 		onPaint: {
 			const ctx = getContext("2d")
+			ctx.setTransform(1, 0, 0, 1, 0, 0)
 			ctx.clearRect(0, 0, width, height)
-			if (width <= 0 || height <= 0 || shimmer.label === "")
+			if (shimmer.width <= 0 || shimmer.height <= 0 || shimmer.label === "")
 				return
+			ctx.setTransform(shimmer.pixelScale, 0, 0, shimmer.pixelScale, 0, 0)
 
-			const span = Math.max(width * 1.4, 72)
-			const travel = width + span
+			const w = shimmer.width
+			const h = shimmer.height
+			const span = Math.max(w * shimmer.spanWidthRatio, shimmer.minSweepSpan)
+			const travel = w + span
 			const cx = -span * 0.5 + shimmer.phase * travel
-			const cy = height * 0.5
+			const cy = h * 0.5
 			const dx = Math.cos(shimmer.sweepAngleRad) * (span * 0.5)
 			const dy = Math.sin(shimmer.sweepAngleRad) * (span * 0.5)
 
 			const grad = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy)
 			const baseCss = shimmer.cssColor(shimmer.color)
-			const midCss = shimmer.mixColor(shimmer.color, shimmer.highlight, 0.3)
+			const midCss = shimmer.mixColor(shimmer.color, shimmer.highlight, shimmer.midColorWeight)
 			const peakCss = shimmer.cssColor(shimmer.highlight)
 			grad.addColorStop(0.0, baseCss)
-			grad.addColorStop(0.28, midCss)
+			grad.addColorStop(shimmer.midStopRatio, midCss)
 			grad.addColorStop(0.5, peakCss)
-			grad.addColorStop(0.72, midCss)
+			grad.addColorStop(1 - shimmer.midStopRatio, midCss)
 			grad.addColorStop(1.0, baseCss)
 
 			ctx.font = shimmer.cssFont()
 			ctx.textBaseline = "alphabetic"
 			ctx.fillStyle = grad
-			const y = metrics.ascent > 0 ? metrics.ascent : height * 0.8
+			const y = metrics.ascent > 0 ? metrics.ascent : h * 0.8
 			ctx.fillText(shimmer.label, 0, y)
 		}
 	}

@@ -17,6 +17,7 @@ public:
 	~LinkHighlighter() override;
 	void setColor(const QColor& color);
 	void setStreaming(bool streaming);
+	void setHighlightImageTokens(bool enabled);
 
 protected:
 	void highlightBlock(const QString& text) override;
@@ -30,6 +31,7 @@ private:
 	QTimer m_timer;
 	QColor m_color;
 	bool m_streaming = false;
+	bool m_highlightImageTokens = false;
 	bool m_highlighting = false;
 };
 
@@ -41,7 +43,7 @@ class LinkColorizer : public QObject
 	Q_PROPERTY(QQuickTextDocument* document READ document WRITE setDocument NOTIFY documentChanged FINAL)
 	Q_PROPERTY(QColor color READ color WRITE setColor NOTIFY colorChanged FINAL)
 	Q_PROPERTY(bool streaming READ isStreaming WRITE setStreaming NOTIFY streamingChanged FINAL)
-
+	Q_PROPERTY(bool highlightImageTokens READ highlightImageTokens WRITE setHighlightImageTokens NOTIFY highlightImageTokensChanged FINAL)
 public:
 	explicit LinkColorizer(QObject* parent = nullptr);
 
@@ -51,15 +53,19 @@ public:
 	void setColor(const QColor& color);
 	bool isStreaming() const { return m_streaming; }
 	void setStreaming(bool streaming);
+	bool highlightImageTokens() const { return m_highlightImageTokens; }
+	void setHighlightImageTokens(bool enabled);
 
 signals:
 	void documentChanged();
 	void colorChanged();
 	void streamingChanged();
+	void highlightImageTokensChanged();
 
 private:
 	QPointer<QQuickTextDocument> m_document;
 	QColor m_color;
 	QPointer<LinkHighlighter> m_highlighter; // a child of the text document
 	bool m_streaming = false;
+	bool m_highlightImageTokens = false;
 };

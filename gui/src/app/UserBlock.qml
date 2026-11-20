@@ -265,6 +265,7 @@ Block {
 				width: Math.min(implicitWidth, block.columnWidth - 2 * bubble.horizontalPadding - bubble.markerIndent)
 				textFormat: block.isShell ? TextEdit.MarkdownText : TextEdit.PlainText
 				text: block.isCompaction ? "" : block.content
+				highlightImageTokens: !block.isShell && !block.isCompaction
 				font.family: block.isShell ? Theme.monoFamily : font.family
 			}
 		}

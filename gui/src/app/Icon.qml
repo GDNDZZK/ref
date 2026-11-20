@@ -16,10 +16,9 @@ Image {
 
 	width: size
 	height: size
-	// In logical pixels: Image asks the provider for sourceSize times the device pixel ratio, so
-	// the picture maps 1:1 onto the screen.
-	sourceSize: Qt.size(size, size)
+	// Scaled by UiScale.factor so the SVG renders at exact zoomed physical resolution.
+	sourceSize: Qt.size(Math.max(1, Math.round(size * UiScale.factor)), Math.max(1, Math.round(size * UiScale.factor)))
 	source: name === "" ? "" : "image://icons/" + name + "-" + size + "?color=" + colorHex
-	fillMode: Image.Pad
+	fillMode: Image.Stretch
 	smooth: UiScale.factor !== 1
 }
