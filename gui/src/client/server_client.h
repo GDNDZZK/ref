@@ -75,7 +75,7 @@ public:
 	QCoro::Task<Result<proto::ConfigFilesInfo>> deleteConfigFile(QString file, std::optional<QString> cwd = {});
 	QCoro::Task<Result<QList<proto::SessionInfo>>> listSessions();
 	// Persisted sessions, newest first; of every directory when `cwd` is empty.
-	QCoro::Task<Result<QList<proto::SessionInfo>>> listHistory(QString cwd, int limit);
+	QCoro::Task<Result<QList<proto::SessionInfo>>> listHistory(QString cwd, int limit, QString creator = {}, QString query = {});
 	// Subscribes to the events of every live session (split view). Answers with the live sessions.
 	QCoro::Task<Result<QList<proto::SessionInfo>>> watchAll(bool enabled);
 	QCoro::Task<Result<proto::PromptResult>> prompt(QString sessionId, QString text, QList<proto::ImageData> images = {});

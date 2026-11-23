@@ -160,7 +160,7 @@ public:
 	Q_INVOKABLE void copyLastReply();
 	Q_INVOKABLE void toggleReasoning();
 	Q_INVOKABLE void toggleDetails();
-
+	Q_INVOKABLE QVariantList allImages() const;
 signals:
 	void busyChanged();
 	void activelyWorkingChanged();

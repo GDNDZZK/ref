@@ -10,7 +10,10 @@ import Icon from './Icon.vue'
 
 const QUEUE_MAX_ROWS = components.queueStrip.queueMaxRows
 
-const props = defineProps<{ messages: readonly Message[]; removing: ReadonlySet<string> }>()
+const props = withDefaults(
+  defineProps<{ messages: readonly Message[]; removing: ReadonlySet<string>; compactBottom?: boolean }>(),
+  { compactBottom: false },
+)
 defineEmits<{ remove: [messageId: string] }>()
 
 const { t } = useI18n()
@@ -53,7 +56,7 @@ const rows = computed<Row[]>(() =>
 </script>
 
 <template>
-  <div class="queue" :class="{ shown: rows.length > 0 }">
+  <div class="queue" :class="{ shown: rows.length > 0, 'compact-bottom': compactBottom }">
     <div class="queue-inner">
       <TransitionGroup tag="ul" name="row" class="rows" :style="{ '--max-rows': QUEUE_MAX_ROWS }">
         <li v-for="row in rows" :key="row.id" class="row" :class="{ removing: removing.has(row.id) }">
@@ -86,6 +89,8 @@ const rows = computed<Row[]>(() =>
 .queue {
   --queue-gap: var(--composer-queue-gap);
   --row-height: var(--queue-strip-queue-row-height);
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-rows: 0fr;
   opacity: 0;
@@ -114,6 +119,11 @@ const rows = computed<Row[]>(() =>
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: inset 0 0 0 1px var(--border);
+  transition: margin-bottom var(--motion-standard) var(--motion-ease);
+}
+
+.queue.compact-bottom .rows {
+  margin-bottom: 0;
 }
 
 .row {

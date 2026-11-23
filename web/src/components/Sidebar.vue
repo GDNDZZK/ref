@@ -8,7 +8,14 @@ import lockupDark from '../../../assets/app/ref-lockup-small-dark.svg'
 import lockupLight from '../../../assets/app/ref-lockup-small-light.svg'
 import { clamp } from '../clamp.ts'
 import { useTheme } from '../composables/useTheme.ts'
-import { isWorkingSession, matchesQuery, todoProgress } from '../shell/sessionRow.ts'
+import {
+  creatorKeywords,
+  creatorLabel,
+  isWorkingSession,
+  matchesQuery,
+  todoProgress,
+} from '../shell/sessionRow.ts'
+import type { SessionInfo } from '../proto/generated'
 import { metrics } from '../theme/generated/theme.ts'
 import { useCommandsStore } from '../stores/commands.ts'
 import { useConnectionStore } from '../stores/connection.ts'
@@ -18,6 +25,8 @@ import { useMcpStore } from '../stores/mcp.ts'
 import { useNoticesStore } from '../stores/notices.ts'
 import { useWorkspaceStore } from '../stores/workspace.ts'
 import Chevron from './Chevron.vue'
+import ContextMenu from './ContextMenu.vue'
+import type { MenuItem } from './ContextMenu.vue'
 import HistoryRow from './HistoryRow.vue'
 import Icon from './Icon.vue'
 import McpDots from './McpDots.vue'
@@ -45,15 +54,140 @@ const layout = useLayoutStore()
 const mcp = useMcpStore()
 const notices = useNoticesStore()
 
-const query = ref('')
+const HISTORY_SEARCH_DEBOUNCE_MS = 150
+const query = computed({
+  get: () => workspace.historyQuery,
+  set: (value: string) => (workspace.historyQuery = value),
+})
 
 // The session on screen: the open one, or the focused tile in split view.
 const todos = computed(() => (workspace.focusedId ? workspace.infoOf(workspace.focusedId)?.todos : undefined))
 const hasTodo = computed(() => todoProgress(todos.value) !== undefined)
 const liveIds = computed(() => new Set(workspace.live.map((session) => session.id)))
-const history = computed(() =>
-  workspace.history.filter((session) => !liveIds.value.has(session.id) && matchesQuery(session, query.value)),
+const sessionById = computed(() => {
+  const map = new Map<string, SessionInfo>()
+  for (const info of workspace.history) map.set(info.id, info)
+  for (const info of workspace.sidebarHistory) map.set(info.id, info)
+  for (const info of workspace.live) map.set(info.id, info)
+  return map
+})
+const hasActiveHistoryFilter = computed(
+  () =>
+    Boolean(workspace.historyCreator) ||
+    layout.sidebarHistoryCreatorFilter !== 'all' ||
+    layout.sidebarHistoryCurrentDir,
 )
+const history = computed(() =>
+  workspace.sidebarHistory.filter((session) => {
+    if (liveIds.value.has(session.id)) return false
+    if (workspace.historyCreator) {
+      if (session.parent !== workspace.historyCreator) return false
+    } else if (layout.sidebarHistoryCreatorFilter === 'user' && session.parent) {
+      return false
+    }
+    if (layout.sidebarHistoryCurrentDir && workspace.effectiveCwd && session.cwd !== workspace.effectiveCwd) {
+      return false
+    }
+    if (workspace.sidebarHistorySynced) return true
+    const creator = creatorKeywords(sessionById.value, session)
+    return matchesQuery(session, workspace.historyQuery, creator)
+  }),
+)
+
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+function clearSearchTimer(): void {
+  if (searchTimer === undefined) return
+  clearTimeout(searchTimer)
+  searchTimer = undefined
+}
+function refreshHistoryNow(): void {
+  clearSearchTimer()
+  report(workspace.refreshSidebarHistory())
+}
+watch(
+  () => workspace.historyQuery,
+  (next) => {
+    clearSearchTimer()
+    if (next.trim() === '') {
+      report(workspace.refreshSidebarHistory())
+      return
+    }
+    searchTimer = setTimeout(() => {
+      searchTimer = undefined
+      report(workspace.refreshSidebarHistory())
+    }, HISTORY_SEARCH_DEBOUNCE_MS)
+  },
+)
+const filterButton = useTemplateRef<HTMLButtonElement>('filterButton')
+const filterMenuOpen = ref(false)
+const filterMenuMounted = ref(false)
+const filterMenuCoords = ref({ x: 0, y: 0 })
+let suppressFilterClick = false
+
+function selectCreatorFilter(choice: 'all' | 'user'): void {
+  workspace.historyCreator = undefined
+  layout.setSidebarHistoryCreatorFilter(choice)
+  refreshHistoryNow()
+}
+function toggleCurrentDirFilter(): void {
+  layout.toggleSidebarHistoryCurrentDir()
+  refreshHistoryNow()
+}
+function filterHistoryByCreator(creatorId: string): void {
+  workspace.historyCreator = creatorId
+  if (!layout.sidebarHistoryExpanded) layout.toggleSidebarHistory()
+  refreshHistoryNow()
+}
+const filterMenuItems = computed<MenuItem[]>(() => {
+  const ephemeralId = workspace.historyCreator
+  const creatorFilter = layout.sidebarHistoryCreatorFilter
+  return [
+    {
+      label: t('dialog.sessions.filterAll'),
+      checked: !ephemeralId && creatorFilter === 'all',
+      run: () => selectCreatorFilter('all'),
+    },
+    {
+      label: t('dialog.sessions.filterUser'),
+      checked: !ephemeralId && creatorFilter === 'user',
+      run: () => selectCreatorFilter('user'),
+    },
+    ...(ephemeralId
+      ? [
+          {
+            label: t('dialog.sessions.filterByName', { name: creatorLabel(sessionById.value, ephemeralId) }),
+            checked: true,
+            run: () => {
+              filterMenuOpen.value = false
+            },
+          },
+        ]
+      : []),
+    {
+      label: t('sidebar.onlyCurrentDir'),
+      checked: layout.sidebarHistoryCurrentDir,
+      separatorBefore: true,
+      run: toggleCurrentDirFilter,
+    },
+  ]
+})
+function onFilterButtonPointerDown(): void {
+  suppressFilterClick = filterMenuOpen.value
+}
+function toggleFilterMenu(): void {
+  if (suppressFilterClick) {
+    suppressFilterClick = false
+    return
+  }
+  if (filterMenuOpen.value) {
+    filterMenuOpen.value = false
+    return
+  }
+  const rect = filterButton.value?.getBoundingClientRect()
+  filterMenuCoords.value = { x: rect ? rect.left : 0, y: rect ? rect.bottom + SEARCH_GAP : 0 }
+  filterMenuMounted.value = true
+  filterMenuOpen.value = true
+}
 
 function report(promise: Promise<unknown>): void {
   promise.catch(notices.pushError)
@@ -147,7 +281,8 @@ const showTodoResizer = computed(
     (layout.sidebarRunningExpanded || layout.sidebarHistoryExpanded),
 )
 const showRunningResizer = computed(() => layout.sidebarRunningExpanded && layout.sidebarHistoryExpanded)
-const runningCustomActive = computed(() => layout.sidebarRunningHeight > 0 && showRunningResizer.value)
+const listsCollapsed = computed(() => !layout.sidebarRunningExpanded && !layout.sidebarHistoryExpanded)
+const runningCustomActive = computed(() => layout.sidebarRunningHeight > 0)
 const runningSlotStyle = computed(() =>
   runningCustomActive.value ? { '--running-height': `${layout.sidebarRunningHeight}px` } : undefined,
 )
@@ -392,6 +527,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  clearSearchTimer()
   endSessionDrag()
   resetDragState()
   resetSectionDragState()
@@ -444,12 +580,13 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <div ref="body" class="body">
+      <div ref="body" class="body" :class="{ 'lists-collapsed': listsCollapsed }">
         <SidebarTodo
           :todos="todos"
           :expanded="layout.sidebarTodoExpanded"
           :height="layout.sidebarTodoHeight"
           :max-height="todoMaxHeightCss"
+          :fill="listsCollapsed"
           @toggle="layout.toggleSidebarTodo()"
         />
         <div
@@ -504,6 +641,7 @@ onBeforeUnmount(() => {
                   @drag-start="(y) => startSessionDrag(info.id, y)"
                   @drag-move="moveSessionDrag"
                   @drag-end="endSessionDrag"
+                  @filter-spawned="filterHistoryByCreator(info.id)"
                 />
               </TransitionGroup>
             </div>
@@ -539,9 +677,14 @@ onBeforeUnmount(() => {
             :inert="!layout.sidebarHistoryExpanded || undefined"
           >
             <div class="fold">
-              <label class="search">
+              <div class="search">
                 <Icon icon="search-16" class="search-icon" />
-                <input v-model="query" type="text" :placeholder="t('sidebar.searchHistory')" />
+                <input
+                  v-model="query"
+                  type="text"
+                  :aria-label="t('sidebar.searchHistory')"
+                  :placeholder="t('sidebar.searchHistory')"
+                />
                 <button
                   v-if="query"
                   type="button"
@@ -551,17 +694,40 @@ onBeforeUnmount(() => {
                 >
                   <Icon icon="close-16" />
                 </button>
-              </label>
+                <button
+                  ref="filterButton"
+                  type="button"
+                  class="filter-button"
+                  :class="{ active: hasActiveHistoryFilter }"
+                  :aria-label="t('sidebar.filterHistory')"
+                  :title="t('sidebar.filterHistory')"
+                  :aria-expanded="filterMenuOpen"
+                  aria-haspopup="menu"
+                  @pointerdown="onFilterButtonPointerDown"
+                  @click="toggleFilterMenu"
+                >
+                  <Icon icon="filter-16" />
+                </button>
+                <ContextMenu
+                  v-if="filterMenuMounted"
+                  :open="filterMenuOpen"
+                  :x="filterMenuCoords.x"
+                  :y="filterMenuCoords.y"
+                  :items="filterMenuItems"
+                  @close="filterMenuOpen = false"
+                />
+              </div>
               <div class="history" role="list">
                 <HistoryRow
                   v-for="info in history"
                   :key="info.id"
                   :info="info"
+                  :creator-name="info.parent ? creatorLabel(sessionById, info.parent) : undefined"
                   @open="open(info.id)"
                   @remove="dialogs.open({ kind: 'deleteHistory', sessionId: info.id })"
+                  @filter-by-creator="filterHistoryByCreator"
                 />
-                <p v-if="!workspace.historyLoaded" class="empty">{{ t('sidebar.loading') }}</p>
-                <p v-else-if="history.length === 0" class="empty">{{ t('sidebar.noMatch') }}</p>
+                <p v-if="!workspace.sidebarHistoryLoaded" class="empty">{{ t('sidebar.loading') }}</p>
               </div>
             </div>
           </div>
@@ -657,6 +823,7 @@ onBeforeUnmount(() => {
 }
 
 .sidebar.resizing-sections :deep(.todo-slot),
+.sidebar.resizing-sections .lists,
 .sidebar.resizing-sections .running-slot,
 .sidebar.resizing-sections .history-slot {
   transition: none;
@@ -809,9 +976,14 @@ onBeforeUnmount(() => {
 /* What is left under the Todo section: the percentages of Running count against this. */
 .lists {
   display: flex;
-  flex: 1;
+  flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
+  transition: flex-grow var(--motion-standard) var(--motion-ease);
+}
+
+.body.lists-collapsed .lists {
+  flex: 0 1 auto;
 }
 
 .section-resizer {
@@ -908,7 +1080,15 @@ onBeforeUnmount(() => {
   opacity: 0;
   transition:
     grid-template-rows var(--motion-standard) var(--motion-ease),
+    height var(--motion-standard) var(--motion-ease),
+    min-height var(--motion-standard) var(--motion-ease),
+    max-height var(--motion-standard) var(--motion-ease),
+    flex-grow var(--motion-standard) var(--motion-ease),
     opacity var(--motion-standard) var(--motion-ease);
+}
+
+.running-slot.custom-height {
+  height: 0;
 }
 
 .running-slot.open {
@@ -932,6 +1112,10 @@ onBeforeUnmount(() => {
   max-height: calc(100% - 2 * var(--sidebar-section-height));
 }
 
+.lists.history-collapsed .running-slot.open {
+  flex: 1 1 auto;
+}
+
 .running {
   /* Running keeps its rows and scrolls only when History would get fewer than the minimum rows. */
   display: flex;
@@ -942,7 +1126,8 @@ onBeforeUnmount(() => {
   overflow-y: auto;
 }
 
-.running-slot.open.custom-height .running {
+.running-slot.open.custom-height .running,
+.lists.history-collapsed .running-slot.open .running {
   flex: 1 1 auto;
 }
 .session-enter-active,
@@ -977,8 +1162,10 @@ onBeforeUnmount(() => {
   display: flex;
   flex: none;
   align-items: center;
+  gap: 4px;
   height: var(--search-height);
   margin-bottom: var(--search-gap);
+  padding: 0 6px 0 10px;
   border-radius: 16px;
   background: var(--surface);
   box-shadow: inset 0 0 0 1px var(--border);
@@ -990,8 +1177,7 @@ onBeforeUnmount(() => {
 }
 
 .search-icon {
-  position: absolute;
-  left: 10px;
+  flex: none;
   color: var(--text-muted);
 }
 
@@ -999,7 +1185,7 @@ onBeforeUnmount(() => {
   flex: 1;
   min-width: 0;
   height: 100%;
-  padding: 0 32px;
+  padding: 0;
   border: 0;
   outline: 0;
   background: transparent;
@@ -1012,11 +1198,29 @@ onBeforeUnmount(() => {
   color: var(--text-muted);
 }
 
-.clear {
-  position: absolute;
-  right: 8px;
+.clear,
+.filter-button {
   display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-small);
   color: var(--text-muted);
+  transition:
+    background-color var(--motion-quick) var(--motion-ease),
+    color var(--motion-quick) var(--motion-ease);
+}
+
+.clear:hover,
+.filter-button:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.filter-button.active {
+  color: var(--accent-text);
 }
 
 .history-slot {

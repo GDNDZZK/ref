@@ -41,8 +41,8 @@ const emit = defineEmits<{
   dragStart: [clientY: number]
   dragMove: [clientY: number]
   dragEnd: []
+  filterSpawned: []
 }>()
-
 const BADGE_SIZE = 14
 const HOLD_DELAY_MS = 280
 const MOVE_CANCEL_PX = 6
@@ -122,9 +122,9 @@ const menuMounted = ref(false)
 const menuItems = computed<MenuItem[]>(() => [
   { label: t('sidebar.rename'), run: () => void startRename() },
   ...(props.canDetach ? [{ label: t('sidebar.moveToBackground'), run: () => emit('detach') }] : []),
+  { label: t('sidebar.filterSpawnedHistory'), run: () => emit('filterSpawned') },
   { label: t('sidebar.close'), danger: true, run: () => emit('close') },
 ])
-
 function openMenu(event: MouseEvent): void {
   menuCoords.value = { x: event.clientX, y: event.clientY }
   menuMounted.value = true

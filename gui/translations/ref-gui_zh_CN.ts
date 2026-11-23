@@ -2289,7 +2289,19 @@ $ARGUMENTS</translation>
 <context>
     <name>HistoryRow</name>
     <message>
-        <location filename="../src/app/HistoryRow.qml" line="64"/>
+        <location filename="../src/app/HistoryRow.qml" line="72"/>
+        <source>Filter history by creator</source>
+        <translation>按创建者筛选历史</translation>
+    </message>
+    <message>
+        <location filename="../src/app/HistoryRow.qml" line="73"/>
+        <location filename="../src/app/HistoryRow.qml" line="77"/>
+        <source>Filter spawned history</source>
+        <translation>筛选子会话历史</translation>
+    </message>
+    <message>
+        <location filename="../src/app/HistoryRow.qml" line="74"/>
+        <location filename="../src/app/HistoryRow.qml" line="78"/>
         <source>Delete</source>
         <translation>删除</translation>
     </message>
@@ -2377,7 +2389,34 @@ $ARGUMENTS</translation>
 <context>
     <name>Lightbox</name>
     <message>
-        <location filename="../src/app/Lightbox.qml" line="83"/>
+        <location filename="../src/app/Lightbox.qml" line="217"/>
+        <source>Previous image</source>
+        <translation>上一张图片</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Lightbox.qml" line="233"/>
+        <source>Next image</source>
+        <translation>下一张图片</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Lightbox.qml" line="267"/>
+        <location filename="../src/app/Lightbox.qml" line="268"/>
+        <source>Zoom out</source>
+        <translation>缩小</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Lightbox.qml" line="276"/>
+        <source>Reset zoom</source>
+        <translation>重置缩放</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Lightbox.qml" line="288"/>
+        <location filename="../src/app/Lightbox.qml" line="289"/>
+        <source>Zoom in</source>
+        <translation>放大</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Lightbox.qml" line="307"/>
         <source>Close</source>
         <translation>关闭</translation>
     </message>
@@ -3059,8 +3098,14 @@ $ARGUMENTS</translation>
         <translation>挂到后台</translation>
     </message>
     <message>
-        <location filename="../src/app/SessionRow.qml" line="240"/>
-        <location filename="../src/app/SessionRow.qml" line="241"/>
+        <location filename="../src/app/SessionRow.qml" line="435"/>
+        <location filename="../src/app/SessionRow.qml" line="440"/>
+        <source>Filter spawned history</source>
+        <translation>筛选子会话历史</translation>
+    </message>
+    <message>
+        <location filename="../src/app/SessionRow.qml" line="436"/>
+        <location filename="../src/app/SessionRow.qml" line="441"/>
         <source>Close</source>
         <translation>关闭</translation>
     </message>
@@ -3236,9 +3281,35 @@ $ARGUMENTS</translation>
         <translation>搜索历史</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="336"/>
+        <location filename="../src/app/Sidebar.qml" line="697"/>
         <source>Clear search</source>
         <translation>清除搜索</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Sidebar.qml" line="710"/>
+        <location filename="../src/app/Sidebar.qml" line="711"/>
+        <source>Filter history</source>
+        <translation>筛选历史</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Sidebar.qml" line="762"/>
+        <source>All</source>
+        <translation>全部</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Sidebar.qml" line="771"/>
+        <source>User-created</source>
+        <translation>用户创建</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Sidebar.qml" line="781"/>
+        <source>By %1</source>
+        <translation>来自 %1</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Sidebar.qml" line="792"/>
+        <source>Only current directory</source>
+        <translation>仅当前目录</translation>
     </message>
     <message>
         <location filename="../src/app/Sidebar.qml" line="38"/>

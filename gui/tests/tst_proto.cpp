@@ -205,6 +205,11 @@ private slots:
 		QCOMPARE(request::detach(u"ses_a1b2c3d4"_s), withoutId(u"detach"_s));
 		QCOMPARE(request::listSessions(), withoutId(u"list_sessions"_s));
 		QCOMPARE(request::listHistory(u"/home/user/project"_s, 50), withoutId(u"list_history"_s));
+		const QJsonObject filteredHistory = request::listHistory(u"/home/user/project"_s, 50, u"user"_s, u"parser"_s);
+		QCOMPARE(filteredHistory.value(u"creator"_s).toString(), u"user"_s);
+		QCOMPARE(filteredHistory.value(u"query"_s).toString(), u"parser"_s);
+		QVERIFY(!request::listHistory(u"/home/user/project"_s, 50, QString(), QString()).contains(u"creator"_s));
+		QVERIFY(!request::listHistory(u"/home/user/project"_s, 50, QString(), QString()).contains(u"query"_s));
 		QCOMPARE(request::abort(u"ses_a1b2c3d4"_s), withoutId(u"abort"_s));
 		QCOMPARE(request::permissionReply(u"ses_a1b2c3d4"_s, u"call_9x8y7z"_s, true, false), withoutId(u"permission_reply"_s));
 		QCOMPARE(request::prompt(u"ses_a1b2c3d4"_s, u"Fix the failing parser test"_s), withoutId(u"prompt"_s));

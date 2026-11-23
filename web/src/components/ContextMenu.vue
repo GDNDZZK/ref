@@ -2,10 +2,13 @@
 // A small menu at the pointer (right click). Closes on a choice, a click elsewhere, Esc or scrolling.
 import { nextTick, onBeforeUnmount, useTemplateRef, watch } from 'vue'
 import { Key } from '../keys.ts'
+import Icon from './Icon.vue'
 
 export interface MenuItem {
   label: string
   danger?: boolean
+  checked?: boolean
+  separatorBefore?: boolean
   run(): void
 }
 
@@ -20,6 +23,7 @@ const emit = defineEmits<{ close: [] }>()
 const EDGE_MARGIN = 8
 
 const menu = useTemplateRef<HTMLElement>('menu')
+const hasChecks = (items: readonly MenuItem[]) => items.some((item) => item.checked !== undefined)
 
 function choose(item: MenuItem): void {
   emit('close')
@@ -76,17 +80,22 @@ onBeforeUnmount(unlisten)
   <Teleport to="body">
     <Transition name="context-menu" appear>
       <div v-if="open" ref="menu" class="menu" role="menu" :style="{ left: `${x}px`, top: `${y}px` }">
-        <button
-          v-for="item in items"
-          :key="item.label"
-          type="button"
-          role="menuitem"
-          class="item"
-          :class="{ danger: item.danger }"
-          @click="choose(item)"
-        >
-          {{ item.label }}
-        </button>
+        <template v-for="item in items" :key="item.label">
+          <div v-if="item.separatorBefore" class="separator" role="separator" />
+          <button
+            type="button"
+            role="menuitem"
+            :aria-checked="item.checked"
+            class="item"
+            :class="{ danger: item.danger }"
+            @click="choose(item)"
+          >
+            <span v-if="hasChecks(items)" class="check" aria-hidden="true">
+              <Icon v-if="item.checked" icon="check-16" />
+            </span>
+            <span>{{ item.label }}</span>
+          </button>
+        </template>
       </div>
     </Transition>
   </Teleport>
@@ -107,7 +116,9 @@ onBeforeUnmount(unlisten)
 }
 
 .item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 100%;
   padding: 6px 10px;
   border-radius: var(--radius-small);
@@ -122,6 +133,21 @@ onBeforeUnmount(unlisten)
 
 .item.danger {
   color: var(--danger-text);
+}
+
+.check {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  color: var(--accent-text);
+}
+
+.separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
 }
 
 .context-menu-enter-active {

@@ -44,9 +44,9 @@ public:
 	{
 		m_sessions.insert(id, sessionInfoJson(id, {.title = u"Title "_s + id, .cwd = cwd, .createdAt = created, .parent = parent}));
 	}
-	void addHistory(const QString& id, qint64 created, const QString& cwd = u"/work"_s)
+	void addHistory(const QString& id, qint64 created, const QString& cwd = u"/work"_s, const std::optional<QString>& parent = std::nullopt)
 	{
-		m_sessions.insert(id, sessionInfoJson(id, {.title = u"Title "_s + id, .cwd = cwd, .createdAt = created, .live = false}));
+		m_sessions.insert(id, sessionInfoJson(id, {.title = u"Title "_s + id, .cwd = cwd, .createdAt = created, .live = false, .parent = parent}));
 	}
 	void setState(const QString& id, const QString& state)
 	{
@@ -237,14 +237,35 @@ private:
 		else if(op == u"list_history"_s)
 		{
 			const QString cwdFilter = request.value(u"cwd"_s).toString();
+			const QString creatorFilter = request.value(u"creator"_s).toString();
+			const QString queryFilter = request.value(u"query"_s).toString();
 			const int limit = request.value(u"limit"_s).toInt(0);
 			QList<QJsonObject> matching;
 			for(const QJsonObject& info : m_sessions)
 			{
-				if(cwdFilter.isEmpty() || info.value(u"cwd"_s).toString() == cwdFilter)
+				if(!cwdFilter.isEmpty() && info.value(u"cwd"_s).toString() != cwdFilter)
 				{
-					matching.append(info);
+					continue;
 				}
+				const QString parent = info.value(u"parent"_s).toString();
+				if(creatorFilter == u"user"_s && !parent.isEmpty())
+				{
+					continue;
+				}
+				if(!creatorFilter.isEmpty() && creatorFilter != u"user"_s && parent != creatorFilter)
+				{
+					continue;
+				}
+				if(!queryFilter.isEmpty())
+				{
+					const QString haystack = info.value(u"title"_s).toString() + u' ' + info.value(u"name"_s).toString()
+					                         + u' ' + info.value(u"cwd"_s).toString() + u' ' + info.value(u"id"_s).toString();
+					if(!haystack.contains(queryFilter, Qt::CaseInsensitive))
+					{
+						continue;
+					}
+				}
+				matching.append(info);
 			}
 			std::ranges::sort(matching, [](const QJsonObject& a, const QJsonObject& b) {
 				return a.value(u"created_at"_s).toInteger() > b.value(u"created_at"_s).toInteger();
@@ -531,6 +552,7 @@ private slots:
 	void directArgumentsForModelsAgentsVariantsSessionsAndMultiClose();
 	void closingOrRemovingZoomedTileClearsZoomAndShowsRemainingTiles();
 	void zoomingTileRemovedBeforeAttachFinishesLeavesNoDanglingZoom();
+	void historyFiltersPersistAndCreatorFilterIsEphemeralAndAllImagesCollectsOrder();
 };
 
 void TestWorkspace::opensTheSessionFromTheCommandLine()
@@ -1829,5 +1851,69 @@ void TestWorkspace::zoomingTileRemovedBeforeAttachFinishesLeavesNoDanglingZoom()
 	QCOMPARE(f.workspace->visibleSessionIds(), (QStringList{u"ses_b"_s}));
 }
 
+void TestWorkspace::historyFiltersPersistAndCreatorFilterIsEphemeralAndAllImagesCollectsOrder()
+{
+	const QJsonArray messages{
+		QJsonObject{{u"id"_s, u"m1"_s},
+		            {u"role"_s, u"user"_s},
+		            {u"time"_s, 1},
+		            {u"parts"_s, QJsonArray{QJsonObject{{u"type"_s, u"image"_s},
+		                                               {u"image"_s, QJsonObject{{u"id"_s, u"img_u1"_s}, {u"mime"_s, u"image/png"_s}, {u"data"_s, QString()}, {u"size"_s, 128}}},
+		                                               {u"name"_s, u"first.png"_s}}}}},
+		QJsonObject{{u"id"_s, u"m2"_s},
+		            {u"role"_s, u"assistant"_s},
+		            {u"time"_s, 2},
+		            {u"parts"_s, QJsonArray{QJsonObject{{u"type"_s, u"tool"_s},
+		                                               {u"call_id"_s, u"c1"_s},
+		                                               {u"name"_s, u"read"_s},
+		                                               {u"input"_s, QJsonObject()},
+		                                               {u"state"_s, u"done"_s},
+		                                               {u"images"_s, QJsonArray{QJsonObject{{u"id"_s, u"img_t1"_s}, {u"mime"_s, u"image/png"_s}, {u"data"_s, QString()}, {u"size"_s, 256}}}}}}}},
+	};
+	Fixture f(refgui::proto::ProtocolVersion, false, messages, [](StubServer& stub) {
+		stub.add(u"ses_lead"_s, 2, u"/other"_s);
+		stub.addHistory(u"ses_hist_user"_s, 3, u"/work"_s);
+		stub.addHistory(u"ses_hist_spawned"_s, 4, u"/other"_s, u"ses_lead"_s);
+	});
+	QTRY_COMPARE(f.workspace->historyLoaded(), true);
+	QTRY_COMPARE(f.workspace->history()->rowCount(), 2);
+	QCOMPARE(f.workspace->sessionChoices()->rowCount(), 4);
+
+	// allImages collects both image block and tool block images in display order.
+	const QVariantList imgs = f.workspace->current()->allImages();
+	QCOMPARE(imgs.size(), 2);
+	QCOMPARE(imgs.at(0).toMap().value(u"id"_s).toString(), u"img_u1"_s);
+	QCOMPARE(imgs.at(1).toMap().value(u"id"_s).toString(), u"img_t1"_s);
+
+	// Persisted user-created + currentDir filter updates settings and issues list_history with creator & cwd,
+	// while keeping sessionChoices and allSessions() unfiltered.
+	f.workspace->setHistoryFilter(u"user"_s, true);
+	QCOMPARE(f.workspace->historyCreatorFilter(), u"user"_s);
+	QVERIFY(f.workspace->historyCurrentDir());
+	QCOMPARE(f.workspace->settings()->sidebarHistoryCreatorFilter(), u"user"_s);
+	QVERIFY(f.workspace->settings()->sidebarHistoryCurrentDir());
+	QTRY_VERIFY(f.stub.requests(u"list_history"_s).last().value(u"creator"_s).toString() == u"user"_s);
+	QCOMPARE(f.stub.requests(u"list_history"_s).last().value(u"cwd"_s).toString(), u"/work"_s);
+	QTRY_COMPARE(f.workspace->history()->rowCount(), 1);
+	QCOMPARE(f.workspace->sessionChoices()->rowCount(), 4);
+	QVERIFY(!f.workspace->info(u"ses_hist_spawned"_s).isEmpty());
+
+	// Ephemeral By <creatorId> does NOT overwrite persisted sidebarHistoryCreatorFilter.
+	f.workspace->filterHistoryByCreator(u"ses_lead"_s);
+	QCOMPARE(f.workspace->historyCreatorFilter(), u"creator"_s);
+	QCOMPARE(f.workspace->historyCreatorId(), u"ses_lead"_s);
+	QCOMPARE(f.workspace->historyCreatorLabel(), u"Title ses_lead"_s);
+	QCOMPARE(f.workspace->settings()->sidebarHistoryCreatorFilter(), u"user"_s);
+	QTRY_COMPARE(f.stub.requests(u"list_history"_s).last().value(u"creator"_s).toString(), u"ses_lead"_s);
+	QTRY_COMPARE(f.workspace->history()->rowCount(), 0); // currentDir is /work, spawned session is in /other
+	QCOMPARE(f.workspace->sessionChoices()->rowCount(), 4);
+
+	// Switching current session to /other re-queries list_history with new effectiveCwd when historyCurrentDir is true.
+	f.workspace->openSession(u"ses_lead"_s);
+	QTRY_COMPARE(f.workspace->effectiveCwd(), u"/other"_s);
+	QTRY_COMPARE(f.stub.requests(u"list_history"_s).last().value(u"cwd"_s).toString(), u"/other"_s);
+	QTRY_COMPARE(f.workspace->history()->rowCount(), 1);
+	QCOMPARE(f.workspace->sessionChoices()->rowCount(), 4);
+}
 QTEST_MAIN(TestWorkspace)
 #include "tst_workspace.moc"

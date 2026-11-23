@@ -82,6 +82,7 @@ Sets: `20`, `16` or both. Names are the file names without the set suffix.
 | `history` | 16, 20 | Clock with a counter-clockwise arrow | History sessions |
 | `search` | 16, 20 | Magnifier | Search field; the `grep` tool |
 | `close` | 16, 20 | Cross | Close, clear, deny a permission |
+| `filter` | 16 | Funnel | Filter history sessions |
 | `sidebar` | 20 | Window with a left panel | Collapse / expand the sidebar |
 | `split` | 20 | Four tiles | Split view |
 | `maximize` | 20 | Corners pointing outwards | Enlarge a split tile |
@@ -108,6 +109,7 @@ Sets: `20`, `16` or both. Names are the file names without the set suffix.
 | `check` | 16, 20 | Tick | Copied; allow a permission |
 | `undo` | 16, 20 | Curved arrow back | Undo (revert) a message |
 | `recall` | 16 | Return arrow | Take a queued message back into the input |
+| `minus` | 16 | Minus | Zoom out |
 
 ### Tool types (tool-card titles)
 

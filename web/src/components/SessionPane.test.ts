@@ -104,4 +104,36 @@ describe('SessionPane composer', () => {
     expect(document.activeElement).toBe(wrapper.get('textarea').element)
     wrapper.unmount()
   })
+
+  it('clips box-slot during fold transitions and removes QueueStrip bottom gap when folded', async () => {
+    vi.useFakeTimers()
+    try {
+      const { wrapper } = mountPane('s5', false, [userMessage('m1', 'queued')])
+      const slot = wrapper.get('.box-slot')
+      const queue = wrapper.get('.queue')
+
+      expect(slot.classes()).toContain('folded')
+      expect(slot.classes()).toContain('clip')
+      expect(queue.classes()).toContain('compact-bottom')
+
+      // Unfolding keeps .clip active during transition until settled, and clears compact-bottom.
+      await wrapper.setProps({ composerShown: true })
+      expect(slot.classes()).not.toContain('folded')
+      expect(slot.classes()).toContain('clip')
+      expect(queue.classes()).not.toContain('compact-bottom')
+
+      vi.advanceTimersByTime(300)
+      await nextTick()
+      expect(slot.classes()).not.toContain('clip')
+
+      // Folding re-applies .clip and .compact-bottom immediately.
+      await wrapper.setProps({ composerShown: false })
+      expect(slot.classes()).toContain('folded')
+      expect(slot.classes()).toContain('clip')
+      expect(queue.classes()).toContain('compact-bottom')
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

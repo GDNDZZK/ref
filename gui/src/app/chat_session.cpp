@@ -570,3 +570,8 @@ void ChatSession::setFailure(const QString& text)
 	m_failure = text;
 	emit statusTextChanged();
 }
+
+QVariantList ChatSession::allImages() const
+{
+	return m_controller.model().allImages();
+}

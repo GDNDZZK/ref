@@ -102,7 +102,7 @@ SessionListModel::Row SessionListModel::toRow(const proto::SessionInfo& info) co
 	row.parentId = info.parent.value_or(QString());
 	if(!row.parentId.isEmpty())
 	{
-		if(const proto::SessionInfo* creator = find(row.parentId))
+		if(const proto::SessionInfo* creator = findKnown(row.parentId))
 		{
 			row.creatorName = displayTitle(creator->live, creator->name, creator->title, creator->cwd);
 			row.creatorRawName = creator->name;
@@ -117,14 +117,14 @@ SessionListModel::Row SessionListModel::toRow(const proto::SessionInfo& info) co
 		while(!currentId.isEmpty() && !visited.contains(currentId))
 		{
 			visited.insert(currentId);
-			const proto::SessionInfo* ancestor = find(currentId);
+			const proto::SessionInfo* ancestor = findKnown(currentId);
 			if(ancestor == nullptr || !ancestor->parent || ancestor->parent->isEmpty())
 			{
 				break;
 			}
 			currentId = *ancestor->parent;
 		}
-		const proto::SessionInfo* root = find(currentId);
+		const proto::SessionInfo* root = findKnown(currentId);
 		row.rootId = currentId;
 		row.rootName = root != nullptr ? displayTitle(root->live, root->name, root->title, root->cwd) : currentId;
 	}
@@ -133,6 +133,10 @@ SessionListModel::Row SessionListModel::toRow(const proto::SessionInfo& info) co
 
 bool SessionListModel::matchesFilter(const Row& row) const
 {
+	if(!m_cwdFilter.isEmpty() && row.cwd != m_cwdFilter)
+	{
+		return false;
+	}
 	switch(m_creatorFilter)
 	{
 	case CreatorFilter::All:
@@ -240,6 +244,34 @@ void SessionListModel::setCreatorId(const QString& id)
 	}
 	emit creatorIdChanged();
 }
+
+void SessionListModel::setCwdFilter(const QString& cwd)
+{
+	if(cwd == m_cwdFilter)
+	{
+		return;
+	}
+	m_cwdFilter = cwd;
+	rebuild();
+	emit cwdFilterChanged();
+}
+
+void SessionListModel::setKnownSessions(const QList<proto::SessionInfo>& sessions)
+{
+	m_known.clear();
+	for(const proto::SessionInfo& info : sessions)
+	{
+		m_known.insert(info.id, info);
+	}
+	rebuild();
+}
+
+QString SessionListModel::displayName(const QString& sessionId) const
+{
+	const proto::SessionInfo* info = findKnown(sessionId);
+	return info != nullptr ? displayTitle(info->live, info->name, info->title, info->cwd) : sessionId;
+}
+
 void SessionListModel::setCurrentId(const QString& id)
 {
 	if(id == m_currentId)
@@ -318,6 +350,15 @@ const proto::SessionInfo* SessionListModel::find(const QString& sessionId) const
 	return it == m_all.constEnd() ? nullptr : &*it;
 }
 
+const proto::SessionInfo* SessionListModel::findKnown(const QString& sessionId) const
+{
+	if(const proto::SessionInfo* direct = find(sessionId))
+	{
+		return direct;
+	}
+	const auto it = m_known.constFind(sessionId);
+	return it == m_known.constEnd() ? nullptr : &*it;
+}
 // The rows that pass the filter, in display order.
 QList<SessionListModel::Row> SessionListModel::selectWanted() const
 {

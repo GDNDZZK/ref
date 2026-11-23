@@ -366,6 +366,87 @@ describe('the history list', () => {
       expect(useNoticesStore().notices.map((notice) => notice.text)).toEqual(['history unavailable']),
     )
   })
+
+  it('keeps workspace.history unfiltered while refreshSidebarHistory forwards filters and drops stale responses', async () => {
+    const workspace = setup([])
+    api.listHistory.mockResolvedValueOnce([session('ses_all_1'), session('ses_all_2', { cwd: '/other' })])
+    await workspace.refreshHistory()
+    expect(workspace.history.map((entry) => entry.id)).toEqual(['ses_all_1', 'ses_all_2'])
+
+    let resolveSlow!: (value: SessionInfo[]) => void
+    let resolveFast!: (value: SessionInfo[]) => void
+    api.listHistory
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSlow = resolve
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFast = resolve
+          }),
+      )
+
+    const slow = workspace.refreshSidebarHistory({ cwd: '/a', creator: 'user', query: 'first' })
+    const fast = workspace.refreshSidebarHistory({ cwd: '/b', creator: 'ses_lead', query: 'second' })
+    expect(api.listHistory).toHaveBeenNthCalledWith(2, {
+      cwd: '/a',
+      creator: 'user',
+      query: 'first',
+      limit: 200,
+    })
+    expect(api.listHistory).toHaveBeenNthCalledWith(3, {
+      cwd: '/b',
+      creator: 'ses_lead',
+      query: 'second',
+      limit: 200,
+    })
+
+    resolveFast([session('ses_2')])
+    await fast
+    expect(workspace.sidebarHistory.map((entry) => entry.id)).toEqual(['ses_2'])
+    expect(workspace.sidebarHistoryLoaded).toBe(true)
+    // Unfiltered workspace.history stays untouched so SessionsDialog and /session always see everything.
+    expect(workspace.history.map((entry) => entry.id)).toEqual(['ses_all_1', 'ses_all_2'])
+
+    resolveSlow([session('ses_1')])
+    await slow
+    expect(workspace.sidebarHistory.map((entry) => entry.id)).toEqual(['ses_2'])
+    expect(workspace.history.map((entry) => entry.id)).toEqual(['ses_all_1', 'ses_all_2'])
+  })
+
+  it('preserves active sidebar filters across background refreshes while keeping history unfiltered', async () => {
+    const workspace = setup([session('ses_1', { cwd: '/proj' }), session('ses_2', { cwd: '/proj' })])
+    await workspace.openSession('ses_1')
+    const settings = useSettingsStore()
+    settings.update((draft) => {
+      draft.sidebarHistoryCreatorFilter = 'user'
+      draft.sidebarHistoryCurrentDir = true
+    })
+    workspace.historyQuery = 'alpha'
+    workspace.historyCreator = 'ses_lead'
+    api.listHistory.mockClear()
+    api.listHistory.mockImplementation((options?: { query?: string }) =>
+      Promise.resolve(
+        options?.query ? [session('ses_filtered')] : [session('ses_all'), session('ses_filtered')],
+      ),
+    )
+
+    await workspace.closeSession('ses_2')
+    await vi.waitFor(() => {
+      expect(api.listHistory).toHaveBeenCalledWith({ cwd: undefined, limit: 200 })
+      expect(api.listHistory).toHaveBeenCalledWith({
+        cwd: '/proj',
+        creator: 'ses_lead',
+        query: 'alpha',
+        limit: 200,
+      })
+      expect(workspace.history.map((entry) => entry.id)).toEqual(['ses_all', 'ses_filtered'])
+      expect(workspace.sidebarHistory.map((entry) => entry.id)).toEqual(['ses_filtered'])
+    })
+  })
 })
 
 describe('agents', () => {
@@ -502,5 +583,13 @@ describe('split view', () => {
     expect(api.attach).toHaveBeenCalledWith('ses_hist', true)
     expect(api.detach).toHaveBeenCalledWith('ses_2')
     expect(api.detach).toHaveBeenCalledWith('ses_4')
+  })
+
+  it('clears zoomedId when the zoomed tile session is closed or gone', async () => {
+    const workspace = await inSplit([session('ses_4', { attached: 0 })])
+    workspace.zoomTile('ses_2')
+    expect(workspace.zoomedId).toBe('ses_2')
+    await workspace.closeSession('ses_2')
+    expect(workspace.zoomedId).toBeUndefined()
   })
 })

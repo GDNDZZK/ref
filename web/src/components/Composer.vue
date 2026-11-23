@@ -11,12 +11,14 @@ import { fileUriToPath, parseFileUris } from '../composer/sessionComposer.ts'
 import type { SessionComposer } from '../composer/sessionComposer.ts'
 import type { ChatSession } from '../model/chatSession.ts'
 import { hasImageTokens, splitImageTokens } from '../model/imageTokens.ts'
+import { prefersReducedMotion } from '../motion/reducedMotion.ts'
 import { useCommandsStore } from '../stores/commands.ts'
 import { useConnectionStore } from '../stores/connection.ts'
 import { useDialogsStore } from '../stores/dialogs.ts'
 import { useNoticesStore } from '../stores/notices.ts'
 import { useWorkspaceStore } from '../stores/workspace.ts'
 import { components } from '../theme/generated/components.ts'
+import { motion } from '../theme/generated/motion.ts'
 import AttachmentStrip from './AttachmentStrip.vue'
 import CompletionPopup from './CompletionPopup.vue'
 import ComposerTags from './ComposerTags.vue'
@@ -54,7 +56,9 @@ const backdrop = useTemplateRef<HTMLElement>('backdrop')
 const root = useTemplateRef<HTMLElement>('root')
 const inputHeight = ref(SEND_BUTTON_SIZE)
 const dragDepth = ref(0) // drag events of the children come in pairs; the box is hovered while > 0
-
+const boxTransitioning = ref(false)
+const clipBox = computed(() => Boolean(props.folded) || boxTransitioning.value)
+let foldTimer: ReturnType<typeof setTimeout> | undefined
 const canSend = computed(() => draft.value.text.trim() !== '' || draft.value.attachments.length > 0)
 const stripHeight = computed(() => (draft.value.attachments.length > 0 ? THUMB_SIZE + THUMB_ROW_GAP : 0))
 const boxHeight = computed(
@@ -349,7 +353,35 @@ onMounted(() => {
   if (root.value) resizeObserver.observe(root.value)
   measure()
 })
-onBeforeUnmount(() => resizeObserver.disconnect())
+onBeforeUnmount(() => {
+  clearFoldTimer()
+  resizeObserver.disconnect()
+})
+
+function clearFoldTimer(): void {
+  if (foldTimer === undefined) return
+  clearTimeout(foldTimer)
+  foldTimer = undefined
+}
+
+function onBoxSlotTransitionEnd(event: TransitionEvent): void {
+  if (event.target !== event.currentTarget || event.propertyName !== 'grid-template-rows') return
+  clearFoldTimer()
+  boxTransitioning.value = false
+}
+
+watch(
+  () => Boolean(props.folded),
+  () => {
+    clearFoldTimer()
+    boxTransitioning.value = true
+    const waitMs = prefersReducedMotion() ? 0 : motion.standard + 30
+    foldTimer = setTimeout(() => {
+      foldTimer = undefined
+      boxTransitioning.value = false
+    }, waitMs)
+  },
+)
 
 watch(
   () => props.composer.focusRequests.value,
@@ -361,8 +393,18 @@ defineExpose({ focus: () => input.value?.focus() })
 
 <template>
   <div class="composer">
-    <QueueStrip :messages="session.queued" :removing="composer.removingQueued" @remove="takeBack" />
-    <div class="box-slot" :class="{ folded }" :inert="folded || undefined">
+    <QueueStrip
+      :messages="session.queued"
+      :removing="composer.removingQueued"
+      :compact-bottom="Boolean(folded)"
+      @remove="takeBack"
+    />
+    <div
+      class="box-slot"
+      :class="{ folded, clip: clipBox }"
+      :inert="folded || undefined"
+      @transitionend="onBoxSlotTransitionEnd"
+    >
       <div class="box-wrap">
         <CompletionPopup
           :completion="composer.completion"
@@ -431,12 +473,19 @@ defineExpose({ focus: () => input.value?.focus() })
 /* Folds by animating the grid track from the box's height to 0; the box is not clipped, so the
    completion popup can rise out of it. A folded box is hidden once the fold is done. */
 .box-slot {
+  position: relative;
+  z-index: 0;
   display: grid;
   grid-template-rows: 1fr;
   transition:
     grid-template-rows var(--motion-standard) var(--motion-ease),
     opacity var(--motion-standard) var(--motion-ease),
     visibility 0s;
+}
+
+.box-slot.clip,
+.box-slot.clip .box-wrap {
+  overflow: hidden;
 }
 
 .box-slot.folded {

@@ -18,6 +18,21 @@ Q_LOGGING_CATEGORY(lcDirectory, "refgui.workspace.directory")
 
 // Session changes come in bursts (a turn ends, the title changes); fetch the history once.
 constexpr auto HistoryDelay = 1000ms;
+constexpr auto HistorySearchDelay = 150ms;
+
+QString creatorWireValue(SessionListModel::CreatorFilter filter, const QString& creatorId)
+{
+	switch(filter)
+	{
+	case SessionListModel::CreatorFilter::All:
+		return {};
+	case SessionListModel::CreatorFilter::UserCreated:
+		return QStringLiteral("user");
+	case SessionListModel::CreatorFilter::ByCreator:
+		return creatorId;
+	}
+	return {};
+}
 
 } // namespace
 
@@ -27,11 +42,24 @@ SessionDirectory::SessionDirectory(Connection& connection, QObject* parent)
 {
 	m_historyTimer.setSingleShot(true);
 	m_historyTimer.setInterval(HistoryDelay);
-	connect(&m_historyTimer, &QTimer::timeout, this, &SessionDirectory::loadHistory);
+	connect(&m_historyTimer, &QTimer::timeout, this, [this] {
+		loadHistory();
+		if(hasSidebarFilter())
+		{
+			loadUnfilteredHistory();
+		}
+	});
+	m_historySearchTimer.setSingleShot(true);
+	m_historySearchTimer.setInterval(HistorySearchDelay);
+	connect(&m_historySearchTimer, &QTimer::timeout, this, &SessionDirectory::loadHistory);
 	// Through the Connection, like the window's other handlers, so they run in the order they were connected.
 	connect(&connection, &Connection::connected, this, [this] {
 		loadLive();
 		loadHistory();
+		if(hasSidebarFilter())
+		{
+			loadUnfilteredHistory();
+		}
 		if(m_watchAll)
 		{
 			resubscribe();
@@ -40,11 +68,56 @@ SessionDirectory::SessionDirectory(Connection& connection, QObject* parent)
 	connect(&m_backend.client(), &client::ServerClient::frameReceived, this, &SessionDirectory::onFrame);
 }
 
-void SessionDirectory::refreshHistory()
+bool SessionDirectory::hasSidebarFilter() const
 {
-	m_historyTimer.start();
+	return !m_historyCwd.isEmpty() || !m_historyCreator.isEmpty() || !m_historyQuery.isEmpty();
 }
 
+void SessionDirectory::setHistoryFilter(const QString& cwd, SessionListModel::CreatorFilter creatorFilter, const QString& creatorId, bool refreshNow)
+{
+	const QString creator = creatorWireValue(creatorFilter, creatorId);
+	m_history.setCwdFilter(cwd);
+	m_history.setCreatorFilter(creatorFilter);
+	m_history.setCreatorId(creatorId);
+	if(cwd == m_historyCwd && creator == m_historyCreator)
+	{
+		return;
+	}
+	m_historyCwd = cwd;
+	m_historyCreator = creator;
+	if(refreshNow)
+	{
+		refreshHistory(true);
+	}
+}
+
+void SessionDirectory::setHistoryQuery(const QString& query)
+{
+	const QString trimmed = query.trimmed();
+	m_history.setFilter(trimmed);
+	if(trimmed == m_historyQuery)
+	{
+		return;
+	}
+	m_historyQuery = trimmed;
+	m_historySearchTimer.start();
+}
+
+void SessionDirectory::refreshHistory(bool immediate)
+{
+	if(immediate)
+	{
+		m_historyTimer.stop();
+		m_historySearchTimer.stop();
+		loadHistory();
+		if(hasSidebarFilter())
+		{
+			loadUnfilteredHistory();
+		}
+		return;
+	}
+	m_historyTimer.start();
+}
 QList<proto::SessionInfo> SessionDirectory::allSessions() const
 {
 	QList<proto::SessionInfo> all = m_liveSessions;
@@ -84,6 +157,11 @@ void SessionDirectory::setLiveOrder(const QStringList& ids)
 void SessionDirectory::forgetPersisted(const QString& sessionId)
 {
 	m_persisted.removeIf([&sessionId](const proto::SessionInfo& info) { return info.id == sessionId; });
+	m_sidebarPersisted.removeIf([&sessionId](const proto::SessionInfo& info) { return info.id == sessionId; });
+	if(!m_live.contains(sessionId))
+	{
+		m_knownSessions.remove(sessionId);
+	}
 	applyHistory();
 }
 
@@ -212,8 +290,13 @@ QCoro::Task<> SessionDirectory::loadLive()
 
 QCoro::Task<> SessionDirectory::loadHistory()
 {
+	if(m_backend.state() != client::Backend::State::Connected)
+	{
+		co_return;
+	}
 	const int request = ++m_historyRequest;
-	const auto sessions = co_await m_backend.client().listHistory({}, HistoryLimit);
+	const bool filtered = hasSidebarFilter();
+	const auto sessions = co_await m_backend.client().listHistory(m_historyCwd, HistoryLimit, m_historyCreator, m_historyQuery);
 	if(request != m_historyRequest)
 	{
 		co_return;
@@ -223,7 +306,20 @@ QCoro::Task<> SessionDirectory::loadHistory()
 		emit failed(sessions.error());
 		co_return;
 	}
-	m_persisted = *sessions;
+	m_sidebarPersisted = *sessions;
+	if(!filtered)
+	{
+		++m_unfilteredHistoryRequest;
+		m_persisted = *sessions;
+	}
+	for(proto::SessionInfo info : std::as_const(m_sidebarPersisted))
+	{
+		if(!m_live.contains(info.id))
+		{
+			info.live = false;
+			m_knownSessions.insert(info.id, info);
+		}
+	}
 	applyHistory();
 	if(!m_historyLoaded)
 	{
@@ -232,6 +328,39 @@ QCoro::Task<> SessionDirectory::loadHistory()
 	}
 }
 
+QCoro::Task<> SessionDirectory::loadUnfilteredHistory()
+{
+	if(m_backend.state() != client::Backend::State::Connected)
+	{
+		co_return;
+	}
+	const int request = ++m_unfilteredHistoryRequest;
+	const auto sessions = co_await m_backend.client().listHistory({}, HistoryLimit);
+	if(request != m_unfilteredHistoryRequest)
+	{
+		co_return;
+	}
+	if(!sessions)
+	{
+		emit failed(sessions.error());
+		co_return;
+	}
+	m_persisted = *sessions;
+	for(proto::SessionInfo info : std::as_const(m_persisted))
+	{
+		if(!m_live.contains(info.id))
+		{
+			info.live = false;
+			m_knownSessions.insert(info.id, info);
+		}
+	}
+	applyHistory();
+	if(!m_historyLoaded)
+	{
+		m_historyLoaded = true;
+		emit historyLoadedChanged();
+	}
+}
 void SessionDirectory::setLive(QList<proto::SessionInfo> sessions)
 {
 	std::ranges::sort(sessions, [](const proto::SessionInfo& a, const proto::SessionInfo& b) {
@@ -240,6 +369,7 @@ void SessionDirectory::setLive(QList<proto::SessionInfo> sessions)
 	for(proto::SessionInfo& info : sessions)
 	{
 		info.live = true;
+		m_knownSessions.insert(info.id, info);
 	}
 	m_liveSessions = sessions;
 	applyHistory();
@@ -249,17 +379,26 @@ void SessionDirectory::setLive(QList<proto::SessionInfo> sessions)
 
 void SessionDirectory::applyHistory()
 {
-	QList<proto::SessionInfo> shown;
-	for(proto::SessionInfo info : std::as_const(m_persisted))
-	{
-		if(!m_live.contains(info.id))
+	const auto nonLive = [this](const QList<proto::SessionInfo>& source) {
+		QList<proto::SessionInfo> shown;
+		for(proto::SessionInfo info : source)
 		{
-			info.live = false;
-			shown.append(info);
+			if(!m_live.contains(info.id))
+			{
+				info.live = false;
+				shown.append(std::move(info));
+			}
 		}
-	}
-	m_history.setSessions(shown);
-	m_choices.setSessions(m_liveSessions + shown);
+		return shown;
+	};
+	const QList<proto::SessionInfo> shownSidebar = nonLive(m_sidebarPersisted);
+	const QList<proto::SessionInfo> shownAll = nonLive(m_persisted);
+	const QList<proto::SessionInfo> known = m_knownSessions.values();
+	m_history.setKnownSessions(known);
+	m_choices.setKnownSessions(known);
+	m_history.setSessions(shownSidebar);
+	m_choices.setSessions(m_liveSessions + shownAll);
+	emit historyUpdated();
 }
 
 void SessionDirectory::onFrame(const proto::ServerFrame& frame)

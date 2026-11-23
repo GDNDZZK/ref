@@ -28,8 +28,8 @@ Rectangle {
 	readonly property bool todoExpanded: Workspace.settings.sidebarTodoExpanded
 	readonly property bool runningExpanded: Workspace.settings.sidebarRunningExpanded
 	readonly property bool historyExpanded: Workspace.settings.sidebarHistoryExpanded
-	readonly property real reservedRunning: running.openProgress * minRunningHeight
-	readonly property real reservedHistory: historyBody.openProgress * (historyOverhead + minHistoryHeight)
+	readonly property real reservedRunning: runningExpanded ? minRunningHeight : 0
+	readonly property real reservedHistory: historyExpanded ? (historyOverhead + minHistoryHeight) : 0
 	property bool ready: false
 
 	// The to-do list of the session in front: the current one, or the focused tile in split view. One value, {items,
@@ -45,24 +45,35 @@ Rectangle {
 	readonly property real todoCap: Math.max(0, Math.min(height / 3, bodySpace - reservedRunning - reservedHistory))
 	readonly property bool todoFits: todo.items.length > 0 && todoCap >= Theme.sidebarSectionHeight + todoList.rowHeight
 	readonly property real minTodoBodyHeight: todoList.rowHeight + 2 * todoList.verticalPadding
-	readonly property real customTodoMax: Math.max(minCustomTodoHeight, bodySpace - running.openProgress * minCustomRunningHeight - historyBody.openProgress * minCustomHistoryHeight)
+	readonly property real customTodoMax: Math.max(minCustomTodoHeight, bodySpace - (runningExpanded ? minCustomRunningHeight : 0) - (historyExpanded ? minCustomHistoryHeight : 0))
 	readonly property real customTodoHeight: Math.max(minCustomTodoHeight, Math.min(customTodoMax, Workspace.settings.sidebarTodoHeight))
-	readonly property real todoExpandedHeight: Workspace.settings.sidebarTodoHeight > 0
-		? customTodoHeight
-		: Math.min(Theme.sidebarSectionHeight + Math.max(todoList.height, minTodoBodyHeight), todoCap)
+	readonly property real todoExpandedHeight: (!runningExpanded && !historyExpanded)
+		? Math.max(minCustomTodoHeight, bodySpace)
+		: (Workspace.settings.sidebarTodoHeight > 0
+			? customTodoHeight
+			: Math.min(Theme.sidebarSectionHeight + Math.max(todoList.height, minTodoBodyHeight), todoCap))
 	readonly property real todoHeight: !todoFits ? 0 : (todoExpanded ? todoExpandedHeight : Theme.sidebarSectionHeight)
-	readonly property real remainingAfterTodo: Math.max(0, bodySpace - todoSection.height)
+	readonly property real remainingAfterTodo: Math.max(0, bodySpace - todoHeight)
 	readonly property real runningMaxHeight: Math.min(remainingAfterTodo, Math.max(remainingAfterTodo - reservedHistory, minRunningHeight))
-	readonly property real runningAutoHeight: Math.max(0, Math.min(running.contentHeight, runningMaxHeight))
+	readonly property real runningContentHeight: running.count > 0 ? running.count * Theme.sidebarRowHeight + Math.max(0, running.count - 1) * runningRowSpacing : 0
+	readonly property real runningAutoHeight: Math.max(0, Math.min(runningContentHeight, runningMaxHeight))
 	readonly property real customRunningMax: Math.max(minCustomRunningHeight, remainingAfterTodo - minCustomHistoryHeight)
-	readonly property real runningTargetHeight: (Workspace.settings.sidebarRunningHeight > 0 && historyExpanded)
-		? Math.max(minCustomRunningHeight, Math.min(customRunningMax, Workspace.settings.sidebarRunningHeight))
-		: runningAutoHeight
-	readonly property real historySpace: Math.max(0, bodySpace - todoSection.height - running.height)
+	readonly property real runningTargetHeight: {
+		if (!runningExpanded)
+			return 0
+		if (!historyExpanded)
+			return remainingAfterTodo
+		if (Workspace.settings.sidebarRunningHeight > 0)
+			return Math.max(minCustomRunningHeight, Math.min(customRunningMax, Workspace.settings.sidebarRunningHeight))
+		return runningAutoHeight
+	}
+	readonly property real historySpace: Math.max(0, bodySpace - todoHeight - runningTargetHeight)
+	readonly property real historyTargetHeight: historyExpanded ? historySpace : 0
+	readonly property bool historyFilterActive: Workspace.historyCreatorFilter !== "all" || Workspace.historyCurrentDir
 	readonly property string emptyHistoryText: {
 		if (!Workspace.historyLoaded)
 			return qsTr("Loading…")
-		return searchInput.text !== "" ? qsTr("No matching sessions") : qsTr("No earlier sessions")
+		return (searchInput.text !== "" || historyFilterActive) ? qsTr("No matching sessions") : qsTr("No earlier sessions")
 	}
 	readonly property int lockupWidth: 60 // the lockup is drawn at this size only: its pixels are aligned to it
 	readonly property int lockupHeight: 24
@@ -74,10 +85,29 @@ Rectangle {
 			shownTodo = todo
 	}
 
+	property bool sectionAnimating: false
+
+	Timer {
+		id: sectionAnimTimer
+		interval: Motion.standard + 60
+		onTriggered: sidebar.sectionAnimating = false
+	}
+
+	function triggerSectionAnimation() {
+		if (!ready)
+			return
+		sectionAnimating = true
+		sectionAnimTimer.restart()
+	}
+
 	onTodoChanged: keepTodo()
+	onTodoFitsChanged: triggerSectionAnimation()
+	onTodoExpandedChanged: triggerSectionAnimation()
+	onRunningExpandedChanged: triggerSectionAnimation()
 	onHistoryExpandedChanged: {
 		if (!historyExpanded && searchInput.activeFocus)
 			searchInput.focus = false
+		triggerSectionAnimation()
 	}
 	Component.onCompleted: {
 		keepTodo()
@@ -156,6 +186,58 @@ Rectangle {
 		}
 	}
 
+	component FilterMenuItem: Item {
+		id: menuItem
+
+		required property string text
+		required property bool checked
+		readonly property int textInset: 12
+		readonly property int checkSize: 16
+		signal triggered()
+
+		width: parent ? parent.width : 196
+		height: 30
+
+		Rectangle {
+			anchors.fill: parent
+			radius: Theme.radiusSmall + 2
+			color: itemHover.hovered ? Theme.surfaceHover : "transparent"
+
+			Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+		}
+
+		Icon {
+			id: checkIcon
+			anchors { left: parent.left; leftMargin: menuItem.textInset; verticalCenter: parent.verticalCenter }
+			name: "check"
+			size: menuItem.checkSize
+			color: Theme.accentText
+			visible: menuItem.checked
+		}
+
+		Text {
+			textFormat: Text.PlainText
+			anchors {
+				left: parent.left
+				leftMargin: menuItem.textInset + menuItem.checkSize + 8
+				right: parent.right
+				rightMargin: menuItem.textInset
+				verticalCenter: parent.verticalCenter
+			}
+			text: menuItem.text
+			color: menuItem.checked ? Theme.accentText : Theme.text
+			font.pixelSize: Theme.secondaryFontSize
+			elide: Text.ElideRight
+		}
+
+		HoverHandler {
+			id: itemHover
+			cursorShape: Qt.PointingHandCursor
+		}
+		TapHandler {
+			onTapped: menuItem.triggered()
+		}
+	}
 	Rectangle {
 		anchors { top: parent.top; bottom: parent.bottom; right: parent.right }
 		width: 1
@@ -326,7 +408,7 @@ Rectangle {
 			visible: height > 0
 
 			Behavior on height {
-				enabled: sidebar.ready && !sidebar.resizingSections
+				enabled: sidebar.ready && sidebar.sectionAnimating && !sidebar.resizingSections
 				NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
 			}
 			Behavior on opacity {
@@ -340,7 +422,10 @@ Rectangle {
 				text: qsTr("Todo %1/%2").arg(sidebar.shownTodo.done).arg(sidebar.shownTodo.total)
 				expanded: sidebar.todoExpanded
 				ready: sidebar.ready
-				onToggled: Workspace.settings.sidebarTodoExpanded = !Workspace.settings.sidebarTodoExpanded
+				onToggled: {
+					sidebar.triggerSectionAnimation()
+					Workspace.settings.sidebarTodoExpanded = !Workspace.settings.sidebarTodoExpanded
+				}
 			}
 
 			Flickable {
@@ -436,17 +521,18 @@ Rectangle {
 			text: qsTr("Running")
 			expanded: sidebar.runningExpanded
 			ready: sidebar.ready
-			onToggled: Workspace.settings.sidebarRunningExpanded = !Workspace.settings.sidebarRunningExpanded
+			onToggled: {
+				sidebar.triggerSectionAnimation()
+				Workspace.settings.sidebarRunningExpanded = !Workspace.settings.sidebarRunningExpanded
+			}
 		}
 
 		ListView {
 			id: running
 			objectName: "runningList"
-			property real openProgress: sidebar.runningExpanded ? 1 : 0
 			anchors.top: runningHeader.bottom
 			width: parent.width
-			// The rows' own height; scrolls only when the history would get less than its minimum.
-			height: openProgress === 1 ? sidebar.runningTargetHeight : Math.round(sidebar.runningTargetHeight * openProgress)
+			height: sidebar.runningTargetHeight
 			visible: height > 0
 			enabled: sidebar.runningExpanded && Workspace.settings.sidebarVisible
 			model: Workspace.sessions
@@ -465,11 +551,10 @@ Rectangle {
 				onReorderRequested: (sessionId, toIndex) => Workspace.moveRunningSession(sessionId, toIndex)
 			}
 
-			Behavior on openProgress {
-				enabled: sidebar.ready && !sidebar.resizingSections
+			Behavior on height {
+				enabled: sidebar.ready && sidebar.sectionAnimating && !sidebar.resizingSections
 				NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
 			}
-
 			add: Transition {
 				ParallelAnimation {
 					NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Motion.standard; easing.type: Motion.ease }
@@ -560,29 +645,31 @@ Rectangle {
 			text: qsTr("History")
 			expanded: sidebar.historyExpanded
 			ready: sidebar.ready
-			onToggled: Workspace.settings.sidebarHistoryExpanded = !Workspace.settings.sidebarHistoryExpanded
+			onToggled: {
+				sidebar.triggerSectionAnimation()
+				Workspace.settings.sidebarHistoryExpanded = !Workspace.settings.sidebarHistoryExpanded
+			}
 		}
 
 		Item {
 			id: historyBody
 			objectName: "historyBody"
-			property real openProgress: sidebar.historyExpanded ? 1 : 0
 			anchors.top: historyHeader.bottom
 			width: parent.width
-			height: openProgress === 1 ? sidebar.historySpace : Math.round(sidebar.historySpace * openProgress)
+			height: sidebar.historyTargetHeight
 			clip: true
 			visible: height > 0
-			enabled: sidebar.historyExpanded
+			enabled: sidebar.historyExpanded && Workspace.settings.sidebarVisible
 
-			Behavior on openProgress {
-				enabled: sidebar.ready && !sidebar.resizingSections
+			Behavior on height {
+				enabled: sidebar.ready && sidebar.sectionAnimating && !sidebar.resizingSections
 				NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
 			}
 
 			// Keep inner geometry at full height so search and history never squeeze below zero during fold.
 			Item {
 				width: parent.width
-				height: Math.max(sidebar.historyOverhead, sidebar.historySpace)
+				height: Math.max(sidebar.historyOverhead, sidebar.historyTargetHeight, historyBody.height)
 
 				// The search field of the history.
 				Rectangle {
@@ -606,14 +693,20 @@ Rectangle {
 					}
 					TextInput {
 						id: searchInput
-						anchors { left: parent.left; leftMargin: 34; right: clear.left; rightMargin: 6; verticalCenter: parent.verticalCenter }
+						anchors {
+							left: parent.left
+							leftMargin: 34
+							right: clear.visible ? clear.left : filterButton.left
+							rightMargin: 6
+							verticalCenter: parent.verticalCenter
+						}
 						color: Theme.text
 						selectionColor: Theme.selection
 						selectedTextColor: Theme.text
 						font.pixelSize: Theme.captionFontSize
 						clip: true
 						Accessible.name: qsTr("Search history")
-						onTextChanged: Workspace.history.filter = text.trim()
+						onTextChanged: Workspace.setHistorySearch(text)
 
 						PlaceholderText {
 							anchors.fill: parent
@@ -624,7 +717,7 @@ Rectangle {
 					}
 					IconButton {
 						id: clear
-						anchors { right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
+						anchors { right: filterButton.left; rightMargin: 2; verticalCenter: parent.verticalCenter }
 						buttonSize: 22
 						iconName: "close"
 						iconSize: 16
@@ -634,6 +727,108 @@ Rectangle {
 						onClicked: searchInput.text = ""
 
 						Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+					}
+					IconButton {
+						id: filterButton
+						objectName: "historyFilterButton"
+						anchors { right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
+						buttonSize: 22
+						iconName: "filter"
+						iconSize: 16
+						iconColor: sidebar.historyFilterActive ? Theme.accentText : Theme.textMuted
+						tooltipText: qsTr("Filter history")
+						Accessible.name: qsTr("Filter history")
+						onClicked: historyFilterMenu.visible ? historyFilterMenu.close() : historyFilterMenu.open()
+
+						Popup {
+							id: historyFilterMenu
+							objectName: "historyFilterMenu"
+							readonly property real uiScale: UiScale.factor
+							readonly property int menuPadding: 4
+							readonly property int menuWidth: 204
+
+							parent: filterButton
+							x: filterButton.width - width
+							y: filterButton.height + 6
+							width: menuInner.width * uiScale
+							height: menuInner.height * uiScale
+							padding: 0
+							closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+							background: null
+
+							enter: Transition {
+								NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Motion.quick; easing.type: Motion.ease }
+								NumberAnimation { property: "scale"; from: Motion.popScale; to: 1; duration: Motion.quick; easing.type: Motion.ease }
+							}
+							exit: Transition {
+								NumberAnimation { property: "opacity"; to: 0; duration: Motion.quick; easing.type: Motion.ease }
+							}
+
+							contentItem: Item {
+								Item {
+									id: menuInner
+									width: historyFilterMenu.menuWidth
+									height: menuColumn.implicitHeight + 2 * historyFilterMenu.menuPadding
+									transformOrigin: Item.TopLeft
+									scale: historyFilterMenu.uiScale
+
+									Rectangle {
+										anchors.fill: parent
+										radius: Theme.radius
+										color: Theme.surface
+										border.color: Theme.border
+									}
+
+									Column {
+										id: menuColumn
+										x: historyFilterMenu.menuPadding
+										y: historyFilterMenu.menuPadding
+										width: parent.width - 2 * historyFilterMenu.menuPadding
+										spacing: 2
+
+										FilterMenuItem {
+											objectName: "historyFilterAll"
+											text: qsTr("All")
+											checked: Workspace.historyCreatorFilter === "all"
+											onTriggered: {
+												Workspace.setHistoryFilter("all", Workspace.historyCurrentDir)
+												historyFilterMenu.close()
+											}
+										}
+										FilterMenuItem {
+											objectName: "historyFilterUser"
+											text: qsTr("User-created")
+											checked: Workspace.historyCreatorFilter === "user"
+											onTriggered: {
+												Workspace.setHistoryFilter("user", Workspace.historyCurrentDir)
+												historyFilterMenu.close()
+											}
+										}
+										FilterMenuItem {
+											objectName: "historyFilterCreator"
+											visible: Workspace.historyCreatorFilter === "creator" && Workspace.historyCreatorId !== ""
+											text: qsTr("By %1").arg(Workspace.historyCreatorLabel)
+											checked: Workspace.historyCreatorFilter === "creator"
+											onTriggered: historyFilterMenu.close()
+										}
+										Rectangle {
+											width: parent.width
+											height: 1
+											color: Theme.border
+										}
+										FilterMenuItem {
+											objectName: "historyFilterCurrentDir"
+											text: qsTr("Only current directory")
+											checked: Workspace.historyCurrentDir
+											onTriggered: {
+												Workspace.setHistoryFilter(Workspace.historyCreatorFilter, !Workspace.historyCurrentDir, Workspace.historyCreatorId)
+												historyFilterMenu.close()
+											}
+										}
+									}
+								}
+							}
+						}
 					}
 				}
 

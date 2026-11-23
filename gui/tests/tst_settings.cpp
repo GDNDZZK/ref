@@ -47,6 +47,7 @@ private slots:
 	void runningOrderAndUiScaleValidationAndPersistence();
 	void readUiScaleOnlyIsReadOnlyAndNormalizes();
 	void sidebarSectionHeightsPersistAndValidate();
+	void sidebarHistoryFiltersPersistAndValidate();
 };
 
 void TestSettings::defaultsWithoutAFile()
@@ -64,6 +65,8 @@ void TestSettings::defaultsWithoutAFile()
 	QCOMPARE(settings.sidebarWidth(), Settings::DefaultSidebarWidth);
 	QCOMPARE(settings.sidebarTodoHeight(), 0);
 	QCOMPARE(settings.sidebarRunningHeight(), 0);
+	QCOMPARE(settings.sidebarHistoryCreatorFilter(), Settings::HistoryCreatorAll);
+	QVERIFY(!settings.sidebarHistoryCurrentDir());
 	QCOMPARE(settings.windowWidth(), Settings::DefaultWindowWidth);
 	QVERIFY(settings.sidebarRunningOrder().isEmpty());
 	QCOMPARE(settings.uiScale(), Settings::DefaultUiScale);
@@ -363,5 +366,35 @@ void TestSettings::sidebarSectionHeightsPersistAndValidate()
 	QCOMPARE(settings.sidebarTodoHeight(), 0);
 	QCOMPARE(todoSpy.count(), 2);
 }
+
+void TestSettings::sidebarHistoryFiltersPersistAndValidate()
+{
+	QTemporaryDir dir;
+	const QString path = dir.filePath(u"gui.json"_s);
+	{
+		Settings settings(path);
+		QSignalSpy creatorSpy(&settings, &Settings::sidebarHistoryCreatorFilterChanged);
+		QSignalSpy dirSpy(&settings, &Settings::sidebarHistoryCurrentDirChanged);
+		settings.setSidebarHistoryCreatorFilter(Settings::HistoryCreatorUser);
+		settings.setSidebarHistoryCurrentDir(true);
+		QCOMPARE(creatorSpy.count(), 1);
+		QCOMPARE(dirSpy.count(), 1);
+		settings.save();
+	}
+
+	const Settings reloaded(path);
+	QVERIFY(reloaded.loadProblem().isEmpty());
+	QCOMPARE(reloaded.sidebarHistoryCreatorFilter(), Settings::HistoryCreatorUser);
+	QVERIFY(reloaded.sidebarHistoryCurrentDir());
+
+	const QString badPath = dir.filePath(u"bad_filter.json"_s);
+	writeFile(badPath, R"({"sidebar":{"historyCreatorFilter":"creator","historyCurrentDir":"yes"}})");
+	const Settings bad(badPath);
+	QCOMPARE(bad.sidebarHistoryCreatorFilter(), Settings::HistoryCreatorAll);
+	QVERIFY(!bad.sidebarHistoryCurrentDir());
+	QVERIFY(bad.loadProblem().contains(u"sidebar.historyCreatorFilter"_s));
+	QVERIFY(bad.loadProblem().contains(u"sidebar.historyCurrentDir"_s));
+}
+
 QTEST_GUILESS_MAIN(TestSettings)
 #include "tst_settings.moc"

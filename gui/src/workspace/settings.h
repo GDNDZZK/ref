@@ -35,6 +35,8 @@ class Settings : public QObject
 	Q_PROPERTY(int sidebarTodoHeight READ sidebarTodoHeight WRITE setSidebarTodoHeight NOTIFY sidebarTodoHeightChanged)
 	Q_PROPERTY(int sidebarRunningHeight READ sidebarRunningHeight WRITE setSidebarRunningHeight NOTIFY sidebarRunningHeightChanged)
 	Q_PROPERTY(QStringList sidebarRunningOrder READ sidebarRunningOrder WRITE setSidebarRunningOrder NOTIFY sidebarRunningOrderChanged)
+	Q_PROPERTY(QString sidebarHistoryCreatorFilter READ sidebarHistoryCreatorFilter WRITE setSidebarHistoryCreatorFilter NOTIFY sidebarHistoryCreatorFilterChanged)
+	Q_PROPERTY(bool sidebarHistoryCurrentDir READ sidebarHistoryCurrentDir WRITE setSidebarHistoryCurrentDir NOTIFY sidebarHistoryCurrentDirChanged)
 	Q_PROPERTY(int windowWidth READ windowWidth WRITE setWindowWidth NOTIFY windowSizeChanged)
 	Q_PROPERTY(int windowHeight READ windowHeight WRITE setWindowHeight NOTIFY windowSizeChanged)
 	Q_PROPERTY(double uiScale READ uiScale WRITE setUiScale NOTIFY uiScaleChanged)
@@ -50,7 +52,8 @@ public:
 	static const QString Dark;
 	static const QString English;
 	static const QString ChineseSimplified;
-
+	static const QString HistoryCreatorAll;
+	static const QString HistoryCreatorUser;
 	static constexpr int DefaultSidebarWidth = 264;
 	static constexpr int MinSidebarWidth = 210;
 	static constexpr int MaxSidebarWidth = 480;
@@ -83,6 +86,8 @@ public:
 	int sidebarTodoHeight() const { return m_sidebarTodoHeight; }
 	int sidebarRunningHeight() const { return m_sidebarRunningHeight; }
 	QStringList sidebarRunningOrder() const { return m_sidebarRunningOrder; }
+	QString sidebarHistoryCreatorFilter() const { return m_sidebarHistoryCreatorFilter; }
+	bool sidebarHistoryCurrentDir() const { return m_sidebarHistoryCurrentDir; }
 	int windowWidth() const { return m_windowWidth; }
 	int windowHeight() const { return m_windowHeight; }
 	double uiScale() const { return m_uiScale; }
@@ -105,10 +110,11 @@ public:
 	void setSidebarTodoHeight(int height);
 	void setSidebarRunningHeight(int height);
 	void setSidebarRunningOrder(const QStringList& order);
+	void setSidebarHistoryCreatorFilter(const QString& filter);
+	void setSidebarHistoryCurrentDir(bool currentDir);
 	void setWindowWidth(int width);
 	void setWindowHeight(int height);
 	void setUiScale(double scale);
-
 	// What went wrong reading the file, for the user. Empty when it was read or did not exist.
 	QString loadProblem() const { return m_loadProblem; }
 
@@ -127,6 +133,8 @@ signals:
 	void sidebarTodoHeightChanged();
 	void sidebarRunningHeightChanged();
 	void sidebarRunningOrderChanged();
+	void sidebarHistoryCreatorFilterChanged();
+	void sidebarHistoryCurrentDirChanged();
 	void windowSizeChanged();
 	void uiScaleChanged();
 	void saveFailed(const QString& reason);
@@ -156,6 +164,8 @@ private:
 	int m_sidebarTodoHeight = 0;
 	int m_sidebarRunningHeight = 0;
 	QStringList m_sidebarRunningOrder;
+	QString m_sidebarHistoryCreatorFilter;
+	bool m_sidebarHistoryCurrentDir = false;
 	int m_windowWidth = DefaultWindowWidth;
 	int m_windowHeight = DefaultWindowHeight;
 	double m_uiScale = DefaultUiScale;

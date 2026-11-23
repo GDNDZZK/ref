@@ -93,7 +93,7 @@ describe('Sidebar', () => {
     const currentMenu = [...document.body.querySelectorAll('[role="menuitem"]')].map((el) =>
       el.textContent?.trim(),
     )
-    expect(currentMenu).toEqual(['Rename', 'Move to background', 'Close'])
+    expect(currentMenu).toEqual(['Rename', 'Move to background', 'Filter spawned history', 'Close'])
     ;(document.body.querySelectorAll('[role="menuitem"]')[1] as HTMLElement).click()
     expect(detachSpy).toHaveBeenCalledTimes(1)
     await nextTick()
@@ -102,7 +102,7 @@ describe('Sidebar', () => {
     const otherMenu = [...document.body.querySelectorAll('[role="menuitem"]')].map((el) =>
       el.textContent?.trim(),
     )
-    expect(otherMenu).toEqual(['Rename', 'Close'])
+    expect(otherMenu).toEqual(['Rename', 'Filter spawned history', 'Close'])
     wrapper.unmount()
   })
 
@@ -684,6 +684,199 @@ describe('Sidebar', () => {
       } finally {
         rectSpy.mockRestore()
       }
+    })
+  })
+
+  describe('smooth VS Code accordion collapse/expand', () => {
+    it('keeps custom-height class and CSS height vars when collapsed so height transitions smoothly', async () => {
+      const { workspace, wrapper } = mountSidebar()
+      const layout = useLayoutStore()
+      if (!layout.sidebarVisible) layout.toggleSidebar()
+      workspace.onFrame({
+        kind: 'sessions',
+        sessions: [info({ id: 's1', name: 'alpha', todos: [{ content: 'step 1', status: 'pending' }] })],
+      })
+      workspace.currentId = 's1'
+      layout.setSidebarTodoHeight(140)
+      layout.setSidebarRunningHeight(200)
+      await nextTick()
+
+      const todoSlot = wrapper.get('.todo-slot')
+      const runningSlot = wrapper.get('.running-slot')
+      const body = wrapper.get('.body')
+      const lists = wrapper.get('.lists')
+
+      expect(todoSlot.classes()).toContain('open')
+      expect(todoSlot.classes()).toContain('custom-height')
+      expect(runningSlot.classes()).toContain('open')
+      expect(runningSlot.classes()).toContain('custom-height')
+
+      // Collapsing Todo and Running keeps custom-height so CSS transitions customHeight <-> collapsed height.
+      layout.toggleSidebarTodo()
+      layout.toggleSidebarRunning()
+      await nextTick()
+      expect(todoSlot.classes()).not.toContain('open')
+      expect(todoSlot.classes()).toContain('custom-height')
+      expect(todoSlot.attributes('style')).toContain('--todo-height: 140px')
+      expect(runningSlot.classes()).not.toContain('open')
+      expect(runningSlot.classes()).toContain('custom-height')
+      expect(runningSlot.attributes('style')).toContain('--running-height: 200px')
+
+      // Expanding Running while collapsing History lets Running fill remaining height cleanly.
+      layout.toggleSidebarRunning()
+      layout.toggleSidebarHistory()
+      await nextTick()
+      expect(lists.classes()).toContain('history-collapsed')
+      expect(runningSlot.classes()).toContain('open')
+      expect(runningSlot.classes()).toContain('custom-height')
+
+      // Expanding Todo and collapsing both Running & History gives Todo .fill to occupy available space.
+      layout.toggleSidebarTodo()
+      layout.toggleSidebarRunning()
+      await nextTick()
+      expect(body.classes()).toContain('lists-collapsed')
+      expect(todoSlot.classes()).toContain('open')
+      expect(todoSlot.classes()).toContain('fill')
+      wrapper.unmount()
+    })
+  })
+
+  describe('history filter and creator display', () => {
+    it('shows creator on HistoryRow, filters via popover, persists settings, and debounces backend re-query', async () => {
+      vi.useFakeTimers()
+      const { workspace, wrapper } = mountSidebar()
+      const layout = useLayoutStore()
+      const refreshSpy = vi.spyOn(workspace, 'refreshSidebarHistory').mockResolvedValue(undefined)
+      workspace.cwd = '/proj'
+      workspace.onFrame({
+        kind: 'sessions',
+        sessions: [info({ id: 's1', name: 'lead', cwd: '/proj' })],
+      })
+      workspace.currentId = 's1'
+      workspace.sidebarHistoryLoaded = true
+      workspace.sidebarHistory = [
+        info({ id: 'h1', name: 'user-hist', title: 'User work', cwd: '/proj', parent: null, live: false }),
+        info({ id: 'h2', name: 'child-hist', title: 'Child work', cwd: '/other', parent: 's1', live: false }),
+      ]
+      workspace.history = workspace.sidebarHistory
+      await nextTick()
+
+      // Second row displays · ⟲ lead on subtitle.
+      const subtitles = wrapper.findAll('.history-row .subtitle').map((el) => el.text())
+      expect(subtitles[0]).not.toContain('⟲')
+      expect(subtitles[1]).toContain('· ⟲ lead')
+
+      // Filter button opens popover with All, User-created, and Only current directory.
+      const filterBtn = wrapper.get('button.filter-button')
+      expect(filterBtn.classes()).not.toContain('active')
+      await filterBtn.trigger('click')
+      await nextTick()
+      const items = [...document.body.querySelectorAll('[role="menuitem"]')]
+      expect(items.map((el) => el.textContent?.trim())).toEqual([
+        'All',
+        'User-created',
+        'Only current directory',
+      ])
+
+      // Pick User-created: persists, highlights filter button, filters locally, and triggers refreshSidebarHistory.
+      ;(items[1] as HTMLElement).click()
+      await nextTick()
+      expect(layout.sidebarHistoryCreatorFilter).toBe('user')
+      expect(filterBtn.classes()).toContain('active')
+      expect(wrapper.findAll('.history-row .title').map((el) => el.text())).toEqual(['User work'])
+      expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({
+        sidebarHistoryCreatorFilter: 'user',
+      })
+      expect(refreshSpy).toHaveBeenCalledTimes(1)
+      // Unfiltered workspace.history stays untouched.
+      expect(workspace.history).toHaveLength(2)
+
+      // Switch back to All, then toggle Only current directory.
+      await filterBtn.trigger('click')
+      await nextTick()
+      ;(document.body.querySelectorAll('[role="menuitem"]')[0] as HTMLElement).click()
+      await nextTick()
+      await filterBtn.trigger('click')
+      await nextTick()
+      ;(document.body.querySelectorAll('[role="menuitem"]')[2] as HTMLElement).click()
+      await nextTick()
+      expect(layout.sidebarHistoryCurrentDir).toBe(true)
+      expect(wrapper.findAll('.history-row .title').map((el) => el.text())).toEqual(['User work'])
+      expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({ sidebarHistoryCurrentDir: true })
+      expect(refreshSpy).toHaveBeenCalledTimes(3)
+
+      // Search input debounces 150ms before re-querying backend.
+      refreshSpy.mockClear()
+      const input = wrapper.get('.search input')
+      await input.setValue('User')
+      expect(refreshSpy).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(150)
+      expect(refreshSpy).toHaveBeenCalledTimes(1)
+      wrapper.unmount()
+    })
+
+    it('keeps server-matched child rows when sidebarHistorySynced is true even if parent is absent from byId', async () => {
+      const { workspace, wrapper } = mountSidebar()
+      workspace.sidebarHistoryLoaded = true
+      workspace.sidebarHistory = [
+        info({ id: 'h_child', name: 'child-only', title: 'Child task', parent: 's_missing', live: false }),
+      ]
+      workspace.historyQuery = 'OrchestratorRoot'
+      workspace.sidebarHistorySynced = true
+      await nextTick()
+      expect(wrapper.findAll('.history-row .title').map((el) => el.text())).toEqual(['Child task'])
+      wrapper.unmount()
+    })
+
+    it('sets ephemeral By <creator> filter from HistoryRow and SidebarRow context menus', async () => {
+      const { workspace, wrapper } = mountSidebar()
+      const refreshSpy = vi.spyOn(workspace, 'refreshSidebarHistory').mockResolvedValue(undefined)
+      workspace.sidebarHistoryLoaded = true
+      workspace.sidebarHistory = [
+        info({ id: 'h1', name: 'root-h', title: 'Root Hist', parent: null, live: false }),
+        info({ id: 'h2', name: 'sub-h', title: 'Sub Hist', parent: 's1', live: false }),
+      ]
+      await nextTick()
+
+      // Right-click HistoryRow with parent -> Filter history by creator.
+      const histRows = wrapper.findAll('.history-row')
+      await histRows[1]!.trigger('contextmenu')
+      await nextTick()
+      const histMenu = [...document.body.querySelectorAll('[role="menuitem"]')]
+      expect(histMenu.map((el) => el.textContent?.trim())).toEqual([
+        'Filter history by creator',
+        'Filter spawned history',
+        'Delete',
+      ])
+      ;(histMenu[0] as HTMLElement).click()
+      await nextTick()
+      expect(workspace.historyCreator).toBe('s1')
+      expect(wrapper.findAll('.history-row .title').map((el) => el.text())).toEqual(['Sub Hist'])
+      expect(refreshSpy).toHaveBeenCalledTimes(1)
+
+      // Filter popover now shows "By alpha" checked.
+      await wrapper.get('button.filter-button').trigger('click')
+      await nextTick()
+      const popoverItems = [...document.body.querySelectorAll('[role="menuitem"]')]
+      expect(popoverItems.map((el) => el.textContent?.trim())).toEqual([
+        'All',
+        'User-created',
+        'By alpha',
+        'Only current directory',
+      ])
+      expect(popoverItems[2]!.getAttribute('aria-checked')).toBe('true')
+      // Close menu, then right-click SidebarRow s2 -> Filter spawned history.
+      ;(popoverItems[0] as HTMLElement).click()
+      await nextTick()
+      await wrapper.findAll('.running .row')[1]!.trigger('contextmenu')
+      await nextTick()
+      const runningMenu = [...document.body.querySelectorAll('[role="menuitem"]')]
+      const spawnedItem = runningMenu.find((el) => el.textContent?.trim() === 'Filter spawned history')!
+      ;(spawnedItem as HTMLElement).click()
+      await nextTick()
+      expect(workspace.historyCreator).toBe('s2')
+      expect(refreshSpy).toHaveBeenCalledTimes(3)
+      wrapper.unmount()
     })
   })
 })

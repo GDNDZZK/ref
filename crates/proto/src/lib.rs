@@ -856,6 +856,12 @@ pub enum Request {
         cwd: Option<String>,
         #[serde(default)]
         limit: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        creator: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        query: Option<String>,
     },
     /// -> `{session: SessionInfo}`. Does not attach.
     CreateSession {

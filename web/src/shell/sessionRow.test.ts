@@ -176,13 +176,13 @@ describe('rootTaskOf and creatorKeywords', () => {
     expect(rootTaskOf([a, b], a)).toEqual({ id: 'b', name: 'beta' })
   })
 
-  it('builds creator search keywords with name and id', () => {
-    const lead = info({ id: 's_lead', name: 'lead', parent: null })
+  it('builds creator search keywords with name, title, and id', () => {
+    const lead = info({ id: 's_lead', name: 'lead', title: 'Lead Task', parent: null })
     const child = info({ id: 's_child', name: 'child', parent: 's_lead' })
     const orphan = info({ id: 's_orphan', name: 'orphan', parent: 's_gone' })
     const byId = new Map([lead, child, orphan].map((s) => [s.id, s]))
     expect(creatorKeywords(byId, lead)).toBe('')
-    expect(creatorKeywords(byId, child)).toBe('lead s_lead')
+    expect(creatorKeywords(byId, child)).toBe('lead Lead Task s_lead')
     expect(creatorKeywords(byId, orphan)).toBe('s_gone')
   })
 })

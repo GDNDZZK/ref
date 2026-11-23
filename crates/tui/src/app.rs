@@ -19,7 +19,7 @@ use crate::ui::autocomplete::{
     DirCache, DirKey, DirListing, ShellTokenPos, build_dir_items, has_drive_prefix,
     has_drive_root_prefix, is_bare_drive, last_arg_token, shell_token_context, split_dir_query,
 };
-use crate::ui::dialog::{Dialog, HelpDialog, Item, Kind, ListDialog, OPEN_SETTLE};
+use crate::ui::dialog::{CreatorFilter, Dialog, HelpDialog, Item, Kind, ListDialog, OPEN_SETTLE};
 use crate::ui::editor::{Editor, History};
 use crate::ui::permission::PermissionView;
 use crate::ui::question::QuestionView;
@@ -61,7 +61,10 @@ pub enum Pending {
         sid: String,
         fg: bool,
     },
-    HistoryDialog,
+    HistoryDialog {
+        creator: Option<String>,
+        query: Option<String>,
+    },
     HistoryBg,
     SwitchSession {
         query: String,
@@ -442,6 +445,12 @@ pub struct App {
     bins_inflight: HashSet<String>,
     history_loaded: bool,
     history_inflight: bool,
+    /// Latest server-filtered history response for the open `Kind::Sessions` dialog:
+    /// `(creator, query, sessions)`. Kept separate from `history_list` so filtered subsets
+    /// never erase unfiltered history or parent lookup entries.
+    history_filtered: Option<(Option<String>, Option<String>, Vec<SessionInfo>)>,
+    /// Debounced `Kind::Sessions` filter query deadline.
+    pub sessions_due: Option<Instant>,
     /// Sessions we've asked to attach (watch) and are waiting on.
     attaching: HashSet<String>,
     pub screen: Rect,
@@ -505,6 +514,10 @@ const HINT_DURATION: Duration = Duration::from_millis(1500);
 const CONFIRM_WINDOW: Duration = Duration::from_secs(4);
 /// Debounce before an `@` file query is sent.
 const FILE_QUERY_DEBOUNCE: Duration = Duration::from_millis(80);
+/// Debounce before a `Kind::Sessions` filter query requests filtered history.
+const HISTORY_QUERY_DEBOUNCE: Duration = Duration::from_millis(80);
+/// `ListHistory.creator` value meaning "sessions without a creator (user-created)".
+const CREATOR_USER: &str = "user";
 /// Rows of one history page request.
 const HISTORY_LIST_LIMIT: usize = 200;
 const FILE_QUERY_LIMIT: usize = 20;
@@ -610,6 +623,8 @@ impl App {
             bins_inflight: HashSet::new(),
             history_loaded: false,
             history_inflight: false,
+            history_filtered: None,
+            sessions_due: None,
             attaching: HashSet::new(),
             screen: Rect::default(),
             sidebar_rows: Vec::new(),
@@ -646,7 +661,11 @@ impl App {
                 Pending::Binaries { query } => {
                     self.bins_inflight.remove(&query);
                 }
-                Pending::HistoryBg => self.history_inflight = false,
+                Pending::HistoryBg => self.history_inflight = self.has_history_inflight(),
+                Pending::HistoryDialog { .. } => {
+                    self.history_inflight = self.has_history_inflight();
+                    self.toasts.warn(NOT_CONNECTED);
+                }
                 _ => self.toasts.warn(NOT_CONNECTED),
             }
             return;
@@ -833,6 +852,7 @@ impl App {
                 self.bin_cache.clear();
                 self.bins_inflight.clear();
                 self.history_inflight = false;
+                self.sessions_due = None;
                 let cwd = self.current_cwd();
                 self.req(
                     Request::GetConfig { cwd },
@@ -880,6 +900,7 @@ impl App {
                 self.dirs_inflight.clear();
                 self.bins_inflight.clear();
                 self.history_inflight = false;
+                self.sessions_due = None;
                 self.mcp_inflight = false;
                 self.mcp_poll_at = None;
                 if self.quit_after_close {
@@ -904,6 +925,7 @@ impl App {
                 self.dirs_inflight.clear();
                 self.bins_inflight.clear();
                 self.history_inflight = false;
+                self.sessions_due = None;
                 self.mcp_inflight = false;
                 self.mcp_poll_at = None;
                 if self.quit_after_close {
@@ -929,6 +951,8 @@ impl App {
                 Request::ListHistory {
                     cwd: Some(self.cwd.clone()),
                     limit: Some(1),
+                    creator: None,
+                    query: None,
                 },
                 Pending::Continue,
             );
@@ -1079,11 +1103,15 @@ impl App {
             Pending::Binaries { query } => {
                 self.bins_inflight.remove(&query);
             }
+            Pending::HistoryDialog { .. } => {
+                self.history_inflight = self.has_history_inflight();
+                self.toasts.error(err.message);
+            }
             Pending::HistoryBg => {
-                self.history_inflight = false;
+                self.history_inflight = self.has_history_inflight();
             }
             Pending::SwitchSession { query } => {
-                self.history_inflight = false;
+                self.history_inflight = self.has_history_inflight();
                 self.switch_session_by_query(&query, true);
             }
             Pending::Continue => {
@@ -1180,13 +1208,23 @@ impl App {
                     .or_insert_with(|| SessionView::new(snap.info.clone(), fg));
                 v.load_snapshot(snap);
             }
-            Pending::HistoryDialog => {
-                self.history_inflight = false;
+            Pending::HistoryDialog { creator, query } => {
+                self.history_inflight = self.has_history_inflight();
                 match sessions_of(&result) {
                     Ok(s) => {
-                        self.history_loaded = true;
-                        self.history_list = s;
-                        self.refresh_session_dialog();
+                        if creator.is_none() && query.is_none() {
+                            self.history_loaded = true;
+                            self.history_list = s;
+                            if self.session_dialog_filter() == Some((None, None)) {
+                                self.history_filtered = None;
+                            }
+                            self.refresh_session_dialog();
+                        } else if self.session_dialog_filter()
+                            == Some((creator.clone(), query.clone()))
+                        {
+                            self.history_filtered = Some((creator, query, s));
+                            self.refresh_session_dialog();
+                        }
                     }
                     Err(e) => self
                         .toasts
@@ -1194,7 +1232,7 @@ impl App {
                 }
             }
             Pending::HistoryBg => {
-                self.history_inflight = false;
+                self.history_inflight = self.has_history_inflight();
                 if let Ok(s) = sessions_of(&result) {
                     self.history_loaded = true;
                     self.history_list = s;
@@ -1202,7 +1240,7 @@ impl App {
                 }
             }
             Pending::SwitchSession { query } => {
-                self.history_inflight = false;
+                self.history_inflight = self.has_history_inflight();
                 if let Ok(s) = sessions_of(&result) {
                     self.history_loaded = true;
                     self.history_list = s;
@@ -1244,13 +1282,7 @@ impl App {
                 }
                 if matches!(&self.dialog, Some(Dialog::List(d)) if d.kind == Kind::Sessions) {
                     // The closed session moves to History.
-                    self.req(
-                        Request::ListHistory {
-                            cwd: None,
-                            limit: Some(HISTORY_LIST_LIMIT),
-                        },
-                        Pending::HistoryDialog,
-                    );
+                    self.request_sessions_history();
                 }
             }
             Pending::Expand { sid } => {
@@ -2244,7 +2276,96 @@ impl App {
         self.open_sessions_filtered(None);
     }
 
+    fn has_history_inflight(&self) -> bool {
+        self.pending.values().any(|p| {
+            matches!(
+                p,
+                Pending::HistoryDialog { .. } | Pending::HistoryBg | Pending::SwitchSession { .. }
+            )
+        })
+    }
+
+    fn session_dialog_filter(&self) -> Option<(Option<String>, Option<String>)> {
+        let Some(Dialog::List(d)) = self.dialog.as_ref() else {
+            return None;
+        };
+        if d.kind != Kind::Sessions {
+            return None;
+        }
+        let creator = match &d.creator_filter {
+            CreatorFilter::All => None,
+            CreatorFilter::UserCreated => Some(CREATOR_USER.to_string()),
+            CreatorFilter::ByCreator { id, .. } => Some(id.clone()),
+        };
+        let q = d.filter.text.trim();
+        let query = (!q.is_empty()).then(|| q.to_string());
+        Some((creator, query))
+    }
+
+    pub fn request_sessions_history(&mut self) {
+        let Some((creator, query)) = self.session_dialog_filter() else {
+            return;
+        };
+        self.sessions_due = None;
+        self.history_inflight = true;
+        self.req(
+            Request::ListHistory {
+                cwd: None,
+                limit: Some(HISTORY_LIST_LIMIT),
+                creator: creator.clone(),
+                query: query.clone(),
+            },
+            Pending::HistoryDialog { creator, query },
+        );
+    }
+
+    pub fn cycle_dialog_creator_filter(&mut self) {
+        let is_sessions = {
+            let Some(Dialog::List(d)) = self.dialog.as_mut() else {
+                return;
+            };
+            d.cycle_creator_filter();
+            d.kind == Kind::Sessions
+        };
+        if is_sessions {
+            if self.history_filtered.is_some() {
+                self.history_filtered = None;
+                self.refresh_session_dialog();
+            }
+            self.request_sessions_history();
+        }
+    }
+
+    pub fn on_sessions_filter_edited(&mut self, text_changed: bool) {
+        if let Some(Dialog::List(d)) = self.dialog.as_mut() {
+            d.refilter();
+        }
+        if !text_changed {
+            return;
+        }
+        let Some(filter) = self.session_dialog_filter() else {
+            return;
+        };
+        let keep_filtered = self.history_filtered.as_ref().is_some_and(|(fc, fq, _)| {
+            filter != (None, None)
+                && *fc == filter.0
+                && fq.as_deref().is_none_or(|prev| {
+                    let prev_l = prev.to_lowercase();
+                    filter
+                        .1
+                        .as_deref()
+                        .is_some_and(|q| q.to_lowercase().contains(&prev_l))
+                })
+        });
+        if !keep_filtered && self.history_filtered.take().is_some() {
+            self.refresh_session_dialog();
+        }
+        self.sessions_due = Some(Instant::now() + HISTORY_QUERY_DEBOUNCE);
+    }
+
     pub fn open_sessions_filtered(&mut self, initial_filter: Option<&str>) {
+        self.history_filtered = None;
+        self.sessions_due = None;
         let mut d = ListDialog::new(Kind::Sessions, "Sessions", Vec::new())
             .with_hint("enter open · tab filter · ctrl+d close live / delete history · esc");
         if let Some(q) = initial_filter.filter(|q| !q.is_empty()) {
@@ -2258,15 +2379,29 @@ impl App {
         {
             d.select_key(&live_key(c));
         }
-        self.history_inflight = true;
-        self.req(
-            Request::ListHistory {
-                cwd: None,
-                limit: Some(HISTORY_LIST_LIMIT),
-            },
-            Pending::HistoryDialog,
-        );
+        self.request_sessions_history();
         self.req(Request::ListSessions, Pending::LiveList);
+    }
+
+    fn active_dialog_history(&self) -> &[SessionInfo] {
+        let Some((cur_creator, cur_query)) = self.session_dialog_filter() else {
+            return &self.history_list;
+        };
+        if cur_creator.is_none() && cur_query.is_none() {
+            return &self.history_list;
+        }
+        if let Some((fc, fq, list)) = &self.history_filtered
+            && *fc == cur_creator
+            && fq.as_deref().is_none_or(|prev| {
+                let prev_l = prev.to_lowercase();
+                cur_query
+                    .as_deref()
+                    .is_some_and(|q| q.to_lowercase().contains(&prev_l))
+            })
+        {
+            return list;
+        }
+        &self.history_list
     }
 
     fn refresh_session_dialog(&mut self) {
@@ -2276,6 +2411,12 @@ impl App {
             .filter(|s| self.attached_elsewhere(&s.id))
             .map(|s| s.id.clone())
             .collect();
+        let active_history_owned = self.active_dialog_history().to_vec();
+        let extra_history_owned = self
+            .history_filtered
+            .as_ref()
+            .map(|(_, _, l)| l.clone())
+            .unwrap_or_default();
         let Some(Dialog::List(d)) = self.dialog.as_mut() else {
             return;
         };
@@ -2293,6 +2434,7 @@ impl App {
                 .live
                 .iter()
                 .chain(self.history_list.iter())
+                .chain(extra_history_owned.iter())
                 .find(|x| x.id == pid);
             let name = info
                 .map(|x| x.name.as_str())
@@ -2357,7 +2499,11 @@ impl App {
             });
         }
         let live_ids: HashSet<&str> = live.iter().map(|s| s.id.as_str()).collect();
-        let history: &[SessionInfo] = if close_only { &[] } else { &self.history_list };
+        let history: &[SessionInfo] = if close_only {
+            &[]
+        } else {
+            &active_history_owned
+        };
         for s in history.iter().filter(|s| !live_ids.contains(s.id.as_str())) {
             let title = if s.title.trim().is_empty() {
                 s.name.clone()
@@ -2856,6 +3002,9 @@ impl App {
         } else if let Some(sid) = key.strip_prefix(HISTORY_KEY_PREFIX) {
             let sid = sid.to_string();
             self.history_list.retain(|s| s.id != sid);
+            if let Some((_, _, list)) = &mut self.history_filtered {
+                list.retain(|s| s.id != sid);
+            }
             self.req(
                 Request::Delete { session_id: sid },
                 Pending::Simple {
@@ -3639,6 +3788,8 @@ impl App {
                 Request::ListHistory {
                     cwd: None,
                     limit: Some(HISTORY_LIST_LIMIT),
+                    creator: None,
+                    query: None,
                 },
                 Pending::SwitchSession {
                     query: q.to_string(),
@@ -4608,6 +4759,8 @@ impl App {
             Request::ListHistory {
                 cwd: None,
                 limit: Some(HISTORY_LIST_LIMIT),
+                creator: None,
+                query: None,
             },
             Pending::HistoryBg,
         );
@@ -4830,6 +4983,12 @@ impl App {
                     .max(MIN_DEADLINE_WAIT),
             );
         }
+        if let Some(at) = self.sessions_due {
+            return Some(
+                at.saturating_duration_since(Instant::now())
+                    .max(MIN_DEADLINE_WAIT),
+            );
+        }
         // Spinners for sessions we don't hold a view of: the sidebar's live list, split tiles that
         // are still loading and the session dialogs all draw from `self.live`.
         let live_list_shown = self.mode == Mode::Watch
@@ -4916,6 +5075,16 @@ impl App {
             && let Some((_, q)) = self.files_due.take()
         {
             self.request_files(q);
+        }
+        if self.sessions_due.is_some_and(|at| Instant::now() >= at) {
+            self.sessions_due = None;
+            if matches!(&self.dialog, Some(Dialog::List(d)) if d.kind == Kind::Sessions) {
+                self.request_sessions_history();
+            }
+        }
+        if !matches!(&self.dialog, Some(Dialog::List(d)) if d.kind == Kind::Sessions) {
+            self.sessions_due = None;
+            self.history_filtered = None;
         }
         if self.mcp_poll_at.is_some_and(|at| Instant::now() >= at) {
             self.refresh_mcp();

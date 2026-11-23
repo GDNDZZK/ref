@@ -19,7 +19,7 @@ QJsonObject createSession(const QString& cwd, const std::optional<QString>& agen
 QJsonObject attach(const QString& sessionId, bool foreground);
 QJsonObject detach(const QString& sessionId);
 QJsonObject listSessions();
-QJsonObject listHistory(const QString& cwd, int limit);
+QJsonObject listHistory(const QString& cwd, int limit, const QString& creator = {}, const QString& query = {});
 QJsonObject prompt(const QString& sessionId, const QString& text, const QList<ImageData>& images = {});
 QJsonObject removeQueued(const QString& sessionId, const QString& messageId);
 // Takes back the last human prompt and what came after it, or with `messageId` that message and what followed.

@@ -15,6 +15,7 @@ Item {
 	// Whether the input box is there (a split-view tile shows it only while focused). Hidden, it
 	// keeps everything it holds; the queue strip above it stays.
 	property bool boxShown: true
+	property bool ready: false
 
 	readonly property int padding: 8
 	readonly property int maxInputHeight: 220
@@ -98,7 +99,8 @@ Item {
 		input.syncing = false
 	}
 	readonly property real queueBlock: queueStrip.height > 0
-		? queueStrip.height + queueGap * Math.min(1, queueStrip.height / queueStrip.queueRowHeight) : 0
+		? queueStrip.height + queueGap * Math.min(1, queueStrip.height / queueStrip.queueRowHeight) * Math.min(1, box.height / Math.max(1, queueGap))
+		: 0
 
 	implicitHeight: queueBlock + box.height
 	height: implicitHeight
@@ -107,8 +109,8 @@ Item {
 	Component.onCompleted: {
 		model.interruptWindow = Motion.interruptWindow
 		syncFromModel()
+		ready = true
 	}
-
 	Connections {
 		target: composer.model
 		function onDraftReplaced() { composer.syncFromModel() }
@@ -117,11 +119,11 @@ Item {
 
 	QueueStrip {
 		id: queueStrip
+		z: 1
 		anchors { left: parent.left; right: parent.right; top: parent.top }
 		model: composer.model.queue
 		onWithdrawRequested: row => composer.model.withdraw(row)
 	}
-
 	Rectangle {
 		id: box
 
@@ -130,7 +132,8 @@ Item {
 		readonly property real fullHeight: composer.padding + attachmentBlock + Math.min(input.implicitHeight, composer.maxInputHeight)
 			+ composer.textGap + composer.tagRowHeight + composer.padding
 
-		anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+		anchors { left: parent.left; right: parent.right }
+		y: composer.queueBlock
 		height: composer.boxShown ? fullHeight : 0
 		radius: Theme.radiusLarge
 		color: composer.model.shellMode ? Theme.shellSurface : Theme.surface
@@ -141,11 +144,16 @@ Item {
 		visible: composer.boxShown || height > 0
 		enabled: composer.boxShown
 
-		Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-		Behavior on height { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+		Behavior on opacity {
+			enabled: composer.ready
+			NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
+		}
+		Behavior on height {
+			enabled: composer.ready
+			NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
+		}
 		Behavior on color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 		Behavior on border.color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-
 		AttachmentStrip {
 			id: strip
 			anchors { left: parent.left; right: parent.right; top: parent.top; margins: composer.padding }
@@ -187,10 +195,35 @@ Item {
 				font.pixelSize: Theme.fontSize
 				background: null
 				Component.onCompleted: TextEditSupport.disableUndoRedo(input.textDocument)
-				LinkColorizer {
-					document: input.textDocument
-					color: Theme.accentText
-					highlightImageTokens: true
+				TextEdit {
+					id: tokenOverlay
+					objectName: "composerTokenOverlay"
+					anchors.fill: parent
+					z: 1
+					enabled: false
+					readOnly: true
+					focus: false
+					activeFocusOnTab: false
+					textFormat: TextEdit.PlainText
+					wrapMode: input.wrapMode
+					font: input.font
+					color: "transparent"
+					leftPadding: input.leftPadding
+					rightPadding: input.rightPadding
+					topPadding: input.topPadding
+					bottomPadding: input.bottomPadding
+					horizontalAlignment: input.horizontalAlignment
+					verticalAlignment: input.verticalAlignment
+					visible: input.length > 0 || input.inputMethodComposing
+					text: input.inputMethodComposing
+						? input.text.slice(0, input.cursorPosition) + input.preeditText + input.text.slice(input.cursorPosition)
+						: input.text
+
+					LinkColorizer {
+						document: tokenOverlay.textDocument
+						color: Theme.accentText
+						highlightImageTokens: true
+					}
 				}
 				Basic.ContextMenu.menu: Basic.Menu {
 					id: editMenu
@@ -516,6 +549,7 @@ Item {
 
 	CompletionPopup {
 		id: popup
+		z: 2
 		anchors { left: parent.left; right: parent.right; bottom: parent.top; bottomMargin: popupGap }
 		kind: composer.model.completionKind
 		fileModel: composer.model.files

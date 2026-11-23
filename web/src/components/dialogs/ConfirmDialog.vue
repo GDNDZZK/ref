@@ -15,7 +15,10 @@ const dialogs = useDialogsStore()
 const workspace = useWorkspaceStore()
 const notices = useNoticesStore()
 
-const info = workspace.infoOf(props.sessionId) ?? workspace.history.find((s) => s.id === props.sessionId)
+const info =
+  workspace.infoOf(props.sessionId) ??
+  workspace.history.find((s) => s.id === props.sessionId) ??
+  workspace.sidebarHistory.find((s) => s.id === props.sessionId)
 const label = props.kind === 'closeSession' ? liveLabel : historyLabel
 const body = t(`dialog.${props.kind}.body`, { title: info ? label(info) : props.sessionId })
 

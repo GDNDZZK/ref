@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 /// Database file name inside the data directory.
 const DB_FILE: &str = "ref.db";
@@ -103,9 +103,12 @@ enum Cmd {
     Exists(String, Reply<bool>),
     List {
         cwd: Option<String>,
+        creator: Option<String>,
+        query: Option<String>,
         limit: Option<usize>,
         reply: Reply<Vec<SessionInfo>>,
     },
+    Infos(Vec<String>, Reply<Vec<SessionInfo>>),
     Delete(String, Reply<()>),
     Flush(Reply<()>),
     Close(Reply<()>),
@@ -125,6 +128,12 @@ fn valid_id(id: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
+pub(crate) fn normalize_filter(value: Option<String>) -> Option<String> {
+    value.and_then(|v| {
+        let trimmed = v.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    })
+}
 impl Store {
     /// Opens (or creates) `<data_dir>/ref.db` on a background thread.
     pub fn new(data_dir: PathBuf) -> Store {
@@ -196,16 +205,44 @@ impl Store {
 
     /// All persisted session infos, newest `updated_at` first.
     pub fn list(&self) -> Vec<SessionInfo> {
-        self.list_for(None, None)
+        self.list_for(None, None, None, None)
     }
 
-    /// Persisted session infos (optionally only for `cwd`), newest first, at most `limit`.
-    pub(crate) fn list_for(&self, cwd: Option<String>, limit: Option<usize>) -> Vec<SessionInfo> {
-        self.call(|reply| Cmd::List { cwd, limit, reply })
-            .unwrap_or_else(|e| {
-                tracing::warn!("listing sessions failed: {e}");
-                Vec::new()
-            })
+    /// Persisted session infos matching optional `cwd`, `creator`, and `query`, newest first,
+    /// at most `limit`.
+    pub(crate) fn list_for(
+        &self,
+        cwd: Option<String>,
+        creator: Option<String>,
+        query: Option<String>,
+        limit: Option<usize>,
+    ) -> Vec<SessionInfo> {
+        let cwd = normalize_filter(cwd);
+        let creator = normalize_filter(creator);
+        let query = normalize_filter(query);
+        self.call(|reply| Cmd::List {
+            cwd,
+            creator,
+            query,
+            limit,
+            reply,
+        })
+        .unwrap_or_else(|e| {
+            tracing::warn!("listing sessions failed: {e}");
+            Vec::new()
+        })
+    }
+
+    /// Persisted `SessionInfo` rows for the given valid session ids (skips missing/corrupt rows).
+    pub(crate) fn infos(&self, ids: Vec<String>) -> Vec<SessionInfo> {
+        let ids: Vec<String> = ids.into_iter().filter(|id| valid_id(id)).collect();
+        if ids.is_empty() {
+            return Vec::new();
+        }
+        self.call(|r| Cmd::Infos(ids, r)).unwrap_or_else(|e| {
+            tracing::warn!("loading session infos failed: {e}");
+            Vec::new()
+        })
     }
 }
 
@@ -295,6 +332,17 @@ fn migrate(conn: &Connection) -> DbResult<()> {
         )
         .map_err(|e| format!("creating the schema failed: {e}"))?;
     }
+    if v < 2 {
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE sessions ADD COLUMN parent TEXT;
+             UPDATE sessions SET parent = json_extract(info, '$.parent') WHERE json_valid(info);
+             CREATE INDEX IF NOT EXISTS sessions_parent ON sessions(parent, updated_at);
+             PRAGMA user_version = 2;
+             COMMIT;",
+        )
+        .map_err(|e| format!("migrating the schema to v2 failed: {e}"))?;
+    }
     Ok(())
 }
 
@@ -339,8 +387,26 @@ fn db_thread(data_dir: &Path, path: &Path, rx: mpsc::Receiver<Cmd>) {
                 Cmd::Exists(id, r) => {
                     answer(r, exists(db, &id));
                 }
-                Cmd::List { cwd, limit, reply } => {
-                    answer(reply, list(db, cwd.as_deref(), limit));
+                Cmd::List {
+                    cwd,
+                    creator,
+                    query,
+                    limit,
+                    reply,
+                } => {
+                    answer(
+                        reply,
+                        list(
+                            db,
+                            cwd.as_deref(),
+                            creator.as_deref(),
+                            query.as_deref(),
+                            limit,
+                        ),
+                    );
+                }
+                Cmd::Infos(ids, r) => {
+                    answer(r, infos(db, &ids));
                 }
                 Cmd::Delete(id, r) => {
                     cache.remove(&id);
@@ -391,6 +457,7 @@ fn fail(c: Cmd, msg: &str) {
         Cmd::Load(_, r) => answer(r, Err(m)),
         Cmd::Exists(_, r) => answer(r, Err(m)),
         Cmd::List { reply, .. } => answer(reply, Err(m)),
+        Cmd::Infos(_, r) => answer(r, Err(m)),
         Cmd::Delete(_, r) | Cmd::Flush(r) => answer(r, Err(m)),
         Cmd::Close(r) => answer(r, Ok(())),
     }
@@ -423,12 +490,22 @@ fn save(db: &mut Connection, cache: &mut HashMap<String, Cached>, p: &Persisted)
         let info = serde_json::to_string(&p.info)?;
         let extra = serde_json::to_string(&extra)?;
         tx.execute(
-            "INSERT INTO sessions (id, info, cwd, title, name, created_at, updated_at, extra)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            "INSERT INTO sessions (id, info, cwd, title, name, created_at, updated_at, extra, parent)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(id) DO UPDATE SET info = excluded.info, cwd = excluded.cwd, title = excluded.title,
                  name = excluded.name, created_at = excluded.created_at, updated_at = excluded.updated_at,
-                 extra = excluded.extra",
-            params![id, info, p.info.cwd, p.info.title, p.info.name, p.info.created_at, p.info.updated_at, extra],
+                 extra = excluded.extra, parent = excluded.parent",
+            params![
+                id,
+                info,
+                p.info.cwd,
+                p.info.title,
+                p.info.name,
+                p.info.created_at,
+                p.info.updated_at,
+                extra,
+                p.info.parent
+            ],
         )?;
     }
     {
@@ -521,19 +598,67 @@ fn load(db: &Connection, cache: &mut HashMap<String, Cached>, id: &str) -> DbRes
     Ok(p)
 }
 
-fn list(db: &Connection, cwd: Option<&str>, limit: Option<usize>) -> DbResult<Vec<SessionInfo>> {
+fn list(
+    db: &Connection,
+    cwd: Option<&str>,
+    creator: Option<&str>,
+    query: Option<&str>,
+    limit: Option<usize>,
+) -> DbResult<Vec<SessionInfo>> {
+    let cwd = cwd.map(str::trim).filter(|s| !s.is_empty());
+    let creator = creator.map(str::trim).filter(|s| !s.is_empty());
+    let query_lower = query
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_lowercase);
     let limit = limit.map(|l| l as i64).unwrap_or(NO_LIMIT);
-    let mut stmt = db
-        .prepare_cached(
-            "SELECT info FROM sessions WHERE (?1 IS NULL OR cwd = ?1) ORDER BY updated_at DESC LIMIT ?2",
-        )?;
-    let rows = stmt.query_map(params![cwd, limit], |r| r.get::<_, String>(0))?;
+    let mut stmt = db.prepare_cached(
+        "SELECT s.info
+         FROM sessions s
+         LEFT JOIN sessions p ON p.id = s.parent
+         WHERE (?1 IS NULL OR s.cwd = ?1)
+           AND (
+               ?2 IS NULL
+               OR (?2 = 'user' AND (s.parent IS NULL OR s.parent = ''))
+               OR (?2 != 'user' AND (s.parent = ?2 OR LOWER(COALESCE(p.name, '')) = LOWER(?2)))
+           )
+           AND (
+               ?3 IS NULL
+               OR INSTR(LOWER(COALESCE(s.title, '')), ?3) > 0
+               OR INSTR(LOWER(COALESCE(s.name, '')), ?3) > 0
+               OR INSTR(LOWER(COALESCE(s.cwd, '')), ?3) > 0
+               OR INSTR(LOWER(COALESCE(s.id, '')), ?3) > 0
+               OR INSTR(LOWER(COALESCE(s.parent, '')), ?3) > 0
+               OR INSTR(LOWER(COALESCE(p.name, '')), ?3) > 0
+               OR INSTR(LOWER(COALESCE(p.title, '')), ?3) > 0
+           )
+         ORDER BY s.updated_at DESC
+         LIMIT ?4",
+    )?;
+    let rows = stmt.query_map(params![cwd, creator, query_lower, limit], |r| {
+        r.get::<_, String>(0)
+    })?;
     let mut out = Vec::new();
     for r in rows {
         let raw = r?;
         match serde_json::from_str::<SessionInfo>(&raw) {
             Ok(i) => out.push(i),
             Err(e) => tracing::warn!("skipping corrupt session row: {e}"),
+        }
+    }
+    Ok(out)
+}
+
+fn infos(db: &Connection, ids: &[String]) -> DbResult<Vec<SessionInfo>> {
+    let mut stmt = db.prepare_cached("SELECT info FROM sessions WHERE id = ?1")?;
+    let mut out = Vec::new();
+    for id in ids {
+        let Some(raw) = stmt.query_row([id], |r| r.get::<_, String>(0)).optional()? else {
+            continue;
+        };
+        match serde_json::from_str::<SessionInfo>(&raw) {
+            Ok(i) => out.push(i),
+            Err(e) => tracing::warn!(session = %id, "skipping corrupt session row: {e}"),
         }
     }
     Ok(out)
@@ -600,8 +725,8 @@ fn import_json(db: &mut Connection, data_dir: &Path) -> DbResult<()> {
             model_explicit: p.model_explicit,
         };
         tx.execute(
-            "INSERT INTO sessions (id, info, cwd, title, name, created_at, updated_at, extra)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO sessions (id, info, cwd, title, name, created_at, updated_at, extra, parent)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 p.info.id,
                 serde_json::to_string(&p.info)?,
@@ -610,7 +735,8 @@ fn import_json(db: &mut Connection, data_dir: &Path) -> DbResult<()> {
                 p.info.name,
                 p.info.created_at,
                 p.info.updated_at,
-                serde_json::to_string(&extra)?
+                serde_json::to_string(&extra)?,
+                p.info.parent
             ],
         )?;
         for (seq, m) in p.messages.iter().enumerate() {
@@ -796,8 +922,8 @@ mod tests {
             all.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
             ["ses_b", "ses_abc"]
         );
-        assert_eq!(store.list_for(Some("/a".into()), None).len(), 1);
-        assert_eq!(store.list_for(None, Some(1)).len(), 1);
+        assert_eq!(store.list_for(Some("/a".into()), None, None, None).len(), 1);
+        assert_eq!(store.list_for(None, None, None, Some(1)).len(), 1);
         assert!(store.load("../etc").is_err());
         assert!(store.load("ses_nope").is_err());
         store.delete("ses_abc").unwrap();
@@ -852,6 +978,194 @@ mod tests {
         drop(store);
         let store = Store::new(dir.clone());
         assert_eq!(store.list().len(), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn migrates_v1_to_v2_and_backfills_parent() {
+        let dir = tmp();
+        let db_path = dir.join(DB_FILE);
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE sessions (
+                     id TEXT PRIMARY KEY,
+                     info TEXT NOT NULL,
+                     cwd TEXT,
+                     title TEXT,
+                     name TEXT,
+                     created_at INTEGER,
+                     updated_at INTEGER,
+                     extra TEXT
+                 );
+                 CREATE INDEX sessions_updated ON sessions(updated_at);
+                 CREATE INDEX sessions_cwd ON sessions(cwd, updated_at);
+                 CREATE TABLE messages (
+                     session_id TEXT NOT NULL,
+                     seq INTEGER NOT NULL,
+                     id TEXT NOT NULL,
+                     time INTEGER,
+                     data TEXT NOT NULL,
+                     PRIMARY KEY (session_id, seq)
+                 );
+                 PRAGMA user_version = 1;",
+            )
+            .unwrap();
+            let parent_info = info("ses_parent", "/p", 10);
+            let mut child_info = info("ses_child", "/p", 20);
+            child_info.parent = Some("ses_parent".into());
+            for inf in [&parent_info, &child_info] {
+                conn.execute(
+                    "INSERT INTO sessions (id, info, cwd, title, name, created_at, updated_at, extra)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![
+                        inf.id,
+                        serde_json::to_string(inf).unwrap(),
+                        inf.cwd,
+                        inf.title,
+                        inf.name,
+                        inf.created_at,
+                        inf.updated_at,
+                        "{}"
+                    ],
+                )
+                .unwrap();
+            }
+        }
+
+        let store = Store::new(dir.clone());
+        let user = store.list_for(None, Some("user".into()), None, None);
+        assert_eq!(
+            user.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
+            ["ses_parent"]
+        );
+        let children = store.list_for(None, Some("ses_parent".into()), None, None);
+        assert_eq!(
+            children.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
+            ["ses_child"]
+        );
+        store.close().unwrap();
+
+        let conn = Connection::open(&db_path).unwrap();
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        let parent_col: Option<String> = conn
+            .query_row(
+                "SELECT parent FROM sessions WHERE id = 'ses_child'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(parent_col.as_deref(), Some("ses_parent"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn filters_by_creator_and_query() {
+        let dir = tmp();
+        let store = Store::new(dir.clone());
+
+        let mut p1 = persisted("ses_p1", "/proj/a", 10, vec![msg("m1", "x")]);
+        p1.info.name = "BossAgent".into();
+        p1.info.title = "Main Orchestration".into();
+
+        let mut p2 = persisted("ses_p2", "/proj/b", 20, vec![msg("m2", "x")]);
+        p2.info.name = "OtherUser".into();
+        p2.info.title = "Docs Cleanup".into();
+        p2.info.parent = Some(String::new());
+
+        let mut c1 = persisted("ses_c1", "/proj/a", 30, vec![msg("m3", "x")]);
+        c1.info.name = "worker-alpha".into();
+        c1.info.title = "Fix Parser Bug".into();
+        c1.info.parent = Some("ses_p1".into());
+
+        let mut c2 = persisted("ses_c2", "/proj/b", 40, vec![msg("m4", "x")]);
+        c2.info.name = "worker-beta".into();
+        c2.info.title = "Write Tests".into();
+        c2.info.parent = Some("ses_p1".into());
+
+        let mut c3 = persisted("ses_c3", "/proj/a", 50, vec![msg("m5", "x")]);
+        c3.info.name = "helper".into();
+        c3.info.title = "Subtask".into();
+        c3.info.parent = Some("ses_p2".into());
+
+        for p in [p1, p2, c1, c2, c3] {
+            store.save(p);
+        }
+
+        let ids =
+            |items: Vec<SessionInfo>| -> Vec<String> { items.into_iter().map(|i| i.id).collect() };
+
+        assert_eq!(
+            ids(store.list_for(None, Some("  user ".into()), None, None)),
+            ["ses_p2", "ses_p1"]
+        );
+        assert_eq!(
+            ids(store.list_for(None, Some("ses_p1".into()), None, None)),
+            ["ses_c2", "ses_c1"]
+        );
+        assert_eq!(
+            ids(store.list_for(None, Some("bossagent".into()), None, None)),
+            ["ses_c2", "ses_c1"]
+        );
+        assert_eq!(
+            ids(store.list_for(None, Some("   ".into()), Some("  ".into()), None)).len(),
+            5
+        );
+
+        // Query across title, name, cwd, id, parent, parent.name, parent.title.
+        assert_eq!(
+            ids(store.list_for(None, None, Some("parser".into()), None)),
+            ["ses_c1"]
+        );
+        assert_eq!(
+            ids(store.list_for(None, None, Some("ALPHA".into()), None)),
+            ["ses_c1"]
+        );
+        assert_eq!(
+            ids(store.list_for(None, None, Some("/proj/b".into()), None)),
+            ["ses_c2", "ses_p2"]
+        );
+        assert_eq!(
+            ids(store.list_for(None, None, Some("ses_c3".into()), None)),
+            ["ses_c3"]
+        );
+        assert_eq!(
+            ids(store.list_for(None, None, Some("ses_p2".into()), None)),
+            ["ses_c3", "ses_p2"]
+        );
+        assert_eq!(
+            ids(store.list_for(None, None, Some("bossagent".into()), None)),
+            ["ses_c2", "ses_c1", "ses_p1"]
+        );
+        assert_eq!(
+            ids(store.list_for(None, None, Some("ORCHESTRATION".into()), None)),
+            ["ses_c2", "ses_c1", "ses_p1"]
+        );
+
+        // Combined cwd + creator + query + limit.
+        assert_eq!(
+            ids(store.list_for(
+                Some(" /proj/a ".into()),
+                Some("bossagent".into()),
+                Some("parser".into()),
+                None
+            )),
+            ["ses_c1"]
+        );
+        assert_eq!(
+            ids(store.list_for(
+                None,
+                Some("bossagent".into()),
+                Some("orchestration".into()),
+                Some(1)
+            )),
+            ["ses_c2"]
+        );
+
+        let _ = store.close();
         let _ = std::fs::remove_dir_all(dir);
     }
 }

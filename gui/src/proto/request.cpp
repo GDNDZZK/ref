@@ -89,11 +89,19 @@ QJsonObject listSessions()
 	return op(u"list_sessions"_s);
 }
 
-QJsonObject listHistory(const QString& cwd, int limit)
+QJsonObject listHistory(const QString& cwd, int limit, const QString& creator, const QString& query)
 {
 	QJsonObject json = op(u"list_history"_s);
 	json.insert(u"cwd"_s, cwd);
 	json.insert(u"limit"_s, limit);
+	if(!creator.isEmpty())
+	{
+		json.insert(u"creator"_s, creator);
+	}
+	if(!query.isEmpty())
+	{
+		json.insert(u"query"_s, query);
+	}
 	return json;
 }
 

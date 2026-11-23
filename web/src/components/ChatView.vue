@@ -23,13 +23,16 @@ import {
   watch,
 } from 'vue'
 import { chatScrollKey } from '../composables/chatScroll.ts'
-import type { Block } from '../model/blocks.ts'
+import { imageCaption, imageLightboxKey } from '../composables/imageLightboxContext.ts'
+import type { Block, ImageRef } from '../model/blocks.ts'
 import type { ChatSession } from '../model/chatSession.ts'
 import { findLeaving, prependedCount, withLeaving } from '../model/rowDiff.ts'
 import type { LeavingRow } from '../model/rowDiff.ts'
 import { scrollArrived, scrollStep } from '../motion/chase.ts'
 import { useFrame } from '../motion/useFrame.ts'
 import BlockView from './BlockView.vue'
+import ImageLightbox from './ImageLightbox.vue'
+import type { LightboxItem } from './ImageLightbox.vue'
 import OlderMessages from './OlderMessages.vue'
 import { OLDER_TRIGGER_DISTANCE } from './toolLimits.ts'
 import { Key } from '../keys.ts'
@@ -250,6 +253,60 @@ provide(chatScrollKey, {
   },
 })
 
+// --- Session-wide image lightbox navigation.
+const sessionImages = computed<ImageRef[]>(() => {
+  const list: ImageRef[] = []
+  for (const block of blocks.value) {
+    if (block.kind !== 'user' && block.kind !== 'tool') continue
+    for (const image of block.images) {
+      if (image.id !== null) list.push(image)
+    }
+  }
+  return list
+})
+const resolvedUrls = ref<Record<string, string>>({})
+const lightboxOpen = ref(false)
+const lightboxIndex = ref(0)
+const everOpenedLightbox = ref(false)
+const lightboxItems = computed<LightboxItem[]>(() =>
+  sessionImages.value.map((image) => ({
+    url: (image.id ? resolvedUrls.value[image.id] : undefined) ?? '',
+    caption: imageCaption(image),
+  })),
+)
+
+function ensureImageUrl(imageId: string | null | undefined): void {
+  if (!imageId || resolvedUrls.value[imageId] || typeof props.session.imageUrl !== 'function') return
+  props.session.imageUrl(imageId).then(
+    (url) => {
+      resolvedUrls.value = { ...resolvedUrls.value, [imageId]: url }
+    },
+    () => undefined,
+  )
+}
+
+watch([lightboxOpen, lightboxIndex, sessionImages], ([open, index, list]) => {
+  if (!open || list.length === 0) return
+  const clamped = Math.max(0, Math.min(index, list.length - 1))
+  ensureImageUrl(list[clamped]?.id)
+  ensureImageUrl(list[clamped - 1]?.id)
+  ensureImageUrl(list[clamped + 1]?.id)
+})
+
+provide(imageLightboxKey, {
+  open(target: ImageRef) {
+    const list = sessionImages.value
+    let index = list.indexOf(target)
+    if (index < 0 && target.id !== null) {
+      index = list.findIndex((candidate) => candidate.id === target.id)
+    }
+    if (index < 0) return
+    lightboxIndex.value = index
+    everOpenedLightbox.value = true
+    lightboxOpen.value = true
+    ensureImageUrl(list[index]?.id)
+  },
+})
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)
   if (rows.value) sizeObserver.observe(rows.value)
@@ -291,6 +348,13 @@ onBeforeUnmount(() => {
       />
     </div>
     <div class="footer" />
+    <ImageLightbox
+      v-if="everOpenedLightbox"
+      v-model:index="lightboxIndex"
+      :open="lightboxOpen"
+      :images="lightboxItems"
+      @close="lightboxOpen = false"
+    />
   </div>
 </template>
 

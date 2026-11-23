@@ -681,6 +681,8 @@ async fn the_old_sessions_are_in_the_history() {
     let req = Request::ListHistory {
         cwd: None,
         limit: None,
+        creator: None,
+        query: None,
     };
     let res = api::handle(&rig.hub, &rig.conn, req).await.unwrap();
     let stored = res["sessions"].as_array().unwrap();

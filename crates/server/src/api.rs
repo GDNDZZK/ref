@@ -56,7 +56,8 @@ impl From<&str> for ApiError {
 
 /// Sessions `ListHistory` returns when the client sets no limit.
 const HISTORY_DEFAULT_LIMIT: usize = 100;
-
+/// `ListHistory.creator` value meaning "sessions without a creator (user-created)".
+const CREATOR_USER: &str = "user";
 /// Files `ListFiles` returns by default, and at most.
 const FILES_DEFAULT_LIMIT: usize = 50;
 const FILES_MAX_LIMIT: usize = 500;
@@ -171,7 +172,12 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> Reply {
             let cfg = crate::ops::load_config(hub, &cwd).await?;
             Ok(json!({ "servers": hub.mcp.status(&cfg) }))
         }
-        Request::ListHistory { cwd, limit } => list_history(hub, cwd, limit).await,
+        Request::ListHistory {
+            cwd,
+            limit,
+            creator,
+            query,
+        } => list_history(hub, cwd, creator, query, limit).await,
         Request::CreateSession {
             cwd,
             agent,
@@ -417,15 +423,27 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> Reply {
     }
 }
 
-/// Persisted and live sessions, newest first.
-async fn list_history(hub: &Arc<Hub>, cwd: Option<String>, limit: Option<usize>) -> Reply {
+/// Persisted and live sessions matching optional `cwd`, `creator`, and `query`, newest first.
+async fn list_history(
+    hub: &Arc<Hub>,
+    cwd: Option<String>,
+    creator: Option<String>,
+    query: Option<String>,
+    limit: Option<usize>,
+) -> Reply {
     let store = hub.store.clone();
-    let cwd = cwd.filter(|c| !c.is_empty());
-    let (c2, limit) = (cwd.clone(), limit.unwrap_or(HISTORY_DEFAULT_LIMIT));
-    let mut list = tokio::task::spawn_blocking(move || store.list_for(c2, Some(limit)))
-        .await
-        .map_err(|e| e.to_string())?;
+    let cwd = crate::store::normalize_filter(cwd);
+    let creator = crate::store::normalize_filter(creator);
+    let query = crate::store::normalize_filter(query);
+    let limit = limit.unwrap_or(HISTORY_DEFAULT_LIMIT);
     let live: Vec<SessionInfo> = hub.infos();
+    let fetch_limit = limit.saturating_add(live.len());
+    let (cwd_q, creator_q, query_q) = (cwd.clone(), creator.clone(), query.clone());
+    let mut list = tokio::task::spawn_blocking(move || {
+        store.list_for(cwd_q, creator_q, query_q, Some(fetch_limit))
+    })
+    .await
+    .map_err(|e| e.to_string())?;
     for i in &mut list {
         if let Some(l) = live.iter().find(|l| l.id == i.id) {
             *i = l.clone();
@@ -436,12 +454,89 @@ async fn list_history(hub: &Arc<Hub>, cwd: Option<String>, limit: Option<usize>)
             list.push(l);
         }
     }
-    if let Some(c) = cwd {
-        list.retain(|i| i.cwd == c);
+    if cwd.is_some() || creator.is_some() || query.is_some() {
+        let mut by_id: std::collections::HashMap<String, SessionInfo> =
+            list.iter().map(|s| (s.id.clone(), s.clone())).collect();
+        if creator.is_some() || query.is_some() {
+            let missing_parents: Vec<String> = list
+                .iter()
+                .filter_map(|s| s.parent.as_deref())
+                .filter(|pid| !pid.is_empty() && !by_id.contains_key(*pid))
+                .map(str::to_string)
+                .collect::<std::collections::HashSet<_>>()
+                .into_iter()
+                .collect();
+            if !missing_parents.is_empty() {
+                let store = hub.store.clone();
+                let parents = tokio::task::spawn_blocking(move || store.infos(missing_parents))
+                    .await
+                    .map_err(|e| e.to_string())?;
+                for p in parents {
+                    by_id.entry(p.id.clone()).or_insert(p);
+                }
+            }
+        }
+        let creator_lower = creator.as_deref().map(str::to_lowercase);
+        let query_lower = query.as_deref().map(str::to_lowercase);
+        list.retain(|s| {
+            matches_history_filter(
+                s,
+                &by_id,
+                cwd.as_deref(),
+                creator.as_deref(),
+                creator_lower.as_deref(),
+                query_lower.as_deref(),
+            )
+        });
     }
     list.sort_by_key(|i| std::cmp::Reverse(i.updated_at));
     list.truncate(limit);
     Ok(json!({ "sessions": list }))
+}
+
+fn matches_history_filter(
+    s: &SessionInfo,
+    by_id: &std::collections::HashMap<String, SessionInfo>,
+    cwd: Option<&str>,
+    creator: Option<&str>,
+    creator_lower: Option<&str>,
+    query_lower: Option<&str>,
+) -> bool {
+    if let Some(c) = cwd
+        && s.cwd != c
+    {
+        return false;
+    }
+    let parent_id = s.parent.as_deref().filter(|p| !p.is_empty());
+    let parent = parent_id.and_then(|pid| by_id.get(pid));
+    if let Some(cr) = creator {
+        if cr == CREATOR_USER {
+            if parent_id.is_some() {
+                return false;
+            }
+        } else {
+            let cr_lower = creator_lower.unwrap_or(cr);
+            let matched = parent_id.is_some_and(|pid| {
+                pid == cr || parent.is_some_and(|p| p.name.to_lowercase() == cr_lower)
+            });
+            if !matched {
+                return false;
+            }
+        }
+    }
+    if let Some(q) = query_lower {
+        let contains = |hay: &str| hay.to_lowercase().contains(q);
+        let hit = contains(&s.title)
+            || contains(&s.name)
+            || contains(&s.cwd)
+            || contains(&s.id)
+            || parent_id.is_some_and(contains)
+            || parent.is_some_and(|p| contains(&p.name) || contains(&p.title));
+        if !hit {
+            return false;
+        }
+    }
+    true
 }
 
 /// Attaches the connection to a session (loading it if needed) and returns its snapshot.

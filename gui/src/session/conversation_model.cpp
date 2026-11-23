@@ -1059,4 +1059,17 @@ void ConversationModel::notifyOpensTurn(qsizetype row)
 	emit dataChanged(changed, changed, {OpensTurnRole});
 }
 
+QVariantList ConversationModel::allImages() const
+{
+	QVariantList list;
+	for(const Block& block : m_rows)
+	{
+		if(block.kind == Block::Kind::Image || block.kind == Block::Kind::Tool)
+		{
+			list.append(imagesToVariant(block.images));
+		}
+	}
+	return list;
+}
+
 } // namespace refgui::session

@@ -277,7 +277,7 @@ fn dialog_key(app: &mut App, k: KeyEvent) {
                 if d.kind == Kind::Cd {
                     app.cd_dialog_tab();
                 } else if d.asking_arg.is_none() {
-                    d.cycle_creator_filter();
+                    app.cycle_dialog_creator_filter();
                 }
             }
             KeyCode::Backspace
@@ -308,15 +308,23 @@ fn dialog_key(app: &mut App, k: KeyEvent) {
                     d.filter.clear();
                     if d.kind == Kind::Cd {
                         app.on_cd_filter_edited();
+                    } else if d.kind == Kind::Sessions {
+                        app.on_sessions_filter_edited(true);
                     } else {
                         d.refilter();
                     }
                 }
             }
             _ => {
+                let is_cd = d.kind == Kind::Cd;
+                let is_sessions = d.kind == Kind::Sessions;
+                let before = is_sessions.then(|| d.filter.text.clone());
                 if edit_key(&mut d.filter, &k, false) {
-                    if d.kind == Kind::Cd {
+                    if is_cd {
                         app.on_cd_filter_edited();
+                    } else if is_sessions {
+                        let changed = before.as_deref() != Some(d.filter.text.as_str());
+                        app.on_sessions_filter_edited(changed);
                     } else {
                         d.refilter();
                     }
@@ -846,6 +854,8 @@ fn paste(app: &mut App, s: String) {
         d.filter.insert(&crate::text::one_line(&s));
         if d.kind == Kind::Cd {
             app.on_cd_filter_edited();
+        } else if d.kind == Kind::Sessions {
+            app.on_sessions_filter_edited(true);
         } else {
             d.refilter();
         }

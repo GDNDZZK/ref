@@ -14,22 +14,30 @@ Rectangle {
 	readonly property real removingOpacity: 0.5
 
 	required property var model
-	// Height of the visible rows; follows the rows while they come and go.
-	readonly property real rowsHeight: Math.min(list.contentHeight, queueMaxRows * queueRowHeight)
+	readonly property real targetHeight: Math.min(list.count, queueMaxRows) * queueRowHeight
+	property bool ready: false
 
 	signal withdrawRequested(int row)
 
-	implicitHeight: rowsHeight
+	Component.onCompleted: ready = true
+
+	implicitHeight: targetHeight
 	height: implicitHeight
-	visible: height > 0
+	visible: height > 0 || list.count > 0
 	radius: Theme.radius
 	color: Theme.surface
 	border.color: Theme.border
 	clip: true
 
+	Behavior on implicitHeight {
+		enabled: strip.ready
+		NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
+	}
+
 	ListView {
 		id: list
-		anchors.fill: parent
+		width: parent.width
+		height: Math.max(strip.queueRowHeight, strip.height)
 		model: strip.model
 		interactive: contentHeight > height
 		boundsBehavior: Flickable.StopAtBounds

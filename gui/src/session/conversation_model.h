@@ -143,7 +143,8 @@ public:
 	std::optional<QString> partText(const QString& messageId, qsizetype index) const;
 	// Number of parts of a message, -1 when it is unknown.
 	qsizetype partCount(const QString& messageId) const;
-
+	// All images across the conversation in display order, each as {id, mime, size, name}.
+	QVariantList allImages() const;
 signals:
 	void toolSummaryChanged();
 

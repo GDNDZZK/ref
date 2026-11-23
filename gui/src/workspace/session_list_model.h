@@ -22,7 +22,7 @@ class SessionListModel : public QAbstractListModel
 	Q_PROPERTY(QString filter READ filter WRITE setFilter NOTIFY filterChanged)
 	Q_PROPERTY(CreatorFilter creatorFilter READ creatorFilter WRITE setCreatorFilter NOTIFY creatorFilterChanged)
 	Q_PROPERTY(QString creatorId READ creatorId WRITE setCreatorId NOTIFY creatorIdChanged)
-
+	Q_PROPERTY(QString cwdFilter READ cwdFilter WRITE setCwdFilter NOTIFY cwdFilterChanged)
 public:
 	enum class CreatorFilter
 	{
@@ -75,6 +75,10 @@ public:
 	CreatorFilter creatorFilter() const { return m_creatorFilter; }
 	void setCreatorId(const QString& id);
 	const QString& creatorId() const { return m_creatorId; }
+	void setCwdFilter(const QString& cwd);
+	const QString& cwdFilter() const { return m_cwdFilter; }
+	void setKnownSessions(const QList<proto::SessionInfo>& sessions);
+	QString displayName(const QString& sessionId) const;
 	void setCurrentId(const QString& id);
 	void setTileIds(const QStringList& ids);
 	void setLiveOrder(const QStringList& ids);
@@ -98,6 +102,8 @@ signals:
 	void filterChanged();
 	void creatorFilterChanged();
 	void creatorIdChanged();
+	void cwdFilterChanged();
+
 private:
 	// What the views show of a session; rows are compared to see whether one changed.
 	struct Row
@@ -130,6 +136,7 @@ private:
 		bool operator==(const Row&) const = default;
 	};
 
+	const proto::SessionInfo* findKnown(const QString& sessionId) const;
 	Row toRow(const proto::SessionInfo& info) const;
 	QVariant roleData(const Row& row, int role) const;
 	bool matchesFilter(const Row& row) const;
@@ -144,10 +151,12 @@ private:
 	QString m_filter;
 	CreatorFilter m_creatorFilter = CreatorFilter::All;
 	QString m_creatorId;
+	QString m_cwdFilter;
 	QString m_currentId;
 	QStringList m_tileIds;
 	QHash<QString, int> m_liveOrder;
 	QHash<QString, proto::SessionInfo> m_all;
+	QHash<QString, proto::SessionInfo> m_known;
 	QList<Row> m_rows; // the listed ones, in order
 };
 

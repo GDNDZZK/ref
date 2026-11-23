@@ -7539,3 +7539,143 @@ fn typing_after_attach_image_does_not_coalesce_with_attachment() {
     press_with(&mut app, KeyCode::Char('z'), KeyModifiers::CONTROL);
     assert!(app.editor.is_empty());
 }
+
+#[test]
+fn sessions_dialog_requests_filtered_history_without_clobbering_unfiltered_cache() {
+    let (mut app, mut rx) = test_app_with_requests(false);
+    let mut main = bg_session("ses_main", "main", SessionStatus::Idle, 1);
+    main.updated_at = 400;
+    let mut w1 = bg_session("ses_w1", "worker-1", SessionStatus::Idle, 0);
+    w1.parent = Some("ses_main".into());
+    w1.updated_at = 300;
+    let mut h_recent = bg_session("ses_hr", "recent-hist", SessionStatus::Idle, 0);
+    h_recent.live = false;
+    h_recent.updated_at = 200;
+    let mut h_deep = bg_session("ses_hd", "deep-child", SessionStatus::Idle, 0);
+    h_deep.live = false;
+    h_deep.parent = Some("ses_main".into());
+    h_deep.title = "Deep history match".into();
+    h_deep.updated_at = 50;
+
+    app.current = Some("ses_main".into());
+    app.live = vec![main, w1];
+    app.history_list = vec![h_recent.clone()];
+    let _ = drain_requests(&mut rx);
+
+    // Opening dialog sends unfiltered ListHistory.
+    app.open_sessions();
+    let reqs = drain_requests(&mut rx);
+    assert!(reqs.iter().any(|f| matches!(
+        &f.req,
+        Request::ListHistory {
+            cwd: None,
+            creator: None,
+            query: None,
+            limit: Some(_),
+        }
+    )));
+
+    // Tab 1 -> UserCreated sends creator = Some("user").
+    press(&mut app, KeyCode::Tab);
+    let reqs = drain_requests(&mut rx);
+    assert!(reqs.iter().any(|f| matches!(
+        &f.req,
+        Request::ListHistory {
+            creator: Some(c),
+            query: None,
+            ..
+        } if c == "user"
+    )));
+
+    // Tab 2 -> ByCreator selects worker-1's creator (ses_main) or cycles back if none selected;
+    // select worker-1 first so Tab 2 picks ses_main.
+    press(&mut app, KeyCode::Tab); // back to All
+    let _ = drain_requests(&mut rx);
+    if let Some(crate::ui::dialog::Dialog::List(d)) = app.dialog.as_mut() {
+        d.select_key("live:ses_w1");
+    }
+    press(&mut app, KeyCode::Tab); // UserCreated (remembers ses_main)
+    let _ = drain_requests(&mut rx);
+    press(&mut app, KeyCode::Tab); // ByCreator (ses_main)
+    let by_req = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(f.req, Request::ListHistory { .. }))
+        .expect("filtered list_history sent");
+    assert!(matches!(
+        &by_req.req,
+        Request::ListHistory {
+            creator: Some(c),
+            query: None,
+            ..
+        } if c == "ses_main"
+    ));
+
+    // Server returns a deep match outside `app.history_list`: dialog shows it, while
+    // `app.history_list` stays intact for unfiltered fallback / autocomplete.
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: by_req.id.unwrap(),
+        ok: true,
+        result: json!({ "sessions": [h_deep] }),
+        error: None,
+        code: None,
+    }));
+    let (_, s_filtered) = render(&mut app, 120, 34);
+    assert!(s_filtered.contains("Deep history match"), "{s_filtered}");
+    assert_eq!(app.history_list.len(), 1);
+    assert_eq!(app.history_list[0].id, h_recent.id);
+
+    // Tab back to All re-fetches full history and immediately shows `recent-hist` from cache.
+    press(&mut app, KeyCode::Tab);
+    let reset_reqs = drain_requests(&mut rx);
+    assert!(reset_reqs.iter().any(|f| matches!(
+        &f.req,
+        Request::ListHistory {
+            creator: None,
+            query: None,
+            ..
+        }
+    )));
+    let (_, s_all) = render(&mut app, 120, 34);
+    assert!(s_all.contains("recent-hist"), "{s_all}");
+
+    // Typing a query schedules debounced ListHistory with `query = Some(...)`.
+    type_text(&mut app, "deep");
+    assert!(app.sessions_due.is_some());
+    assert!(
+        !drain_requests(&mut rx)
+            .iter()
+            .any(|f| matches!(f.req, Request::ListHistory { .. }))
+    );
+    app.sessions_due = Some(std::time::Instant::now() - std::time::Duration::from_millis(1));
+    app.housekeeping();
+    let q_req = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(f.req, Request::ListHistory { .. }))
+        .expect("debounced query sent");
+    assert!(matches!(
+        &q_req.req,
+        Request::ListHistory {
+            creator: None,
+            query: Some(q),
+            ..
+        } if q == "deep"
+    ));
+
+    // Closing the dialog via Esc before the response arrives prevents stale overwrite;
+    // reopening with `open_sessions_filtered` sends the initial query immediately.
+    press(&mut app, KeyCode::Esc);
+    assert!(app.dialog.is_none());
+    app.open_sessions_filtered(Some("parser"));
+    let open_q_req = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(f.req, Request::ListHistory { .. }))
+        .expect("open_sessions_filtered sends list_history");
+    assert!(matches!(
+        &open_q_req.req,
+        Request::ListHistory {
+            creator: None,
+            query: Some(q),
+            ..
+        } if q == "parser"
+    ));
+}

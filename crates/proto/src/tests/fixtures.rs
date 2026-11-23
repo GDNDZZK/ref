@@ -83,6 +83,8 @@ fn requests() -> Samples<ClientFrame> {
                 Request::ListHistory {
                     cwd: Some(PROJECT_DIR.into()),
                     limit: Some(50),
+                    creator: None,
+                    query: None,
                 },
             ),
         ),
@@ -965,4 +967,45 @@ fn every_variant_has_a_fixture() {
     check_variants(PART_DIR, Some("type"), declared_variants::<Part>("type"));
     check_variants(TOOL_STATE_DIR, None, declared_literals::<ToolState>());
     check_variants(DELTA_DIR, Some("type"), declared_variants::<Delta>("type"));
+}
+
+#[test]
+fn list_history_filter_roundtrip() {
+    let legacy = json!({
+        "id": 4,
+        "op": "list_history",
+        "cwd": "/home/user/project",
+        "limit": 50
+    });
+    let parsed_legacy: ClientFrame = serde_json::from_value(legacy.clone()).expect("legacy parses");
+    assert_eq!(
+        serde_json::to_value(&parsed_legacy).expect("legacy serializes"),
+        legacy
+    );
+
+    let filtered = frame(
+        44,
+        Request::ListHistory {
+            cwd: Some(PROJECT_DIR.into()),
+            limit: Some(25),
+            creator: Some("user".into()),
+            query: Some("parser".into()),
+        },
+    );
+    let encoded = serde_json::to_string(&filtered).expect("filtered serializes");
+    let decoded: ClientFrame = serde_json::from_str(&encoded).expect("filtered parses");
+    match decoded.req {
+        Request::ListHistory {
+            cwd,
+            limit,
+            creator,
+            query,
+        } => {
+            assert_eq!(cwd.as_deref(), Some(PROJECT_DIR));
+            assert_eq!(limit, Some(25));
+            assert_eq!(creator.as_deref(), Some("user"));
+            assert_eq!(query.as_deref(), Some("parser"));
+        }
+        other => panic!("not list_history: {other:?}"),
+    }
 }

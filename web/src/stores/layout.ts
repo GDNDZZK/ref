@@ -4,6 +4,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { clamp } from '../clamp.ts'
+import type { HistoryCreatorFilter } from '../settings/model.ts'
 import { metrics } from '../theme/generated/theme.ts'
 import { useSettingsStore } from './settings.ts'
 
@@ -36,6 +37,8 @@ export const useLayoutStore = defineStore('layout', () => {
   const sidebarHistoryExpanded = computed(() => settings.settings.sidebarHistoryExpanded)
   const sidebarTodoHeight = computed(() => settings.settings.sidebarTodoHeight)
   const sidebarRunningHeight = computed(() => settings.settings.sidebarRunningHeight)
+  const sidebarHistoryCreatorFilter = computed(() => settings.settings.sidebarHistoryCreatorFilter)
+  const sidebarHistoryCurrentDir = computed(() => settings.settings.sidebarHistoryCurrentDir)
   function clampWidth(value: number): number {
     return clamp(Math.round(value), metrics.sidebarMinWidth, maxSidebarWidth.value)
   }
@@ -91,6 +94,21 @@ export const useLayoutStore = defineStore('layout', () => {
   function toggleSidebarHistory(): void {
     settings.update((draft) => (draft.sidebarHistoryExpanded = !draft.sidebarHistoryExpanded))
   }
+
+  function setSidebarHistoryCreatorFilter(value: HistoryCreatorFilter): void {
+    if (value === settings.settings.sidebarHistoryCreatorFilter) return
+    settings.update((draft) => (draft.sidebarHistoryCreatorFilter = value))
+  }
+
+  function setSidebarHistoryCurrentDir(value: boolean): void {
+    if (value === settings.settings.sidebarHistoryCurrentDir) return
+    settings.update((draft) => (draft.sidebarHistoryCurrentDir = value))
+  }
+
+  function toggleSidebarHistoryCurrentDir(): void {
+    setSidebarHistoryCurrentDir(!settings.settings.sidebarHistoryCurrentDir)
+  }
+
   // After choosing something in the drawer, so that the content is visible again.
   function closeDrawer(): void {
     drawerOpen.value = false
@@ -105,6 +123,8 @@ export const useLayoutStore = defineStore('layout', () => {
     sidebarHistoryExpanded,
     sidebarTodoHeight,
     sidebarRunningHeight,
+    sidebarHistoryCreatorFilter,
+    sidebarHistoryCurrentDir,
     setSidebarWidth,
     resetSidebarWidth,
     setSidebarTodoHeight,
@@ -115,6 +135,9 @@ export const useLayoutStore = defineStore('layout', () => {
     toggleSidebarTodo,
     toggleSidebarRunning,
     toggleSidebarHistory,
+    setSidebarHistoryCreatorFilter,
+    setSidebarHistoryCurrentDir,
+    toggleSidebarHistoryCurrentDir,
     closeDrawer,
   }
 })

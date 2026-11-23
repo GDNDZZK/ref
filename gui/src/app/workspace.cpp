@@ -5,10 +5,10 @@
 
 #include <QJSEngine>
 #include <QLoggingCategory>
+#include <QScopedValueRollback>
 
 #include <algorithm>
 #include <utility>
-
 using refgui::client::Result;
 using namespace Qt::StringLiterals;
 
@@ -39,6 +39,7 @@ Workspace::Workspace(refgui::cli::LaunchOptions options, QString settingsPath, Q
 	connect(&m_connection, &refgui::workspace::Connection::configChangedReceived, this, &Workspace::onConfigChanged);
 	connect(&m_directory, &refgui::workspace::SessionDirectory::liveChanged, this, &Workspace::onLiveChanged);
 	connect(&m_directory, &refgui::workspace::SessionDirectory::historyLoadedChanged, this, &Workspace::historyLoadedChanged);
+	connect(&m_directory, &refgui::workspace::SessionDirectory::historyUpdated, this, &Workspace::updateHistoryCreatorLabel);
 	connect(&m_directory, &refgui::workspace::SessionDirectory::failed, this, [this](const QString& reason) { toast(refgui::workspace::ToastLevel::Error, reason); });
 	connect(&m_config, &refgui::workspace::BackendConfig::changed, this, [this] {
 		m_commands.setCustomCommands(m_config.config().commands);
@@ -58,8 +59,30 @@ Workspace::Workspace(refgui::cli::LaunchOptions options, QString settingsPath, Q
 	});
 	m_directory.setLiveOrder(m_settings.sidebarRunningOrder());
 
+	m_historyCreatorFilter = m_settings.sidebarHistoryCreatorFilter();
+	connect(&m_settings, &refgui::workspace::Settings::sidebarHistoryCreatorFilterChanged, this, [this] {
+		if(m_updatingHistoryFilter)
+		{
+			return;
+		}
+		m_historyCreatorFilter = m_settings.sidebarHistoryCreatorFilter();
+		m_historyCreatorId.clear();
+		m_lastHistoryCreatorLabel.clear();
+		applyHistoryFilter(true);
+		emit historyFilterChanged();
+	});
+	connect(&m_settings, &refgui::workspace::Settings::sidebarHistoryCurrentDirChanged, this, [this] {
+		if(m_updatingHistoryFilter)
+		{
+			return;
+		}
+		applyHistoryFilter(true);
+		emit historyFilterChanged();
+	});
+
 	m_effectiveCwd = m_cwd;
 	m_config.setCwd(m_effectiveCwd);
+	applyHistoryFilter(false);
 	registerCommands();
 	m_connection.start();
 }
@@ -449,8 +472,104 @@ void Workspace::syncConfigCwd()
 	m_effectiveCwd = next;
 	emit effectiveCwdChanged();
 	m_config.setCwd(m_effectiveCwd);
+	if(m_settings.sidebarHistoryCurrentDir())
+	{
+		applyHistoryFilter(true);
+	}
 }
 
+QString Workspace::historyCreatorLabel() const
+{
+	return m_historyCreatorId.isEmpty() ? QString() : m_directory.sessionLabel(m_historyCreatorId);
+}
+
+void Workspace::setHistoryFilter(const QString& creatorFilter, bool currentDir, const QString& creatorId)
+{
+	QString nextMode = refgui::workspace::Settings::HistoryCreatorAll;
+	QString nextCreatorId;
+	if(creatorFilter == u"user"_s)
+	{
+		nextMode = refgui::workspace::Settings::HistoryCreatorUser;
+	}
+	else if(creatorFilter == u"creator"_s && !creatorId.isEmpty())
+	{
+		nextMode = u"creator"_s;
+		nextCreatorId = creatorId;
+	}
+
+	const bool changed = nextMode != m_historyCreatorFilter
+	                     || nextCreatorId != m_historyCreatorId
+	                     || currentDir != m_settings.sidebarHistoryCurrentDir();
+	m_historyCreatorFilter = nextMode;
+	m_historyCreatorId = nextCreatorId;
+	m_lastHistoryCreatorLabel = historyCreatorLabel();
+
+	{
+		const QScopedValueRollback guard(m_updatingHistoryFilter, true);
+		if(nextMode == refgui::workspace::Settings::HistoryCreatorAll || nextMode == refgui::workspace::Settings::HistoryCreatorUser)
+		{
+			m_settings.setSidebarHistoryCreatorFilter(nextMode);
+		}
+		m_settings.setSidebarHistoryCurrentDir(currentDir);
+	}
+
+	applyHistoryFilter(true);
+	if(changed)
+	{
+		emit historyFilterChanged();
+	}
+}
+
+void Workspace::setHistorySearch(const QString& query)
+{
+	const QString trimmed = query.trimmed();
+	m_directory.setHistoryQuery(trimmed);
+	if(trimmed != m_historySearch)
+	{
+		m_historySearch = trimmed;
+		emit historySearchChanged();
+	}
+}
+
+void Workspace::filterHistoryByCreator(const QString& sessionId)
+{
+	if(sessionId.isEmpty())
+	{
+		return;
+	}
+	m_settings.setSidebarHistoryExpanded(true);
+	setHistoryFilter(u"creator"_s, m_settings.sidebarHistoryCurrentDir(), sessionId);
+}
+
+void Workspace::applyHistoryFilter(bool refreshNow)
+{
+	using CreatorFilter = refgui::workspace::SessionListModel::CreatorFilter;
+	CreatorFilter filter = CreatorFilter::All;
+	if(m_historyCreatorFilter == refgui::workspace::Settings::HistoryCreatorUser)
+	{
+		filter = CreatorFilter::UserCreated;
+	}
+	else if(m_historyCreatorFilter == u"creator"_s && !m_historyCreatorId.isEmpty())
+	{
+		filter = CreatorFilter::ByCreator;
+	}
+	const QString cwd = m_settings.sidebarHistoryCurrentDir() ? m_effectiveCwd : QString();
+	m_directory.setHistoryFilter(cwd, filter, m_historyCreatorId, refreshNow);
+}
+
+void Workspace::updateHistoryCreatorLabel()
+{
+	if(m_historyCreatorId.isEmpty())
+	{
+		return;
+	}
+	const QString label = historyCreatorLabel();
+	if(label != m_lastHistoryCreatorLabel)
+	{
+		m_lastHistoryCreatorLabel = label;
+		emit historyFilterChanged();
+	}
+}
 void Workspace::setCurrent(ChatSession* session)
 {
 	m_current = session;

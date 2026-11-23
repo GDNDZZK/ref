@@ -82,6 +82,7 @@ private slots:
 	void connectionKnowsWhetherTheBackendIsLocal();
 	void configLoadsAgentsModelsAndMcp();
 	void liveOrderSortsRunningSessionsAndPlacesNewSessionsFirst();
+	void historyFiltersCwdResolvesLiveCreatorsDebouncesAndDropsStale();
 };
 
 void TstSessionList::sortsLiveByCreationAndHistoryByUpdate()
@@ -542,6 +543,74 @@ void TstSessionList::liveOrderSortsRunningSessionsAndPlacesNewSessionsFirst()
 
 	model.setLiveOrder({});
 	QCOMPARE(ids(model), (QStringList{u"e"_s, u"d"_s, u"c"_s, u"b"_s, u"a"_s, u"old"_s}));
+}
+
+void TstSessionList::historyFiltersCwdResolvesLiveCreatorsDebouncesAndDropsStale()
+{
+	SessionListModel model;
+	proto::SessionInfo liveCreator = session(u"ses_live_parent"_s, 10);
+	liveCreator.name = u"Planner"_s;
+	proto::SessionInfo childA = stored(u"ses_child_a"_s, 2, 20);
+	childA.cwd = u"/work/a"_s;
+	childA.parent = u"ses_live_parent"_s;
+	proto::SessionInfo childB = stored(u"ses_child_b"_s, 1, 10);
+	childB.cwd = u"/work/b"_s;
+	childB.parent = u"ses_live_parent"_s;
+	model.setKnownSessions({liveCreator});
+	model.setSessions({childA, childB});
+	QCOMPARE(model.get(u"ses_child_a"_s).value(u"creatorName"_s).toString(), u"Planner"_s);
+	model.setCwdFilter(u"/work/a"_s);
+	QCOMPARE(ids(model), (QStringList{u"ses_child_a"_s}));
+	model.setCwdFilter({});
+	QCOMPARE(ids(model), (QStringList{u"ses_child_a"_s, u"ses_child_b"_s}));
+
+	FakeBackend fake;
+	QList<QJsonObject> historyRequests;
+	QList<QJsonObject> heldHistoryRequests;
+	bool holdHistory = false;
+	fake.onRequest = [&](const QJsonObject& request) {
+		const QString op = request.value(u"op"_s).toString();
+		if(op == u"list_sessions"_s)
+		{
+			QJsonObject parentJson = sessionInfoJson(u"ses_live_parent"_s, {.name = u"Planner"_s, .createdAt = 10, .live = true});
+			fake.respond(request, {{u"sessions"_s, QJsonArray{parentJson}}});
+		}
+		else if(op == u"list_history"_s)
+		{
+			historyRequests.append(request);
+			if(holdHistory)
+			{
+				heldHistoryRequests.append(request);
+				return;
+			}
+			QJsonObject histChild = sessionInfoJson(u"ses_hist_child"_s, {.title = u"Child task"_s, .cwd = u"/work/a"_s, .createdAt = 5, .live = false, .parent = u"ses_live_parent"_s});
+			fake.respond(request, {{u"sessions"_s, QJsonArray{histChild}}});
+		}
+	};
+	workspace::Connection connection(Backend::Source(Backend::Mode::Remote{{fake.url(), u"token"_s}}), u"/work/a"_s);
+	Backend& backend = connection.backend();
+	SessionDirectory directory(connection);
+	backend.start();
+	QTRY_COMPARE(directory.history().count(), 1);
+	QCOMPARE(directory.history().data(directory.history().index(0), SessionListModel::CreatorNameRole).toString(), u"Planner"_s);
+
+	// Hold an outdated request, issue a newer filter request, then deliver the stale response first.
+	holdHistory = true;
+	directory.setHistoryQuery(u"old"_s);
+	QTRY_COMPARE(heldHistoryRequests.size(), 1);
+	const QJsonObject staleRequest = heldHistoryRequests.takeFirst();
+	holdHistory = false;
+	directory.setHistoryFilter(u"/work/a"_s, SessionListModel::CreatorFilter::UserCreated, {}, true);
+	QTRY_COMPARE(historyRequests.size(), 3);
+	QCOMPARE(historyRequests.last().value(u"cwd"_s).toString(), u"/work/a"_s);
+	QCOMPARE(historyRequests.last().value(u"creator"_s).toString(), u"user"_s);
+	QCOMPARE(historyRequests.last().value(u"query"_s).toString(), u"old"_s);
+
+	// Responding to the stale request afterwards must not overwrite the newer empty/user-created result.
+	QJsonObject staleChild = sessionInfoJson(u"ses_stale"_s, {.title = u"Stale"_s, .cwd = u"/work/a"_s, .createdAt = 1, .live = false});
+	fake.respond(staleRequest, {{u"sessions"_s, QJsonArray{staleChild}}});
+	QTest::qWait(50);
+	QCOMPARE(directory.history().count(), 0);
 }
 
 QTEST_MAIN(TstSessionList)

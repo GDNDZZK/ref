@@ -8,21 +8,27 @@ import { dirName, historyLabel, relativeTime } from '../shell/sessionRow.ts'
 import ContextMenu from './ContextMenu.vue'
 import type { MenuItem } from './ContextMenu.vue'
 
-const props = defineProps<{ info: SessionInfo }>()
-const emit = defineEmits<{ open: []; remove: [] }>()
+const props = defineProps<{ info: SessionInfo; creatorName?: string }>()
+const emit = defineEmits<{ open: []; remove: []; filterByCreator: [creatorId: string] }>()
 
 const { t, locale } = useI18n()
 
 const subtitle = computed(() => {
   const when = relativeTimeText(relativeTime(props.info.updated_at, Date.now()), t, locale.value)
-  return `${dirName(props.info.cwd)} · ${when}`
+  const base = `${dirName(props.info.cwd)} · ${when}`
+  if (!props.info.parent) return base
+  return `${base} · ⟲ ${props.creatorName ?? props.info.parent}`
 })
 
 const menuCoords = ref({ x: 0, y: 0 })
 const menuOpen = ref(false)
 const menuMounted = ref(false)
 const menuItems = computed<MenuItem[]>(() => [
-  { label: t('sidebar.delete'), danger: true, run: () => emit('remove') },
+  ...(props.info.parent
+    ? [{ label: t('sidebar.filterByCreator'), run: () => emit('filterByCreator', props.info.parent!) }]
+    : []),
+  { label: t('sidebar.filterSpawnedHistory'), run: () => emit('filterByCreator', props.info.id) },
+  { label: t('sidebar.delete'), danger: true, separatorBefore: true, run: () => emit('remove') },
 ])
 
 function openMenu(event: MouseEvent): void {

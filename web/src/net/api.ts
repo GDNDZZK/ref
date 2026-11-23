@@ -86,8 +86,19 @@ export class RefApi {
   }
 
   // Persisted and live sessions, newest first.
-  async listHistory(cwd?: string, limit?: number): Promise<SessionInfo[]> {
-    return this.call({ op: 'list_history', cwd: cwd ?? null, limit: limit ?? null }, 'sessions')
+  async listHistory(
+    options: { cwd?: string; creator?: string; query?: string; limit?: number } = {},
+  ): Promise<SessionInfo[]> {
+    return this.call(
+      {
+        op: 'list_history',
+        cwd: options.cwd ?? null,
+        creator: options.creator ?? null,
+        query: options.query ?? null,
+        limit: options.limit ?? null,
+      },
+      'sessions',
+    )
   }
 
   // Events of every live session follow until `enabled: false`. Returns the live sessions.

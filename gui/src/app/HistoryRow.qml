@@ -9,6 +9,13 @@ Item {
 	required property string displayTitle
 	required property string dirName
 	required property double updatedAt
+	required property string parentId
+	required property string creatorName
+
+	readonly property string creatorLabel: row.parentId !== "" ? (row.creatorName !== "" ? row.creatorName : row.parentId) : ""
+	readonly property string detailText: creatorLabel !== ""
+		? row.dirName + " · " + Format.relativeTime(row.updatedAt) + " · \u27f2 " + creatorLabel
+		: row.dirName + " · " + Format.relativeTime(row.updatedAt)
 
 	width: ListView.view ? ListView.view.width : 0
 	height: Theme.sidebarHistoryRowHeight
@@ -39,7 +46,7 @@ Item {
 			x: 12
 			y: 23
 			width: parent.width - 2 * 12
-			text: row.dirName + " · " + Format.relativeTime(row.updatedAt)
+			text: row.detailText
 			color: Theme.textMuted
 			font.pixelSize: Theme.smallFontSize
 			elide: Text.ElideRight
@@ -61,7 +68,24 @@ Item {
 
 	ContextMenu {
 		id: menu
-		entries: [{text: qsTr("Delete"), danger: true}]
-		onTriggered: Workspace.openDialog(DialogId.deleteHistory, {sessionId: row.sessionId, title: row.displayTitle})
+		entries: row.parentId !== ""
+			? [
+				{text: qsTr("Filter history by creator"), action: "filterCreator"},
+				{text: qsTr("Filter spawned history"), action: "filterSpawned"},
+				{text: qsTr("Delete"), danger: true, action: "delete"}
+			]
+			: [
+				{text: qsTr("Filter spawned history"), action: "filterSpawned"},
+				{text: qsTr("Delete"), danger: true, action: "delete"}
+			]
+		onTriggered: index => {
+			const action = menu.entries[index].action
+			if (action === "filterCreator")
+				Workspace.filterHistoryByCreator(row.parentId)
+			else if (action === "filterSpawned")
+				Workspace.filterHistoryByCreator(row.sessionId)
+			else
+				Workspace.openDialog(DialogId.deleteHistory, {sessionId: row.sessionId, title: row.displayTitle})
+		}
 	}
 }

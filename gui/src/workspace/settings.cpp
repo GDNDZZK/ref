@@ -40,6 +40,8 @@ const QString HistoryExpandedKey = u"historyExpanded"_s;
 const QString RunningOrderKey = u"runningOrder"_s;
 const QString TodoHeightKey = u"todoHeight"_s;
 const QString RunningHeightKey = u"runningHeight"_s;
+const QString HistoryCreatorFilterKey = u"historyCreatorFilter"_s;
+const QString HistoryCurrentDirKey = u"historyCurrentDir"_s;
 const QString WindowKey = u"window"_s;
 const QString WidthKey = u"width"_s;
 const QString HeightKey = u"height"_s;
@@ -87,6 +89,22 @@ QString fieldPath(const QString& sectionKey, const QString& key)
 	return sectionKey + u'.' + key;
 }
 
+void readSidebarChoice(const QJsonObject& root, const QString& sectionKey, const QString& key, const QStringList& allowed, QString& value, Problems& problems)
+{
+	const QJsonObject fields = section(root, sectionKey);
+	if(!fields.contains(key))
+	{
+		return;
+	}
+	const QJsonValue raw = fields.value(key);
+	const QString read = raw.isString() ? raw.toString() : QString();
+	if(!raw.isString() || !allowed.contains(read))
+	{
+		problems.add(u"%1: unknown value"_s.arg(fieldPath(sectionKey, key)));
+		return;
+	}
+	value = read;
+}
 // Reads `root[sectionKey][key]` as a flag; leaves `value` alone when it is absent.
 void readFlag(const QJsonObject& root, const QString& sectionKey, const QString& key, bool& value, Problems& problems)
 {
@@ -239,7 +257,8 @@ const QString Settings::Light = u"light"_s;
 const QString Settings::Dark = u"dark"_s;
 const QString Settings::English = u"en"_s;
 const QString Settings::ChineseSimplified = u"zh_CN"_s;
-
+const QString Settings::HistoryCreatorAll = u"all"_s;
+const QString Settings::HistoryCreatorUser = u"user"_s;
 double Settings::readUiScaleOnly(const QString& path)
 {
 	QFile file(path);
@@ -271,6 +290,7 @@ Settings::Settings(QString path, QObject* parent)
 	, m_path(std::move(path))
 	, m_theme(System)
 	, m_language(System)
+	, m_sidebarHistoryCreatorFilter(HistoryCreatorAll)
 {
 	m_saveTimer.setSingleShot(true);
 	m_saveTimer.setInterval(SaveDelay);
@@ -390,6 +410,16 @@ void Settings::setSidebarRunningOrder(const QStringList& order)
 	set(m_sidebarRunningOrder, deduplicateIds(order), &Settings::sidebarRunningOrderChanged);
 }
 
+void Settings::setSidebarHistoryCreatorFilter(const QString& filter)
+{
+	Q_ASSERT(filter == HistoryCreatorAll || filter == HistoryCreatorUser);
+	set(m_sidebarHistoryCreatorFilter, filter, &Settings::sidebarHistoryCreatorFilterChanged);
+}
+
+void Settings::setSidebarHistoryCurrentDir(bool currentDir)
+{
+	set(m_sidebarHistoryCurrentDir, currentDir, &Settings::sidebarHistoryCurrentDirChanged);
+}
 void Settings::setWindowWidth(int width)
 {
 	set(m_windowWidth, width, &Settings::windowSizeChanged);
@@ -472,10 +502,11 @@ void Settings::readFields(const QJsonObject& root)
 	readSidebarHeight(root, SidebarKey, TodoHeightKey, m_sidebarTodoHeight, problems);
 	readSidebarHeight(root, SidebarKey, RunningHeightKey, m_sidebarRunningHeight, problems);
 	readRunningOrder(root, SidebarKey, RunningOrderKey, m_sidebarRunningOrder, problems);
+	readSidebarChoice(root, SidebarKey, HistoryCreatorFilterKey, {HistoryCreatorAll, HistoryCreatorUser}, m_sidebarHistoryCreatorFilter, problems);
+	readFlag(root, SidebarKey, HistoryCurrentDirKey, m_sidebarHistoryCurrentDir, problems);
 	readEdge(root, WindowKey, WidthKey, m_windowWidth, problems);
 	readEdge(root, WindowKey, HeightKey, m_windowHeight, problems);
 	readUiScale(root, UiScaleKey, m_uiScale, problems);
-
 	if(problems.any())
 	{
 		m_loadProblem = tr("Some settings in %1 were ignored: %2").arg(m_path, problems.text());
@@ -504,6 +535,8 @@ QJsonObject Settings::toJson() const
 	sidebar.insert(TodoHeightKey, m_sidebarTodoHeight);
 	sidebar.insert(RunningHeightKey, m_sidebarRunningHeight);
 	sidebar.insert(RunningOrderKey, QJsonArray::fromStringList(m_sidebarRunningOrder));
+	sidebar.insert(HistoryCreatorFilterKey, m_sidebarHistoryCreatorFilter);
+	sidebar.insert(HistoryCurrentDirKey, m_sidebarHistoryCurrentDir);
 	root.insert(SidebarKey, sidebar);
 
 	QJsonObject window = section(root, WindowKey);

@@ -429,13 +429,25 @@ Item {
 	ContextMenu {
 		id: menu
 		entries: row.canDetach
-			? [{text: qsTr("Rename")}, {text: qsTr("Move to background")}, {text: qsTr("Close"), danger: true}]
-			: [{text: qsTr("Rename")}, {text: qsTr("Close"), danger: true}]
+			? [
+				{text: qsTr("Rename"), action: "rename"},
+				{text: qsTr("Move to background"), action: "detach"},
+				{text: qsTr("Filter spawned history"), action: "filterSpawned"},
+				{text: qsTr("Close"), danger: true, action: "close"}
+			]
+			: [
+				{text: qsTr("Rename"), action: "rename"},
+				{text: qsTr("Filter spawned history"), action: "filterSpawned"},
+				{text: qsTr("Close"), danger: true, action: "close"}
+			]
 		onTriggered: index => {
-			if (index === row.renameEntry)
+			const action = menu.entries[index].action
+			if (action === "rename")
 				row.startRename()
-			else if (row.canDetach && index === 1)
+			else if (action === "detach")
 				Workspace.detachCurrent()
+			else if (action === "filterSpawned")
+				Workspace.filterHistoryByCreator(row.sessionId)
 			else
 				Workspace.requestCloseSession(row.sessionId)
 		}

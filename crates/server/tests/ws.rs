@@ -192,6 +192,8 @@ async fn ws_smoke() {
         Request::ListHistory {
             cwd: None,
             limit: None,
+            creator: None,
+            query: None,
         },
     )
     .await;
@@ -650,4 +652,224 @@ async fn hello_version_mismatch_is_refused_and_does_not_mark_frontend_joined() {
     .await;
     let (ok, _, err, code) = response_coded(&mut ws, 1, &mut Vec::new()).await;
     assert!(ok, "{err:?} {code:?}");
+}
+
+#[tokio::test]
+async fn list_history_filters_by_creator_and_query() {
+    let (r, url, work) = start("", -1).await;
+    let cwd_str = work.to_string_lossy().into_owned();
+
+    // Closed parent session ("boss") + closed child ("closed-sub").
+    let boss = ref_server::ops::create_session(
+        &r.hub,
+        ref_server::ops::CreateOpts {
+            cwd: cwd_str.clone(),
+            agent: None,
+            model: None,
+            name: Some("boss".into()),
+            unique_suffix: false,
+            parent: None,
+            must_report: false,
+        },
+    )
+    .await
+    .unwrap();
+    {
+        let mut st = boss.lock();
+        st.info.title = "Boss Orchestrator".into();
+        st.info.updated_at = 100;
+        st.messages.push(ref_server::session::user_message(
+            ref_proto::MessageSource::Human,
+            "start".into(),
+            vec![],
+        ));
+    }
+    let boss_id = boss.id.clone();
+
+    let closed_child = ref_server::ops::create_session(
+        &r.hub,
+        ref_server::ops::CreateOpts {
+            cwd: cwd_str.clone(),
+            agent: None,
+            model: None,
+            name: Some("closed-sub".into()),
+            unique_suffix: false,
+            parent: Some(boss_id.clone()),
+            must_report: false,
+        },
+    )
+    .await
+    .unwrap();
+    {
+        let mut st = closed_child.lock();
+        st.info.title = "Parse config".into();
+        st.info.updated_at = 200;
+        st.messages.push(ref_server::session::user_message(
+            ref_proto::MessageSource::Human,
+            "parse".into(),
+            vec![],
+        ));
+    }
+
+    // Live child (0 messages, never persisted) + live user-created session.
+    let live_child = ref_server::ops::create_session(
+        &r.hub,
+        ref_server::ops::CreateOpts {
+            cwd: cwd_str.clone(),
+            agent: None,
+            model: None,
+            name: Some("live-sub".into()),
+            unique_suffix: false,
+            parent: Some(boss_id.clone()),
+            must_report: false,
+        },
+    )
+    .await
+    .unwrap();
+    live_child.lock().info.updated_at = 300;
+
+    let user_live = ref_server::ops::create_session(
+        &r.hub,
+        ref_server::ops::CreateOpts {
+            cwd: cwd_str,
+            agent: None,
+            model: None,
+            name: Some("solo".into()),
+            unique_suffix: false,
+            parent: None,
+            must_report: false,
+        },
+    )
+    .await
+    .unwrap();
+    {
+        let mut st = user_live.lock();
+        st.info.title = "Standalone Task".into();
+        st.info.updated_at = 400;
+        st.messages.push(ref_server::session::user_message(
+            ref_proto::MessageSource::Human,
+            "hi".into(),
+            vec![],
+        ));
+    }
+    let user_live_id = user_live.id.clone();
+
+    // Persist and close `boss` and `closed_child` so parent lookup must hit SQLite.
+    ref_server::ops::close_session(&r.hub, &closed_child).await;
+    ref_server::ops::close_session(&r.hub, &boss).await;
+    r.hub.store.flush().unwrap();
+
+    let (mut ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+    hello(&mut ws, &work, vec![]).await;
+    let mut other = Vec::new();
+
+    let list_ids = |res: &Value| -> Vec<String> {
+        res["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    // creator = "user": user_live and closed boss.
+    send(
+        &mut ws,
+        2,
+        Request::ListHistory {
+            cwd: None,
+            limit: None,
+            creator: Some("user".into()),
+            query: None,
+        },
+    )
+    .await;
+    let (ok, res, err) = response(&mut ws, 2, &mut other).await;
+    assert!(ok, "{err:?}");
+    assert_eq!(list_ids(&res), vec![user_live_id.clone(), boss_id.clone()]);
+
+    // creator = "boss" (closed parent name): finds both closed_child and unpersisted live_child.
+    send(
+        &mut ws,
+        3,
+        Request::ListHistory {
+            cwd: None,
+            limit: None,
+            creator: Some("BOSS".into()),
+            query: None,
+        },
+    )
+    .await;
+    let (ok, res, err) = response(&mut ws, 3, &mut other).await;
+    assert!(ok, "{err:?}");
+    assert_eq!(
+        list_ids(&res),
+        vec![live_child.id.clone(), closed_child.id.clone()]
+    );
+
+    // query matching parent title includes closed boss + both children.
+    send(
+        &mut ws,
+        4,
+        Request::ListHistory {
+            cwd: None,
+            limit: None,
+            creator: None,
+            query: Some("orchestrator".into()),
+        },
+    )
+    .await;
+    let (ok, res, err) = response(&mut ws, 4, &mut other).await;
+    assert!(ok, "{err:?}");
+    assert_eq!(
+        list_ids(&res),
+        vec![
+            live_child.id.clone(),
+            closed_child.id.clone(),
+            boss_id.clone()
+        ]
+    );
+
+    // Rename live session in memory without flushing; live overlay reflects the new name.
+    send(
+        &mut ws,
+        5,
+        Request::Rename {
+            session_id: user_live_id.clone(),
+            name: "renamed-alpha".into(),
+        },
+    )
+    .await;
+    let (ok, _, err) = response(&mut ws, 5, &mut other).await;
+    assert!(ok, "{err:?}");
+
+    send(
+        &mut ws,
+        6,
+        Request::ListHistory {
+            cwd: None,
+            limit: None,
+            creator: None,
+            query: Some("solo".into()),
+        },
+    )
+    .await;
+    let (ok, res, _) = response(&mut ws, 6, &mut other).await;
+    assert!(ok);
+    assert!(list_ids(&res).is_empty(), "{res}");
+
+    send(
+        &mut ws,
+        7,
+        Request::ListHistory {
+            cwd: None,
+            limit: None,
+            creator: None,
+            query: Some("renamed-alpha".into()),
+        },
+    )
+    .await;
+    let (ok, res, _) = response(&mut ws, 7, &mut other).await;
+    assert!(ok);
+    assert_eq!(list_ids(&res), vec![user_live_id]);
 }

@@ -468,6 +468,8 @@ const STARTUP_DELAY: Duration = Duration::from_millis(150);
 const HISTORY_SPACING_MS: i64 = 7 * 3_600_000;
 /// Length of a seeded history session.
 const HISTORY_SESSION_SPAN_MS: i64 = 600_000;
+const MOCK_HISTORY_DEFAULT_LIMIT: usize = 100;
+const CREATOR_USER: &str = "user";
 const SEEDED_WORKER_CONTEXT_TOKENS: u64 = 120_000;
 const DOCS_WRITER_DELAY: Duration = Duration::from_secs(6);
 /// The idle pause between worker rounds, and after an aborted round.
@@ -1200,7 +1202,12 @@ impl Mock {
             }
             Request::GetConfig { .. } => self.ok(request_id, json!({ "config": config() })),
             Request::ListSessions => self.on_list_sessions(request_id),
-            Request::ListHistory { .. } => self.on_list_history(request_id),
+            Request::ListHistory {
+                cwd,
+                limit,
+                creator,
+                query,
+            } => self.on_list_history(request_id, cwd, creator, query, limit),
             Request::CreateSession {
                 cwd,
                 agent,
@@ -1378,17 +1385,69 @@ impl Mock {
             .collect();
         self.ok(request_id, json!({ "sessions": list }));
     }
-
-    fn on_list_history(&self, request_id: Option<u64>) {
+    fn on_list_history(
+        &self,
+        request_id: Option<u64>,
+        cwd: Option<String>,
+        creator: Option<String>,
+        query: Option<String>,
+        limit: Option<usize>,
+    ) {
         let w = self.world();
         let mut list: Vec<SessionInfo> = w.history.clone();
-        list.extend(
-            w.order
-                .iter()
-                .filter_map(|i| w.sessions.get(i))
-                .map(|s| s.info.clone()),
-        );
+        for s in w.order.iter().filter_map(|i| w.sessions.get(i)) {
+            if !list.iter().any(|h| h.id == s.info.id) {
+                list.push(s.info.clone());
+            }
+        }
+        let cwd = normalize_filter(cwd);
+        let creator = normalize_filter(creator);
+        let query = normalize_filter(query);
+        if cwd.is_some() || creator.is_some() || query.is_some() {
+            let by_id: HashMap<String, SessionInfo> =
+                list.iter().map(|s| (s.id.clone(), s.clone())).collect();
+            let creator_lower = creator.as_deref().map(str::to_lowercase);
+            let query_lower = query.as_deref().map(str::to_lowercase);
+            list.retain(|s| {
+                if let Some(c) = cwd.as_deref()
+                    && s.cwd != c
+                {
+                    return false;
+                }
+                let parent_id = s.parent.as_deref().filter(|p| !p.is_empty());
+                let parent = parent_id.and_then(|pid| by_id.get(pid));
+                if let Some(cr) = creator.as_deref() {
+                    if cr == CREATOR_USER {
+                        if parent_id.is_some() {
+                            return false;
+                        }
+                    } else {
+                        let cr_lower = creator_lower.as_deref().unwrap_or(cr);
+                        let matched = parent_id.is_some_and(|pid| {
+                            pid == cr || parent.is_some_and(|p| p.name.to_lowercase() == cr_lower)
+                        });
+                        if !matched {
+                            return false;
+                        }
+                    }
+                }
+                if let Some(q) = query_lower.as_deref() {
+                    let contains = |hay: &str| hay.to_lowercase().contains(q);
+                    let hit = contains(&s.title)
+                        || contains(&s.name)
+                        || contains(&s.cwd)
+                        || contains(&s.id)
+                        || parent_id.is_some_and(contains)
+                        || parent.is_some_and(|p| contains(&p.name) || contains(&p.title));
+                    if !hit {
+                        return false;
+                    }
+                }
+                true
+            });
+        }
         list.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
+        list.truncate(limit.unwrap_or(MOCK_HISTORY_DEFAULT_LIMIT));
         self.ok(request_id, json!({ "sessions": list }));
     }
 
@@ -1910,6 +1969,12 @@ impl Mock {
     }
 }
 
+fn normalize_filter(value: Option<String>) -> Option<String> {
+    value.and_then(|v| {
+        let trimmed = v.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    })
+}
 /// The variant after `current` in `variants`; None after the last one (back to "default").
 fn next_variant(current: Option<&str>, variants: &[String]) -> Option<String> {
     let pos = current.and_then(|v| variants.iter().position(|x| x == v));

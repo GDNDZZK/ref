@@ -31,6 +31,11 @@ export interface NewSessionOptions {
   name?: string
 }
 
+export interface HistoryFilterOptions {
+  cwd?: string
+  creator?: string
+  query?: string
+}
 const HISTORY_LIMIT = 200
 const ERROR_TOAST_MAX_CHARS = 200
 
@@ -66,6 +71,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const live = shallowRef<readonly SessionInfo[]>([])
   const history = shallowRef<readonly SessionInfo[]>([])
   const historyLoaded = ref(false)
+  const sidebarHistory = shallowRef<readonly SessionInfo[]>([])
+  const sidebarHistoryLoaded = ref(false)
+  const sidebarHistorySynced = ref(false)
+  const historyQuery = ref('')
+  const historyCreator = ref<string>()
   const currentId = ref<string>() // in split view: the session that returns when split view is left
   const cwd = ref('') // where new sessions start
   const mode = ref<ViewMode>('single')
@@ -80,6 +90,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const goneListeners = new Set<(id: string) => void>()
   const attachingTiles = new Set<string>() // tiles whose first Attach has not been answered yet
   const detachingTiles = new Set<string>()
+  let historySerial = 0
+  let sidebarHistorySerial = 0
+  let sidebarHistoryInFlight = 0
 
   const current = computed(() => (currentId.value ? chat(currentId.value) : undefined))
   // Background sessions get a tile: live ones nobody is attached to, excluding the current foreground session.
@@ -103,7 +116,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       current.value?.info?.cwd ??
       (cwd.value || undefined),
   )
-
+  const historyCurrentDir = computed(() => settingsStore.settings.sidebarHistoryCurrentDir)
   watch(currentId, (id) => writeLocation({ sessionId: id }))
   watch(mode, (value) => writeLocation({ split: value === 'split' }))
   watch(tileIds, () => void syncTiles().catch(notices.pushError))
@@ -114,6 +127,24 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     },
     { flush: 'sync' },
   )
+  watch(
+    [
+      historyQuery,
+      historyCreator,
+      () => settingsStore.settings.sidebarHistoryCreatorFilter,
+      () => settingsStore.settings.sidebarHistoryCurrentDir,
+    ],
+    () => {
+      sidebarHistorySynced.value = false
+    },
+    { flush: 'sync' },
+  )
+  watch(effectiveCwd, () => {
+    if (sidebarHistoryLoaded.value && settingsStore.settings.sidebarHistoryCurrentDir) {
+      sidebarHistorySynced.value = false
+      void refreshSidebarHistory().catch(notices.pushError)
+    }
+  })
   // The session's object; made on first use, without any request.
   function chat(id: string): ChatSession {
     const existing = chats.get(id)
@@ -235,7 +266,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     chats.delete(id)
     for (const listener of goneListeners) listener(id)
     live.value = live.value.filter((session) => session.id !== id)
-    void refreshHistory().catch(notices.pushError)
+    void refreshAllHistory().catch(notices.pushError)
     if (zoomedId.value === id) zoomedId.value = undefined
     if (currentId.value !== id) return
     currentId.value = undefined
@@ -256,8 +287,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function deleteHistory(id: string): Promise<void> {
     await connection.getApi().deleteSession(id)
     history.value = history.value.filter((session) => session.id !== id)
+    sidebarHistory.value = sidebarHistory.value.filter((session) => session.id !== id)
   }
-
   async function setSessionCwd(id: string, path: string): Promise<void> {
     const info = await connection.getApi().setCwd(id, path)
     showInfo(info)
@@ -319,12 +350,78 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return connection.getApi().listDirs(folder, options)
   }
 
-  // Sessions of one directory (or all), newest first. Includes the live ones.
-  async function refreshHistory(forCwd?: string): Promise<void> {
-    history.value = await connection.getApi().listHistory(forCwd, HISTORY_LIMIT)
-    historyLoaded.value = true
+  function currentSidebarHistoryFilter(): HistoryFilterOptions {
+    const trimmedQuery = historyQuery.value.trim()
+    const creator =
+      historyCreator.value ||
+      (settingsStore.settings.sidebarHistoryCreatorFilter === 'user' ? 'user' : undefined)
+    const filterCwd = settingsStore.settings.sidebarHistoryCurrentDir ? effectiveCwd.value : undefined
+    return {
+      ...(filterCwd ? { cwd: filterCwd } : {}),
+      ...(creator ? { creator } : {}),
+      ...(trimmedQuery ? { query: trimmedQuery } : {}),
+    }
   }
 
+  function hasActiveSidebarFilter(): boolean {
+    const active = currentSidebarHistoryFilter()
+    return Boolean(active.cwd || active.creator || active.query)
+  }
+
+  function filterKey(options: HistoryFilterOptions): string {
+    return JSON.stringify([options.cwd ?? '', options.creator ?? '', options.query ?? ''])
+  }
+
+  // Unfiltered sessions of one directory (or all), newest first. Includes the live ones.
+  async function refreshHistory(forCwd?: string): Promise<void> {
+    const serial = ++historySerial
+    const result = await connection.getApi().listHistory({ cwd: forCwd, limit: HISTORY_LIMIT })
+    if (serial !== historySerial) return
+    history.value = result
+    historyLoaded.value = true
+    if (!forCwd && !hasActiveSidebarFilter() && sidebarHistoryInFlight === 0) {
+      sidebarHistory.value = result
+      sidebarHistoryLoaded.value = true
+      sidebarHistorySynced.value = true
+    }
+  }
+
+  // Sidebar history list, scoped by the active sidebar creator/directory/search filters.
+  async function refreshSidebarHistory(options?: HistoryFilterOptions): Promise<void> {
+    const serial = ++sidebarHistorySerial
+    const active = options ?? currentSidebarHistoryFilter()
+    const normalized: HistoryFilterOptions = {
+      ...(active.cwd?.trim() ? { cwd: active.cwd.trim() } : {}),
+      ...(active.creator?.trim() ? { creator: active.creator.trim() } : {}),
+      ...(active.query?.trim() ? { query: active.query.trim() } : {}),
+    }
+    const startedWithKey = filterKey(normalized)
+    sidebarHistoryInFlight++
+    try {
+      const result = await connection.getApi().listHistory({
+        cwd: normalized.cwd,
+        creator: normalized.creator,
+        query: normalized.query,
+        limit: HISTORY_LIMIT,
+      })
+      if (serial !== sidebarHistorySerial) return
+      sidebarHistory.value = result
+      sidebarHistoryLoaded.value = true
+      if (options === undefined && filterKey(currentSidebarHistoryFilter()) === startedWithKey) {
+        sidebarHistorySynced.value = true
+      }
+    } finally {
+      sidebarHistoryInFlight--
+    }
+  }
+
+  async function refreshAllHistory(): Promise<void> {
+    if (!hasActiveSidebarFilter()) {
+      await refreshHistory()
+      return
+    }
+    await Promise.all([refreshHistory(), refreshSidebarHistory()])
+  }
   // --- Split view
 
   // Watches the tiles' sessions and lets go of those that no longer have a tile (including the hidden foreground session).
@@ -438,7 +535,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     live.value = sortLive(sessions, pruned)
     for (const info of sessions) chats.get(info.id)?.setInfo(info)
-    if (gone) void refreshHistory().catch(notices.pushError)
+    if (gone) void refreshAllHistory().catch(notices.pushError)
   }
 
   function moveRunningSession(id: string, toIndex: number): void {
@@ -491,7 +588,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     cwd.value = start.cwd ?? connection.hello?.cwd ?? ''
     await connection.loadConfig(effectiveCwd.value)
     setLive(await api.listSessions())
-    void refreshHistory().catch(notices.pushError)
+    void refreshAllHistory().catch(notices.pushError)
     await openRequested(start.sessionId)
     if (start.split) await enterSplit()
   }
@@ -509,6 +606,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     live,
     history,
     historyLoaded,
+    sidebarHistory,
+    sidebarHistoryLoaded,
+    sidebarHistorySynced,
+    historyQuery,
+    historyCreator,
+    historyCurrentDir,
     currentId,
     current,
     focusedId,
@@ -540,6 +643,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     peerCommand,
     listDirs,
     refreshHistory,
+    refreshSidebarHistory,
     moveRunningSession,
     enterSplit,
     leaveSplit,

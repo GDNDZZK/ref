@@ -28,6 +28,8 @@ describe('parseSettings', () => {
       sidebarRunningOrder: ['s2', 's1'],
       sidebarTodoHeight: 160,
       sidebarRunningHeight: 220,
+      sidebarHistoryCreatorFilter: 'user',
+      sidebarHistoryCurrentDir: true,
     }
     expect(parseSettings(JSON.stringify(stored))).toEqual({ settings: stored, corrupt: false })
   })
@@ -98,6 +100,25 @@ describe('parseSettings', () => {
     ).toMatchObject({
       sidebarTodoHeight: 0,
       sidebarRunningHeight: 0,
+    })
+  })
+
+  it('parses sidebarHistoryCreatorFilter and sidebarHistoryCurrentDir with defaults on invalid values', () => {
+    expect(defaultSettings().sidebarHistoryCreatorFilter).toBe('all')
+    expect(defaultSettings().sidebarHistoryCurrentDir).toBe(false)
+    expect(
+      parseSettings(JSON.stringify({ sidebarHistoryCreatorFilter: 'user', sidebarHistoryCurrentDir: true }))
+        .settings,
+    ).toMatchObject({
+      sidebarHistoryCreatorFilter: 'user',
+      sidebarHistoryCurrentDir: true,
+    })
+    expect(
+      parseSettings(JSON.stringify({ sidebarHistoryCreatorFilter: 'bot', sidebarHistoryCurrentDir: 'yes' }))
+        .settings,
+    ).toMatchObject({
+      sidebarHistoryCreatorFilter: 'all',
+      sidebarHistoryCurrentDir: false,
     })
   })
 })

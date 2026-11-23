@@ -139,10 +139,11 @@ export function creatorLabel(byId: ReadonlyMap<string, SessionInfo>, parentId: s
 
 export function creatorKeywords(byId: ReadonlyMap<string, SessionInfo>, info: SessionInfo): string {
   if (!info.parent) return ''
-  const name = creatorLabel(byId, info.parent)
-  return name === info.parent ? info.parent : `${name} ${info.parent}`
+  const parent = byId.get(info.parent)
+  if (!parent) return info.parent
+  const parts = [liveLabel(parent), oneLine(parent.title), info.parent].filter((part) => part !== '')
+  return [...new Set(parts)].join(' ')
 }
-
 // Case-insensitive search over title, name, directory, id and creator; empty `query` keeps everything.
 export function matchesQuery(info: SessionInfo, query: string, creator = ''): boolean {
   const wanted = query.trim().toLowerCase()

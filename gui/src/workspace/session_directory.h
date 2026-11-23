@@ -6,10 +6,10 @@
 #include "workspace/session_list_model.h"
 
 #include <QCoroTask>
+#include <QHash>
 #include <QList>
 #include <QObject>
 #include <QTimer>
-
 #include <optional>
 
 namespace refgui::workspace
@@ -44,9 +44,13 @@ public:
 
 	// Every live session followed by every non-live persisted session.
 	QList<proto::SessionInfo> allSessions() const;
-	// Asks the backend again. The history is fetched shortly after the last call.
-	void refreshHistory();
-	// Whether the persisted sessions have been listed once.
+	// Configures history filters. Updates SessionListModel immediately and triggers backend re-query when `refreshNow`.
+	void setHistoryFilter(const QString& cwd, SessionListModel::CreatorFilter creatorFilter, const QString& creatorId, bool refreshNow = true);
+	// Sets the history search keyword. Filters SessionListModel immediately and debounces backend re-query.
+	void setHistoryQuery(const QString& query);
+	QString sessionLabel(const QString& sessionId) const { return m_history.displayName(sessionId); }
+	// Asks the backend again. Immediate when `immediate`, otherwise coalesced after burst changes.
+	void refreshHistory(bool immediate = false);
 	bool historyLoaded() const { return m_historyLoaded; }
 	// Drops a persisted session from the list, e.g. after it was deleted.
 	void forgetPersisted(const QString& sessionId);
@@ -84,9 +88,9 @@ signals:
 	// The live list changed (a session came, went or changed).
 	void liveChanged();
 	void historyLoadedChanged();
+	void historyUpdated();
 	// A request for the lists failed.
 	void failed(const QString& reason);
-
 private:
 	// Waits for a request answering with a session's info and takes the info in.
 	QCoro::Task<Result<void>> adopt(QCoro::Task<Result<proto::SessionInfo>> request);
@@ -94,6 +98,8 @@ private:
 	QCoro::Task<> resubscribe();
 	QCoro::Task<> loadLive();
 	QCoro::Task<> loadHistory();
+	QCoro::Task<> loadUnfilteredHistory();
+	bool hasSidebarFilter() const;
 	void setLive(QList<proto::SessionInfo> sessions);
 	void applyHistory();
 	void onFrame(const proto::ServerFrame& frame);
@@ -103,9 +109,16 @@ private:
 	SessionListModel m_history;
 	SessionListModel m_choices;
 	QList<proto::SessionInfo> m_liveSessions;
-	QList<proto::SessionInfo> m_persisted; // as the backend listed them; may include live ones
+	QList<proto::SessionInfo> m_persisted; // unfiltered persisted sessions for allSessions() and choices()
+	QList<proto::SessionInfo> m_sidebarPersisted; // sidebar-filtered persisted sessions for history()
+	QHash<QString, proto::SessionInfo> m_knownSessions;
 	QTimer m_historyTimer;
+	QTimer m_historySearchTimer;
+	QString m_historyCwd;
+	QString m_historyCreator;
+	QString m_historyQuery;
 	int m_historyRequest = 0;
+	int m_unfilteredHistoryRequest = 0;
 	bool m_historyLoaded = false;
 	bool m_watchAll = false;
 };

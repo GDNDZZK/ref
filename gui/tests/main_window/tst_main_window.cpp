@@ -69,6 +69,7 @@ public:
 	}
 
 	void setSession(const QString& id, const QJsonObject& info) { m_sessions.insert(id, info); }
+	void addHistory(const QString& id, const QJsonObject& info) { m_history.insert(id, info); }
 	void broadcastSessions() { m_fake.send({{u"kind"_s, u"sessions"_s}, {u"sessions"_s, list()}}); }
 	void setMessages(const QString& id, const QJsonArray& messages) { m_messages.insert(id, messages); }
 	void setTodos(const QString& id, const QJsonArray& todos) { m_sessions[id][u"todos"_s] = todos; }
@@ -115,9 +116,43 @@ private:
 			}
 			m_fake.respond(request, {});
 		}
-		else if(op == u"list_sessions"_s || op == u"list_history"_s || op == u"watch_all"_s)
+		else if(op == u"list_sessions"_s || op == u"watch_all"_s)
 		{
 			m_fake.respond(request, {{u"sessions"_s, list()}});
+		}
+		else if(op == u"list_history"_s)
+		{
+			const QString cwdFilter = request.value(u"cwd"_s).toString();
+			const QString creatorFilter = request.value(u"creator"_s).toString();
+			const QString queryFilter = request.value(u"query"_s).toString();
+			QJsonArray array;
+			for(const QJsonObject& info : m_sessions.values() + m_history.values())
+			{
+				if(!cwdFilter.isEmpty() && info.value(u"cwd"_s).toString() != cwdFilter)
+				{
+					continue;
+				}
+				const QString parent = info.value(u"parent"_s).toString();
+				if(creatorFilter == u"user"_s && !parent.isEmpty())
+				{
+					continue;
+				}
+				if(!creatorFilter.isEmpty() && creatorFilter != u"user"_s && parent != creatorFilter)
+				{
+					continue;
+				}
+				if(!queryFilter.isEmpty())
+				{
+					const QString haystack = info.value(u"title"_s).toString() + u' ' + info.value(u"name"_s).toString()
+					                         + u' ' + info.value(u"cwd"_s).toString() + u' ' + info.value(u"id"_s).toString();
+					if(!haystack.contains(queryFilter, Qt::CaseInsensitive))
+					{
+						continue;
+					}
+				}
+				array.append(info);
+			}
+			m_fake.respond(request, {{u"sessions"_s, array}});
 		}
 		else if(op == u"get_config"_s || op == u"reload_config"_s)
 		{
@@ -233,6 +268,7 @@ private:
 
 	FakeBackend& m_fake;
 	QMap<QString, QJsonObject> m_sessions;
+	QMap<QString, QJsonObject> m_history;
 	QMap<QString, QJsonArray> m_messages;
 	int m_created = 0;
 	QString m_configRawText = u"// Keep user header comment\n{\n  \"model\": \"anthropic/claude-sonnet-4-5\",\n  \"extraFutureSetting\": {\"preserve\": true}\n}\n"_s;
@@ -416,6 +452,9 @@ private slots:
 	void tileEnlargeKeepsResizingLayoutUntilWidthAnimationSettles();
 	void composerAndUserBlockHighlightImageTokensAndAgentVariantSelects();
 	void splitUnfocusClampsScrollAndTileHeaderHasNoBindingLoop();
+	void queueStripShowsQueuedPromptsAndCoexistsWithTileComposer();
+	void lightboxNavigatesZoomsAndResets();
+	void sidebarHistoryFilterMenuAndCustomHeightCollapseWork();
 };
 
 void TestMainWindow::initTestCase()
@@ -3225,10 +3264,20 @@ void TestMainWindow::composerAndUserBlockHighlightImageTokensAndAgentVariantSele
 	QCOMPARE(f.workspace->current()->composer()->text(), u"[Image 1] hello"_s);
 	auto* composerDocWrap = textArea->property("textDocument").value<QQuickTextDocument*>();
 	QVERIFY(composerDocWrap);
-	QTRY_VERIFY(hasTokenForegroundNoBg(composerDocWrap->textDocument(), 0));
-	QVERIFY(hasTokenForegroundNoBg(composerDocWrap->textDocument(), 8));
-	QVERIFY(!hasAnyForeground(composerDocWrap->textDocument(), 10));
+	QVERIFY(!hasAnyForeground(composerDocWrap->textDocument(), 0));
+	QVERIFY(!hasAnyForeground(composerDocWrap->textDocument(), 8));
 
+	QQuickItem* tokenOverlay = findItem(composerItem, [](QQuickItem* item) {
+		return item->objectName() == u"composerTokenOverlay"_s;
+	});
+	QVERIFY(tokenOverlay);
+	QVERIFY(tokenOverlay->isVisible());
+	QCOMPARE(tokenOverlay->property("text").toString(), u"[Image 1] hello"_s);
+	auto* overlayDocWrap = tokenOverlay->property("textDocument").value<QQuickTextDocument*>();
+	QVERIFY(overlayDocWrap);
+	QTRY_VERIFY(hasTokenForegroundNoBg(overlayDocWrap->textDocument(), 0));
+	QTRY_VERIFY(hasTokenForegroundNoBg(overlayDocWrap->textDocument(), 8));
+	QVERIFY(!hasAnyForeground(overlayDocWrap->textDocument(), 10));
 	// 3) ConfigAgentsSection variant SelectField populates from model variants and selects a variant.
 	const auto findByName = [](QQuickItem* root, const QString& name) {
 		return findItem(root, [&name](QQuickItem* item) { return item->objectName() == name; });
@@ -3349,10 +3398,23 @@ void TestMainWindow::splitUnfocusClampsScrollAndTileHeaderHasNoBindingLoop()
 	QTRY_VERIFY(!chatB->property("following").toBool());
 	QTRY_VERIFY(qFuzzyCompare(chatB->property("contentY").toReal(), maxYBefore));
 
-	// Unfocusing tile B must collapse composerLoader margin and clamp chatB scroll to the grown viewport.
+	// Unfocusing tile B smoothly animates composer box collapse instead of snapping to 0 on frame 0,
+	// collapses composerLoader margin at rest, and clamps chatB scroll to the grown viewport.
+	QQuickItem* composerB = findByTypePrefix(composerLoaderB, "Composer");
+	QVERIFY(composerB);
+	QQuickItem* boxB = findItem(composerB, [](QQuickItem* item) {
+		return QByteArray(item->metaObject()->className()).startsWith("QQuickRectangle")
+		       && qFuzzyCompare(item->property("radius").toReal(), 18.0);
+	});
+	QVERIFY(boxB);
+	const qreal openBoxHeight = boxB->height();
+	QVERIFY(openBoxHeight > 40.0);
+
 	f.workspace->focusTile(u"ses_c"_s);
 	QTRY_COMPARE(f.workspace->focusedTileId(), u"ses_c"_s);
 	QTRY_VERIFY(!paneB->property("composerShown").toBool());
+	// Animation starts from openBoxHeight rather than snapping to 0 on frame 0.
+	QVERIFY(boxB->height() > 0.0);
 	QTRY_COMPARE(composerLoaderB->height(), 0.0);
 	QObject* composerAnchors = composerLoaderB->property("anchors").value<QObject*>();
 	QVERIFY(composerAnchors);
@@ -3360,7 +3422,294 @@ void TestMainWindow::splitUnfocusClampsScrollAndTileHeaderHasNoBindingLoop()
 	QTRY_VERIFY(std::abs((statusLineB->y() + statusLineB->height()) - paneB->height()) <= 0.5);
 	QTRY_VERIFY(chatB->property("contentY").toReal() <= chatB->property("maxContentY").toReal() + 1.0);
 	QTRY_VERIFY(chatB->property("contentY").toReal() >= chatB->property("minContentY").toReal() - 0.5);
+
+	// Focusing tile B back animates boxB from 0 to fullHeight smoothly as well.
+	f.workspace->focusTile(u"ses_b"_s);
+	QTRY_VERIFY(paneB->property("composerShown").toBool());
+	QVERIFY(boxB->height() < openBoxHeight);
+	QTRY_COMPARE(qRound(boxB->height()), qRound(openBoxHeight));
 	QVERIFY2(warningSpy.isEmpty(), "Split unfocus scroll clamp or Tile header with root chip emitted QML warnings");
+}
+
+void TestMainWindow::queueStripShowsQueuedPromptsAndCoexistsWithTileComposer()
+{
+	MainFixture f;
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	window->resize(1000, 700);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+
+	// 1) QueueEvent in single view reveals QueueStrip with height > 0 and displays the queued prompt.
+	const QJsonObject queuedMsg{{u"id"_s, u"q_1"_s},
+	                            {u"role"_s, u"user"_s},
+	                            {u"time"_s, 100},
+	                            {u"source"_s, QJsonObject{{u"kind"_s, u"human"_s}}},
+	                            {u"parts"_s, QJsonArray{QJsonObject{{u"type"_s, u"text"_s}, {u"text"_s, u"Follow-up task"_s}, {u"time"_s, 100}}}}};
+	f.fake.send({{u"kind"_s, u"event"_s},
+	             {u"session_id"_s, u"ses_a"_s},
+	             {u"event"_s, QJsonObject{{u"type"_s, u"queue"_s}, {u"messages"_s, QJsonArray{queuedMsg}}}}});
+	QTRY_COMPARE(f.workspace->current()->composer()->queueCount(), 1);
+
+	QQuickItem* queueStrip = findByTypePrefix(window->contentItem(), "QueueStrip");
+	QVERIFY(queueStrip);
+	QTRY_VERIFY(queueStrip->isVisible());
+	QTRY_COMPARE(qRound(queueStrip->height()), queueStrip->property("queueRowHeight").toInt());
+	QQuickItem* rowText = findItem(queueStrip, [](QQuickItem* item) {
+		return QByteArray(item->metaObject()->className()).startsWith("QQuickText")
+		       && item->property("text").toString() == u"Follow-up task"_s;
+	});
+	QVERIFY(rowText && rowText->isVisible());
+
+	// 2) In split view, an unfocused tile with a queued prompt has zero extra bottom gap and box never covers QueueStrip.
+	f.workspace->toggleSplit();
+	QTRY_VERIFY(f.workspace->isSplitView());
+	QQuickItem* tileGrid = findByTypePrefix(window->contentItem(), "TileGrid");
+	QVERIFY(tileGrid);
+	QQuickItem* tileB = nullptr;
+	QTRY_VERIFY([&] {
+		QList<QQuickItem*> tiles;
+		collectTiles(tileGrid, tiles);
+		for(QQuickItem* candidate : tiles)
+		{
+			if(candidate->property("sessionId").toString() == u"ses_b"_s && candidate->property("arrived").toBool())
+			{
+				tileB = candidate;
+			}
+		}
+		return tileB != nullptr;
+	}());
+	f.workspace->focusTile(u"ses_a"_s);
+	QTRY_COMPARE(f.workspace->focusedTileId(), u"ses_a"_s);
+
+	f.fake.send({{u"kind"_s, u"event"_s},
+	             {u"session_id"_s, u"ses_b"_s},
+	             {u"event"_s, QJsonObject{{u"type"_s, u"queue"_s}, {u"messages"_s, QJsonArray{queuedMsg}}}}});
+	QTRY_COMPARE(f.workspace->session(u"ses_b"_s)->composer()->queueCount(), 1);
+
+	QQuickItem* paneB = findByTypePrefix(tileB, "SessionPane");
+	QQuickItem* composerLoaderB = findItem(paneB, [](QQuickItem* item) { return item->objectName() == u"composerLoader"_s; });
+	QQuickItem* composerB = findByTypePrefix(composerLoaderB, "Composer");
+	QQuickItem* stripB = findByTypePrefix(composerB, "QueueStrip");
+	QQuickItem* boxB = findItem(composerB, [](QQuickItem* item) {
+		return QByteArray(item->metaObject()->className()).startsWith("QQuickRectangle")
+		       && qFuzzyCompare(item->property("radius").toReal(), 18.0);
+	});
+	QVERIFY(paneB && composerLoaderB && composerB && stripB && boxB);
+	QTRY_COMPARE(qRound(stripB->height()), stripB->property("queueRowHeight").toInt());
+	QTRY_COMPARE(qRound(composerLoaderB->height()), qRound(stripB->height()));
+	QCOMPARE(qRound(boxB->height()), 0);
+	QVERIFY(boxB->y() >= stripB->height());
+
+	// Focusing tile B animates boxB open below stripB + queueGap without ever overlapping stripB.
+	f.workspace->focusTile(u"ses_b"_s);
+	QTRY_VERIFY(boxB->height() > 20.0);
+	QVERIFY(boxB->y() >= stripB->height());
+	QTRY_COMPARE(qRound(boxB->y()), qRound(stripB->height() + composerB->property("queueGap").toReal()));
+	QVERIFY2(warningSpy.isEmpty(), "QueueStrip or tile composer queue coexistence emitted QML warnings");
+}
+
+void TestMainWindow::lightboxNavigatesZoomsAndResets()
+{
+	MainFixture f;
+	f.stub.setMessages(u"ses_a"_s, QJsonArray{
+		QJsonObject{{u"id"_s, u"m1"_s},
+		            {u"role"_s, u"user"_s},
+		            {u"time"_s, 1},
+		            {u"parts"_s, QJsonArray{QJsonObject{{u"type"_s, u"image"_s},
+		                                               {u"image"_s, QJsonObject{{u"id"_s, u"img_1"_s}, {u"mime"_s, u"image/png"_s}, {u"data"_s, QString()}, {u"size"_s, 1024}}},
+		                                               {u"name"_s, u"first.png"_s}}}}},
+		QJsonObject{{u"id"_s, u"m2"_s},
+		            {u"role"_s, u"assistant"_s},
+		            {u"time"_s, 2},
+		            {u"parts"_s, QJsonArray{QJsonObject{{u"type"_s, u"tool"_s},
+		                                               {u"call_id"_s, u"c1"_s},
+		                                               {u"name"_s, u"read"_s},
+		                                               {u"input"_s, QJsonObject()},
+		                                               {u"state"_s, u"done"_s},
+		                                               {u"images"_s, QJsonArray{QJsonObject{{u"id"_s, u"img_2"_s}, {u"mime"_s, u"image/png"_s}, {u"data"_s, QString()}, {u"size"_s, 2048}}}}}}}},
+	});
+	f.workspace->openSession(u"ses_b"_s);
+	QTRY_COMPARE(f.workspace->currentId(), u"ses_b"_s);
+	f.workspace->openSession(u"ses_a"_s);
+	QTRY_COMPARE(f.workspace->currentId(), u"ses_a"_s);
+	QCOMPARE(f.workspace->current()->allImages().size(), 2);
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+	window->requestActivate();
+	QTRY_VERIFY(window->isActive());
+
+	QQuickItem* chatView = nullptr;
+	QTRY_VERIFY([&] {
+		chatView = findByTypePrefix(window->contentItem(), "ChatView");
+		return chatView != nullptr;
+	}());
+
+	const QVariantMap firstImg = f.workspace->current()->allImages().first().toMap();
+	QMetaObject::invokeMethod(chatView, "imageClicked", Q_ARG(QVariant, firstImg));
+
+	QQuickItem* lightbox = nullptr;
+	QTRY_VERIFY([&] {
+		lightbox = findByTypePrefix(window->contentItem(), "Lightbox");
+		return lightbox != nullptr && lightbox->property("shown").toBool();
+	}());
+
+	auto* prevBtn = findItem(lightbox, [](QQuickItem* i) { return i->objectName() == u"lightboxPrevButton"_s; });
+	auto* nextBtn = findItem(lightbox, [](QQuickItem* i) { return i->objectName() == u"lightboxNextButton"_s; });
+	auto* zoomInBtn = findItem(lightbox, [](QQuickItem* i) { return i->objectName() == u"lightboxZoomInButton"_s; });
+	auto* zoomOutBtn = findItem(lightbox, [](QQuickItem* i) { return i->objectName() == u"lightboxZoomOutButton"_s; });
+	auto* zoomResetBtn = findItem(lightbox, [](QQuickItem* i) { return i->objectName() == u"lightboxZoomResetButton"_s; });
+	auto* caption = findItem(lightbox, [](QQuickItem* i) { return i->objectName() == u"lightboxCaption"_s; });
+	QVERIFY(prevBtn && nextBtn && zoomInBtn && zoomOutBtn && zoomResetBtn && caption);
+	QTRY_VERIFY(qFuzzyCompare(lightbox->opacity(), 1.0));
+	QVERIFY(prevBtn->isVisible() && nextBtn->isVisible());
+	QVERIFY(caption->property("text").toString().startsWith(u"1 / 2"_s));
+	const auto clickCenter = [&](QQuickItem* item) {
+		const QPoint pt = item->mapToScene(QPointF(item->width() / 2.0, item->height() / 2.0)).toPoint();
+		QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, pt);
+	};
+
+	// Zoom in -> Zoom out -> Reset.
+	clickCenter(zoomInBtn);
+	QTRY_VERIFY(lightbox->property("zoom").toReal() > 1.2);
+	QCOMPARE(zoomResetBtn->property("text").toString(), u"125%"_s);
+	clickCenter(zoomOutBtn);
+	QTRY_VERIFY(qFuzzyCompare(lightbox->property("zoom").toReal(), 1.0));
+	QTest::keyClick(window, Qt::Key_Equal);
+	QTRY_VERIFY(lightbox->property("zoom").toReal() > 1.2);
+	clickCenter(zoomResetBtn);
+	QTRY_VERIFY(qFuzzyCompare(lightbox->property("zoom").toReal(), 1.0));
+
+	// Next / Prev navigation resets zoom and updates index & caption.
+	QTest::keyClick(window, Qt::Key_Equal);
+	QTRY_VERIFY(lightbox->property("zoom").toReal() > 1.2);
+	clickCenter(nextBtn);
+	QTRY_COMPARE(lightbox->property("currentIndex").toInt(), 1);
+	QVERIFY(caption->property("text").toString().startsWith(u"2 / 2"_s));
+	QVERIFY(qFuzzyCompare(lightbox->property("zoom").toReal(), 1.0));
+	QTest::keyClick(window, Qt::Key_Left);
+	QTRY_COMPARE(lightbox->property("currentIndex").toInt(), 0);
+	QVERIFY(caption->property("text").toString().startsWith(u"1 / 2"_s));
+
+	// Let async image fetch finish before teardown.
+	QQuickItem* lightboxPicture = findItem(lightbox, [](QQuickItem* item) {
+		return QByteArray(item->metaObject()->className()).startsWith("QQuickImage")
+		       && item->property("source").toUrl().toString().contains(u"chatimage"_s);
+	});
+	QVERIFY(lightboxPicture);
+	QTRY_VERIFY([&] {
+		const int status = lightboxPicture->property("status").toInt();
+		return status == 1 || status == 3;
+	}());
+	QVERIFY2(warningSpy.isEmpty(), "Lightbox navigation or zoom emitted QML warnings");
+}
+
+void TestMainWindow::sidebarHistoryFilterMenuAndCustomHeightCollapseWork()
+{
+	MainFixture f;
+	f.stub.setSession(u"ses_a"_s, sessionInfoJson(u"ses_a"_s, {.name = u"Planner"_s, .cwd = u"/work"_s, .createdAt = 1}));
+	for(int i = 0; i < 10; ++i)
+	{
+		f.stub.add(u"ses_extra_%1"_s.arg(i), 10 + i);
+	}
+	f.stub.addHistory(u"hist_spawned"_s, sessionInfoJson(u"hist_spawned"_s, {.title = u"Spawned job"_s, .cwd = u"/work"_s, .createdAt = 5, .live = false, .parent = u"ses_a"_s}));
+	f.stub.addHistory(u"hist_other"_s, sessionInfoJson(u"hist_other"_s, {.title = u"Other dir job"_s, .cwd = u"/other"_s, .createdAt = 6, .live = false}));
+	f.stub.broadcastSessions();
+	f.workspace->refreshHistory();
+	QTRY_COMPARE(f.workspace->history()->rowCount(), 2);
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+	window->requestActivate();
+	QTRY_VERIFY(window->isActive());
+
+	auto* sidebar = findByTypePrefix(window->contentItem(), "Sidebar_QMLTYPE");
+	QVERIFY(sidebar);
+	auto* runningList = findItem(sidebar, [](QQuickItem* i) { return i->objectName() == u"runningList"_s; });
+	auto* historyHeader = findItem(sidebar, [](QQuickItem* i) { return i->objectName() == u"historySectionHeader"_s; });
+	auto* historyBody = findItem(sidebar, [](QQuickItem* i) { return i->objectName() == u"historyBody"_s; });
+	auto* filterBtn = findItem(sidebar, [](QQuickItem* i) { return i->objectName() == u"historyFilterButton"_s; });
+	QVERIFY(runningList && historyHeader && historyBody && filterBtn);
+
+	// 1) HistoryRow displays "· ⟲ Planner" for spawned session.
+	QTRY_VERIFY(findItem(historyBody, [](QQuickItem* item) {
+		return QByteArray(item->metaObject()->className()).startsWith("QQuickText")
+		       && item->property("text").toString().contains(u"\u27f2 Planner"_s);
+	}) != nullptr);
+
+	// 2) Scheme B history filter menu toggles User-created and Only current directory.
+	const auto clickCenter = [&](QQuickItem* item) {
+		const QPoint pt = item->mapToScene(QPointF(item->width() / 2.0, item->height() / 2.0)).toPoint();
+		QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, pt);
+	};
+	clickCenter(filterBtn);
+	QObject* filterMenu = nullptr;
+	for(QObject* ch : filterBtn->children())
+	{
+		if(ch->objectName() == u"historyFilterMenu"_s)
+		{
+			filterMenu = ch;
+			break;
+		}
+	}
+	QVERIFY(filterMenu);
+	QTRY_VERIFY(filterMenu->property("opened").toBool());
+	QQuickItem* contentItem = filterMenu->property("contentItem").value<QQuickItem*>();
+	QVERIFY(contentItem);
+	auto* userFilterItem = findItem(contentItem, [](QQuickItem* i) { return i->objectName() == u"historyFilterUser"_s; });
+	QVERIFY(userFilterItem);
+	clickCenter(userFilterItem);
+	QTRY_COMPARE(f.workspace->historyCreatorFilter(), u"user"_s);
+	QTRY_COMPARE(f.workspace->history()->rowCount(), 1);
+	QVERIFY(sidebar->property("historyFilterActive").toBool());
+
+	// 3) Custom running height smoothly animates to remainingAfterTodo when History collapses, then back on expand.
+	f.workspace->settings()->setSidebarRunningHeight(180);
+	QTRY_COMPARE(qRound(runningList->height()), 180);
+	clickCenter(historyHeader);
+	QTRY_VERIFY(!f.workspace->settings()->sidebarHistoryExpanded());
+	QVERIFY(runningList->height() < sidebar->property("remainingAfterTodo").toReal());
+	QTRY_COMPARE(qRound(runningList->height()), qRound(sidebar->property("remainingAfterTodo").toReal()));
+	QTRY_VERIFY(!historyBody->isVisible());
+
+	clickCenter(historyHeader);
+	QTRY_VERIFY(f.workspace->settings()->sidebarHistoryExpanded());
+	QVERIFY(runningList->height() > 180.0);
+	QTRY_COMPARE(qRound(runningList->height()), 180);
+	QVERIFY2(warningSpy.isEmpty(), "Sidebar filter menu or custom-height collapse emitted QML warnings");
 }
 
 QTEST_MAIN(TestMainWindow)

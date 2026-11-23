@@ -76,10 +76,12 @@ Item {
 		olderError: pane.session.olderError
 		onLoadOlderRequested: pane.session.loadOlder()
 		onImageClicked: image => {
+			const list = pane.session.allImages()
 			lightboxLoader.pendingSessionId = pane.session.sessionId
 			lightboxLoader.pendingImage = image
+			lightboxLoader.pendingImages = list
 			if (lightboxLoader.item)
-				(lightboxLoader.item as Lightbox).open(pane.session.sessionId, image)
+				(lightboxLoader.item as Lightbox).open(pane.session.sessionId, image, list)
 			else
 				lightboxLoader.active = true
 		}
@@ -220,12 +222,11 @@ Item {
 	Loader {
 		id: composerLoader
 		objectName: "composerLoader"
-		anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: composerLoader.height > 0 ? pane.margin : 0 }
+		anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: Math.min(pane.margin, composerLoader.height) }
 		width: chat.columnWidth
 		height: item ? item.height : 0
-		active: pane.composerShown || pane.session.composer.queueCount > 0
+		active: true
 		readonly property real sendButtonCenterX: item ? (item as Composer).sendButtonCenterX : width - pane.sendButtonFallbackInset
-
 		sourceComponent: Composer {
 			width: composerLoader.width
 			session: pane.session
@@ -242,11 +243,12 @@ Item {
 		active: false
 		property string pendingSessionId: ""
 		property var pendingImage: null
+		property var pendingImages: []
 
 		sourceComponent: Lightbox {}
 		onLoaded: {
 			if (pendingImage)
-				(item as Lightbox).open(pendingSessionId, pendingImage)
+				(item as Lightbox).open(pendingSessionId, pendingImage, pendingImages)
 		}
 		Connections {
 			target: lightboxLoader.item

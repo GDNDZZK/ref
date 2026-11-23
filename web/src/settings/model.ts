@@ -5,6 +5,7 @@ import type { NotifyKind } from '../proto/generated'
 import { metrics } from '../theme/generated/theme.ts'
 export type ThemeChoice = 'system' | 'light' | 'dark'
 export type LanguageChoice = 'system' | 'en' | 'zh-CN'
+export type HistoryCreatorFilter = 'all' | 'user'
 
 export interface NotificationSettings {
   enabled: boolean // master switch
@@ -25,12 +26,15 @@ export interface Settings {
   sidebarRunningOrder: string[]
   sidebarTodoHeight: number
   sidebarRunningHeight: number
+  sidebarHistoryCreatorFilter: HistoryCreatorFilter
+  sidebarHistoryCurrentDir: boolean
 }
 
 export const STORAGE_KEY = 'ref.settings'
 
 const THEME_CHOICES: readonly ThemeChoice[] = ['system', 'light', 'dark']
 const LANGUAGE_CHOICES: readonly LanguageChoice[] = ['system', 'en', 'zh-CN']
+const HISTORY_CREATOR_FILTERS: readonly HistoryCreatorFilter[] = ['all', 'user']
 
 export function defaultSettings(): Settings {
   return {
@@ -45,6 +49,8 @@ export function defaultSettings(): Settings {
     sidebarRunningOrder: [],
     sidebarTodoHeight: 0,
     sidebarRunningHeight: 0,
+    sidebarHistoryCreatorFilter: 'all',
+    sidebarHistoryCurrentDir: false,
   }
 }
 function pick<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
@@ -111,6 +117,12 @@ export function parseSettings(raw: string | null): { settings: Settings; corrupt
     sidebarRunningOrder: stringList(stored['sidebarRunningOrder']),
     sidebarTodoHeight: nonNegativeInt(stored['sidebarTodoHeight']),
     sidebarRunningHeight: nonNegativeInt(stored['sidebarRunningHeight']),
+    sidebarHistoryCreatorFilter: pick(
+      stored['sidebarHistoryCreatorFilter'],
+      HISTORY_CREATOR_FILTERS,
+      defaults.sidebarHistoryCreatorFilter,
+    ),
+    sidebarHistoryCurrentDir: flag(stored['sidebarHistoryCurrentDir'], defaults.sidebarHistoryCurrentDir),
   }
   return { settings, corrupt: false }
 }

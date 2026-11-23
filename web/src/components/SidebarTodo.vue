@@ -14,26 +14,32 @@ const props = withDefaults(
     expanded?: boolean
     height?: number
     maxHeight?: string
+    fill?: boolean
   }>(),
-  { expanded: true, height: 0, maxHeight: undefined },
+  { expanded: true, height: 0, maxHeight: undefined, fill: false },
 )
 const emit = defineEmits<{ toggle: [] }>()
 
 const { t } = useI18n()
 const progress = computed(() => todoProgress(props.todos))
 const list = computed(() => [...(props.todos ?? [])])
-const customHeight = computed(() => props.expanded && props.height > 0)
+const customHeight = computed(() => props.height > 0)
 const slotStyle = computed(() => {
-  if (!customHeight.value) return undefined
+  if (!customHeight.value && !props.maxHeight) return undefined
   return {
-    '--todo-height': `${props.height}px`,
+    ...(customHeight.value ? { '--todo-height': `${props.height}px` } : {}),
     ...(props.maxHeight ? { '--todo-max-height': props.maxHeight } : {}),
   }
 })
 </script>
 <template>
   <Transition name="todo-fold">
-    <div v-if="progress" class="todo-slot" :class="{ 'custom-height': customHeight }" :style="slotStyle">
+    <div
+      v-if="progress"
+      class="todo-slot"
+      :class="{ open: expanded, 'custom-height': customHeight, fill }"
+      :style="slotStyle"
+    >
       <div class="todo-fold">
         <section class="todo-section" :aria-label="t('sidebar.todo')">
           <h2 class="heading">
@@ -67,15 +73,28 @@ const slotStyle = computed(() => {
   max-height: calc(100% / var(--sidebar-todo-share));
   transition:
     grid-template-rows var(--motion-standard) var(--motion-ease),
+    height var(--motion-standard) var(--motion-ease),
+    min-height var(--motion-standard) var(--motion-ease),
+    max-height var(--motion-standard) var(--motion-ease),
+    flex-grow var(--motion-standard) var(--motion-ease),
     opacity var(--motion-standard) var(--motion-ease);
 }
 
 .todo-slot.custom-height {
-  height: var(--todo-height);
-  min-height: calc(var(--sidebar-section-height) + 38px);
+  height: calc(var(--sidebar-section-height) + 4px);
+  min-height: 0;
   max-height: var(--todo-max-height, calc(100% - 2 * var(--sidebar-section-height)));
 }
 
+.todo-slot.open.custom-height {
+  height: var(--todo-height);
+  min-height: calc(var(--sidebar-section-height) + 38px);
+}
+
+.todo-slot.open.fill {
+  flex-grow: 1;
+  max-height: var(--todo-max-height, calc(100% - 2 * var(--sidebar-section-height)));
+}
 .todo-fold {
   display: flex;
   flex-direction: column;
@@ -91,12 +110,11 @@ const slotStyle = computed(() => {
 
 .todo-section {
   display: flex;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
   margin-bottom: 4px;
 }
-
 .heading {
   flex: none;
   height: var(--sidebar-section-height);
@@ -166,6 +184,10 @@ const slotStyle = computed(() => {
   opacity: 1;
 }
 
+.todo-slot.open.custom-height .todo-body.open,
+.todo-slot.open.fill .todo-body.open {
+  flex: 1 1 auto;
+}
 .todo-body-fold {
   display: flex;
   flex-direction: column;

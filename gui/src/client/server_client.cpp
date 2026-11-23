@@ -267,9 +267,9 @@ QCoro::Task<Result<QList<proto::SessionInfo>>> ServerClient::watchAll(bool enabl
 	co_return asResult(co_await request(proto::request::watchAll(enabled)), proto::parseSessionsResult);
 }
 
-QCoro::Task<Result<QList<proto::SessionInfo>>> ServerClient::listHistory(QString cwd, int limit)
+QCoro::Task<Result<QList<proto::SessionInfo>>> ServerClient::listHistory(QString cwd, int limit, QString creator, QString query)
 {
-	co_return asResult(co_await request(proto::request::listHistory(cwd, limit)), proto::parseSessionsResult);
+	co_return asResult(co_await request(proto::request::listHistory(cwd, limit, creator, query)), proto::parseSessionsResult);
 }
 
 QCoro::Task<Result<proto::PromptResult>> ServerClient::prompt(QString sessionId, QString text, QList<proto::ImageData> images)

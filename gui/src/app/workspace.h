@@ -60,6 +60,11 @@ class Workspace : public QObject
 	// Live and persisted sessions in one list with a filter of its own, for the session picker.
 	Q_PROPERTY(refgui::workspace::SessionListModel* sessionChoices READ sessionChoices CONSTANT)
 	Q_PROPERTY(bool historyLoaded READ historyLoaded NOTIFY historyLoadedChanged)
+	Q_PROPERTY(QString historyCreatorFilter READ historyCreatorFilter NOTIFY historyFilterChanged)
+	Q_PROPERTY(QString historyCreatorId READ historyCreatorId NOTIFY historyFilterChanged)
+	Q_PROPERTY(QString historyCreatorLabel READ historyCreatorLabel NOTIFY historyFilterChanged)
+	Q_PROPERTY(bool historyCurrentDir READ historyCurrentDir NOTIFY historyFilterChanged)
+	Q_PROPERTY(QString historySearch READ historySearch NOTIFY historySearchChanged)
 	// Split view.
 	Q_PROPERTY(QAbstractItemModel* tiles READ tiles CONSTANT)
 	Q_PROPERTY(TileStage* tileStage READ tileStage CONSTANT)
@@ -122,6 +127,11 @@ public:
 	refgui::workspace::SessionListModel* history() { return &m_directory.history(); }
 	refgui::workspace::SessionListModel* sessionChoices() { return &m_directory.choices(); }
 	bool historyLoaded() const { return m_directory.historyLoaded(); }
+	const QString& historyCreatorFilter() const { return m_historyCreatorFilter; }
+	const QString& historyCreatorId() const { return m_historyCreatorId; }
+	QString historyCreatorLabel() const;
+	bool historyCurrentDir() const { return m_settings.sidebarHistoryCurrentDir(); }
+	const QString& historySearch() const { return m_historySearch; }
 	QAbstractItemModel* tiles() { return &m_tiles; }
 	TileStage* tileStage() { return &m_stage; }
 	bool isSplitView() const { return m_split; }
@@ -172,7 +182,10 @@ public:
 	Q_INVOKABLE void listDirs(const QString& path, const QJSValue& cb, const QString& cwd = {}, bool includeFiles = false);
 	Q_INVOKABLE void reloadConfig(const QJSValue& cb = {});
 	Q_INVOKABLE void refreshMcp() { m_config.refreshMcp(); }
-	Q_INVOKABLE void refreshHistory() { m_directory.refreshHistory(); }
+	Q_INVOKABLE void refreshHistory() { m_directory.refreshHistory(true); }
+	Q_INVOKABLE void setHistoryFilter(const QString& creatorFilter, bool currentDir, const QString& creatorId = {});
+	Q_INVOKABLE void setHistorySearch(const QString& query);
+	Q_INVOKABLE void filterHistoryByCreator(const QString& sessionId);
 	void beginLocalConfigMutation() { ++m_localMutationsInFlight; }
 	void endLocalConfigMutation() { --m_localMutationsInFlight; }
 
@@ -208,6 +221,8 @@ signals:
 	void windowActiveChanged();
 	void mcpServersChanged();
 	void historyLoadedChanged();
+	void historyFilterChanged();
+	void historySearchChanged();
 	void splitViewChanged();
 	void focusedTileChanged();
 	void frontSessionChanged();
@@ -243,6 +258,8 @@ private:
 	void setCurrent(ChatSession* session);
 	void setCwd(const QString& cwd);
 	void syncConfigCwd();
+	void applyHistoryFilter(bool refreshNow);
+	void updateHistoryCreatorLabel();
 	void updateHighlight();
 	void onLiveChanged();
 	void dropChat(const QString& sessionId);
@@ -326,5 +343,10 @@ private:
 	bool m_started = false;
 	bool m_windowActive = false;
 	QString m_effectiveCwd;
+	QString m_historyCreatorFilter;
+	QString m_historyCreatorId;
+	QString m_lastHistoryCreatorLabel;
+	QString m_historySearch;
+	bool m_updatingHistoryFilter = false;
 	int m_localMutationsInFlight = 0;
 };
