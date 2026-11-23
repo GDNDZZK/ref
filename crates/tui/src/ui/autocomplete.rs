@@ -1,6 +1,7 @@
 //! Autocomplete popup state, 0-flicker directory/binary caches, path & shell token parsing, and rendering.
 
 use std::collections::VecDeque;
+use std::time::{Duration, Instant};
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
@@ -29,6 +30,7 @@ pub enum AcKind {
     File,
     ShellCmd,
     ShellPath,
+    ShellArg,
 }
 
 #[derive(Debug, Clone)]
@@ -255,6 +257,90 @@ impl DirCache {
     pub fn clear(&mut self) {
         self.entries.clear();
     }
+}
+
+const SHELL_CACHE_CAP: usize = 48;
+const SHELL_CACHE_TTL: Duration = Duration::from_secs(3);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellCompleteKey {
+    pub cwd: String,
+    pub line: String,
+}
+
+#[derive(Default)]
+pub struct ShellCompleteCache {
+    entries: VecDeque<(
+        ShellCompleteKey,
+        Instant,
+        Vec<ref_proto::ShellCompletionItem>,
+    )>,
+}
+
+impl ShellCompleteCache {
+    pub fn get(&self, key: &ShellCompleteKey) -> Option<&[ref_proto::ShellCompletionItem]> {
+        self.entries
+            .iter()
+            .find(|(k, at, _)| k == key && at.elapsed() < SHELL_CACHE_TTL)
+            .map(|(_, _, v)| v.as_slice())
+    }
+
+    pub fn insert(&mut self, key: ShellCompleteKey, items: Vec<ref_proto::ShellCompletionItem>) {
+        self.entries.retain(|(k, _, _)| k != &key);
+        if self.entries.len() >= SHELL_CACHE_CAP {
+            self.entries.pop_front();
+        }
+        self.entries.push_back((key, Instant::now(), items));
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+
+    /// Longest non-expired cached entry in `cwd` whose `line` is a prefix within the same token.
+    pub fn longest_prefix(
+        &self,
+        cwd: &str,
+        line: &str,
+        min_len: usize,
+    ) -> Option<&[ref_proto::ShellCompletionItem]> {
+        self.entries
+            .iter()
+            .filter(|(k, at, _)| {
+                at.elapsed() < SHELL_CACHE_TTL
+                    && k.cwd == cwd
+                    && k.line.len() >= min_len
+                    && line.starts_with(&k.line)
+                    && !line[k.line.len()..].contains(char::is_whitespace)
+            })
+            .max_by_key(|(k, _, _)| k.line.len())
+            .map(|(_, _, v)| v.as_slice())
+    }
+}
+
+/// Formats `CompleteShell` items for `AcKind::ShellArg`, appending a space unless ending with `/`, `\`, `=`, or `:`.
+pub fn build_shell_arg_items(
+    items: &[ref_proto::ShellCompletionItem],
+    raw_prefix: &str,
+    filter_prefix: bool,
+    limit: usize,
+) -> Vec<(String, String, String)> {
+    let p_lower = raw_prefix.trim_start_matches(['"', '\'']).to_lowercase();
+    items
+        .iter()
+        .filter(|it| {
+            !filter_prefix || p_lower.is_empty() || it.value.to_lowercase().starts_with(&p_lower)
+        })
+        .take(limit)
+        .map(|it| {
+            let insert = if it.value.ends_with(['/', '\\', '=', ':', ' ']) {
+                it.value.clone()
+            } else {
+                format!("{} ", it.value)
+            };
+            (insert, it.value.clone(), it.description.clone())
+        })
+        .collect()
 }
 
 /// Splits a typed path fragment into `(request_dir, display_prefix, name_prefix, open_quote)`.

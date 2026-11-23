@@ -58,6 +58,10 @@ QJsonObject createConfigFile(const std::optional<QString>& label,
 QJsonObject selectConfigFile(const QString& file, const std::optional<QString>& cwd = {});
 QJsonObject deleteConfigFile(const QString& file, const std::optional<QString>& cwd = {});
 QJsonObject listBinaries(const QString& query, const std::optional<int>& limit = {});
+QJsonObject completeShell(const QString& cwd,
+                          const QString& line,
+                          const std::optional<int>& cursor = {},
+                          const std::optional<int>& limit = {});
 // A page of messages ending right before message `before`.
 QJsonObject messages(const QString& sessionId, const QString& before, int limit);
 // The bytes of an image the messages only name.

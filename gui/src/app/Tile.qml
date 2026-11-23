@@ -42,7 +42,7 @@ Item {
 		pane.focusInput()
 	}
 	function finishResizeLayout() {
-		if (!resizingLayout || resizeSettleTimer.running || widthAnim.running)
+		if (!resizingLayout || resizeSettleTimer.running || widthAnim.running || sidebarAnimating)
 			return
 		settledLayoutWidth = paneTargetWidth
 		resizingLayout = false
@@ -91,7 +91,7 @@ Item {
 			resizeSettleTimer.restart()
 			return
 		}
-		if (!arrived || travelling || sidebarAnimating) {
+		if (!arrived || travelling) {
 			settledLayoutWidth = paneTargetWidth
 			resizingLayout = false
 			resizeSettleTimer.stop()
@@ -141,8 +141,16 @@ Item {
 	}
 
 	onSidebarAnimatingChanged: {
-		if (!sidebarAnimating && !resizingLayout)
+		if (sidebarAnimating) {
+			if (arrived && !travelling) {
+				resizingLayout = true
+				resizeSettleTimer.restart()
+			}
+		} else if (resizingLayout) {
+			resizeSettleTimer.restart()
+		} else {
 			settledLayoutWidth = paneTargetWidth
+		}
 	}
 
 	// A tile arrives by fading and growing into its slot.
@@ -353,10 +361,10 @@ Item {
 			layoutCompact: widthAnim.running ? true : !tile.expanded
 			layoutWidth: {
 				const inset = anchors.leftMargin + anchors.rightMargin
-				if (tile.sidebarAnimating)
-					return Math.max(0, tile.stableWidth - inset)
 				if (tile.resizingLayout)
 					return tile.settledLayoutWidth
+				if (tile.sidebarAnimating)
+					return Math.max(0, tile.stableWidth - inset)
 				if (widthAnim.running)
 					return tile.paneWidthFloor
 				return width

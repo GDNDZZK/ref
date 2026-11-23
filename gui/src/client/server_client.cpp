@@ -392,6 +392,15 @@ QCoro::Task<Result<QStringList>> ServerClient::listBinaries(QString query, std::
 	co_return asResult(co_await request(proto::request::listBinaries(query, limit)), proto::parseBinariesResult);
 }
 
+QCoro::Task<Result<QList<proto::ShellCompletionItem>>> ServerClient::completeShell(QString cwd,
+                                                                                   QString line,
+                                                                                   std::optional<int> cursor,
+                                                                                   std::optional<int> limit)
+{
+	co_return asResult(co_await request(proto::request::completeShell(cwd, line, cursor, limit)),
+	                   proto::parseShellCompletionResult);
+}
+
 QCoro::Task<Result<proto::MessagesPage>> ServerClient::messages(QString sessionId, QString before, int limit)
 {
 	co_return asResult(co_await request(proto::request::messages(sessionId, before, limit)), proto::parseMessagesResult);

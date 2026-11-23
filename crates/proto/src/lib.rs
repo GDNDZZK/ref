@@ -707,6 +707,14 @@ pub struct CommandInfo {
     pub source: String,
 }
 
+/// One shell completion candidate returned by [`Request::CompleteShell`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShellCompletionItem {
+    pub value: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+}
+
 /// Values of [`McpServerStatus::status`].
 pub const MCP_CONNECTED: &str = "connected";
 pub const MCP_CONNECTING: &str = "connecting";
@@ -1097,6 +1105,20 @@ pub enum Request {
     /// Executable names on `$PATH` + shell builtins matching `query`. -> `{binaries: [String]}`
     ListBinaries {
         query: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        limit: Option<usize>,
+    },
+    /// Shell subcommand / option / argument completions via the user's shell completion scripts.
+    /// `cursor` is a UTF-8 byte offset into `line` (defaulting to `line.len()`); `limit` defaults
+    /// to 50 (max 200); relative `cwd` resolves against the connection's `cwd`.
+    /// -> `{items: [ShellCompletionItem]}` (empty when no shell spec or only generic file fallback).
+    CompleteShell {
+        cwd: String,
+        line: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        cursor: Option<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional = nullable)]
         limit: Option<usize>,

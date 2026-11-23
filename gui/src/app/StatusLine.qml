@@ -16,9 +16,11 @@ Item {
 
 	readonly property int lineHeight: 28
 	readonly property int itemSpacing: 8
-	readonly property int barWidth: 48
+	readonly property int barWidth: 56
 	readonly property int tipDelay: 600
-	readonly property int barHeight: 4
+	readonly property int barHeight: 5
+	readonly property int tickWidth: 2
+	readonly property int tickOverhang: 2
 	readonly property string activity: session.activity
 	readonly property bool working: activity === Activity.thinking || activity === Activity.running || activity === Activity.compacting
 	readonly property bool retrying: activity === Activity.retrying
@@ -157,6 +159,8 @@ Item {
 				font.pixelSize: Theme.smallFontSize
 			}
 			Rectangle {
+				id: contextBar
+				objectName: "contextBar"
 				anchors.verticalCenter: parent.verticalCenter
 				width: line.barWidth
 				height: line.barHeight
@@ -171,6 +175,34 @@ Item {
 
 					Behavior on width { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 					Behavior on color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+				}
+
+				Rectangle {
+					objectName: "contextRecommendTick"
+					anchors.verticalCenter: parent.verticalCenter
+					z: 1
+					width: line.tickWidth
+					height: parent.height + 2 * line.tickOverhang
+					radius: width / 2
+					color: Theme.warning
+					visible: line.session.contextRecommend > 0 && line.session.contextRecommend < line.contextMax
+					x: line.contextMax > 0
+						? Math.max(0, Math.min(parent.width - width, parent.width * (line.session.contextRecommend / line.contextMax) - width / 2))
+						: 0
+				}
+
+				Rectangle {
+					objectName: "contextAutoTick"
+					anchors.verticalCenter: parent.verticalCenter
+					z: 1
+					width: line.tickWidth
+					height: parent.height + 2 * line.tickOverhang
+					radius: width / 2
+					color: Theme.danger
+					visible: line.session.contextAuto > 0 && line.session.contextAuto < line.contextMax
+					x: line.contextMax > 0
+						? Math.max(0, Math.min(parent.width - width, parent.width * (line.session.contextAuto / line.contextMax) - width / 2))
+						: 0
 				}
 			}
 

@@ -209,6 +209,10 @@ private:
 		{
 			m_fake.respond(request, {{u"binaries"_s, QJsonArray{u"cargo"_s, u"cat"_s, u"catfish"_s}}});
 		}
+		else if(op == u"complete_shell"_s)
+		{
+			m_fake.respond(request, {{u"items"_s, QJsonArray()}});
+		}
 		else if(op == u"mcp_status"_s)
 		{
 			m_fake.respond(request, {{u"servers"_s, QJsonArray()}});
@@ -408,6 +412,7 @@ struct MainFixture
 
 	~MainFixture()
 	{
+		QCoreApplication::processEvents();
 		QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 		NotificationCenterForeign::instance = nullptr;
 		Workspace::setInstance(nullptr);
@@ -455,11 +460,19 @@ private slots:
 	void queueStripShowsQueuedPromptsAndCoexistsWithTileComposer();
 	void lightboxNavigatesZoomsAndResets();
 	void sidebarHistoryFilterMenuAndCustomHeightCollapseWork();
+	void splitViewSidebarToggleBlursFadesAndFreezesLayoutWidth();
+	void cleanupTestCase();
 };
 
 void TestMainWindow::initTestCase()
 {
 	QQuickStyle::setStyle(u"Basic"_s);
+}
+
+void TestMainWindow::cleanupTestCase()
+{
+	QCoreApplication::processEvents();
+	QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 }
 
 void TestMainWindow::mainWindowInstantiatesFramelessAndBlocksModalWheel()
@@ -916,6 +929,38 @@ void TestMainWindow::statusLineRetryTooltipShowsFullErrorWithoutWarnings()
 	QVERIFY(!contextTipText.contains(u"%4"_s));
 	QVERIFY(contextTipText.contains(u"1.2k"_s));
 	QVERIFY(contextTipText.contains(u"200.0k"_s));
+
+	QQuickItem* contextBar = findItem(line, [](QQuickItem* item) { return item->objectName() == u"contextBar"_s; });
+	QQuickItem* recommendTick = findItem(line, [](QQuickItem* item) { return item->objectName() == u"contextRecommendTick"_s; });
+	QQuickItem* autoTick = findItem(line, [](QQuickItem* item) { return item->objectName() == u"contextAutoTick"_s; });
+	QVERIFY(contextBar && recommendTick && autoTick);
+	QVERIFY(recommendTick->isVisible());
+	QVERIFY(autoTick->isVisible());
+	const qreal expectedRecX = std::max(0.0, std::min(contextBar->width() - recommendTick->width(),
+	                                                  contextBar->width() * (150000.0 / 200000.0) - recommendTick->width() / 2.0));
+	const qreal expectedAutoX = std::max(0.0, std::min(contextBar->width() - autoTick->width(),
+	                                                   contextBar->width() * (180000.0 / 200000.0) - autoTick->width() / 2.0));
+	QVERIFY(qFuzzyCompare(recommendTick->x(), expectedRecX));
+	QVERIFY(qFuzzyCompare(autoTick->x(), expectedAutoX));
+	QVERIFY(recommendTick->x() < autoTick->x());
+
+	// Thresholds of 0 or >= max hide the ticks.
+	retryInfo[u"context"_s] = QJsonObject{{u"used"_s, 1234}, {u"max"_s, 200000}, {u"recommend"_s, 0}, {u"auto"_s, 200000}};
+	f.fake.send({{u"kind"_s, u"event"_s},
+	             {u"session_id"_s, u"ses_a"_s},
+	             {u"event"_s, QJsonObject{{u"type"_s, u"info"_s}, {u"info"_s, retryInfo}}}});
+	QTRY_COMPARE(f.workspace->current()->contextRecommend(), qint64(0));
+	QCOMPARE(f.workspace->current()->contextAuto(), qint64(200000));
+	QVERIFY(!recommendTick->isVisible());
+	QVERIFY(!autoTick->isVisible());
+
+	retryInfo[u"context"_s] = QJsonObject{{u"used"_s, 1234}, {u"max"_s, 200000}, {u"recommend"_s, 250000}, {u"auto"_s, 0}};
+	f.fake.send({{u"kind"_s, u"event"_s},
+	             {u"session_id"_s, u"ses_a"_s},
+	             {u"event"_s, QJsonObject{{u"type"_s, u"info"_s}, {u"info"_s, retryInfo}}}});
+	QTRY_COMPARE(f.workspace->current()->contextRecommend(), qint64(250000));
+	QVERIFY(!recommendTick->isVisible());
+	QVERIFY(!autoTick->isVisible());
 
 	QVERIFY2(warningSpy.isEmpty(), "StatusLine / PlainToolTip emitted QML warnings");
 }
@@ -2948,8 +2993,9 @@ void TestMainWindow::uiZoomSettingsShortcutsResizeAndPopupsScaleCleanly()
 	QMetaObject::invokeMethod(menuObj, "openAt", Q_ARG(QPointF, QPointF(12.0, 12.0)));
 	QTRY_VERIFY(menuObj->property("opened").toBool());
 	QQuickItem* menuContent = menuObj->property("contentItem").value<QQuickItem*>();
-	QVERIFY(menuContent && !menuContent->childItems().isEmpty());
-	QQuickItem* menuInner = menuContent->childItems().first();
+	QVERIFY(menuContent);
+	QQuickItem* menuInner = findItem(menuContent, [](QQuickItem* item) { return item->objectName() == u"contextMenuInner"_s; });
+	QVERIFY(menuInner);
 	QVERIFY(qFuzzyCompare(menuInner->scale(), 1.2));
 	QVERIFY(qFuzzyCompare(menuObj->property("width").toReal(), menuInner->width() * 1.2));
 	QMetaObject::invokeMethod(menuObj, "close");
@@ -3588,6 +3634,16 @@ void TestMainWindow::lightboxNavigatesZoomsAndResets()
 	QTRY_VERIFY(qFuzzyCompare(lightbox->opacity(), 1.0));
 	QVERIFY(prevBtn->isVisible() && nextBtn->isVisible());
 	QVERIFY(caption->property("text").toString().startsWith(u"1 / 2"_s));
+	QQuickItem* lightboxPicture = findItem(lightbox, [](QQuickItem* item) {
+		return QByteArray(item->metaObject()->className()).startsWith("QQuickImage")
+		       && item->property("source").toUrl().toString().contains(u"chatimage"_s);
+	});
+	QVERIFY(lightboxPicture);
+	QTRY_VERIFY([&] {
+		const int status = lightboxPicture->property("status").toInt();
+		return lightboxPicture->property("source").toUrl().toString().contains(u"img_1"_s)
+		       && (status == 1 || status == 3);
+	}());
 	const auto clickCenter = [&](QQuickItem* item) {
 		const QPoint pt = item->mapToScene(QPointF(item->width() / 2.0, item->height() / 2.0)).toPoint();
 		QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, pt);
@@ -3611,19 +3667,19 @@ void TestMainWindow::lightboxNavigatesZoomsAndResets()
 	QTRY_COMPARE(lightbox->property("currentIndex").toInt(), 1);
 	QVERIFY(caption->property("text").toString().startsWith(u"2 / 2"_s));
 	QVERIFY(qFuzzyCompare(lightbox->property("zoom").toReal(), 1.0));
+	QTRY_VERIFY([&] {
+		const int status = lightboxPicture->property("status").toInt();
+		return lightboxPicture->property("source").toUrl().toString().contains(u"img_2"_s)
+		       && (status == 1 || status == 3);
+	}());
 	QTest::keyClick(window, Qt::Key_Left);
 	QTRY_COMPARE(lightbox->property("currentIndex").toInt(), 0);
 	QVERIFY(caption->property("text").toString().startsWith(u"1 / 2"_s));
-
 	// Let async image fetch finish before teardown.
-	QQuickItem* lightboxPicture = findItem(lightbox, [](QQuickItem* item) {
-		return QByteArray(item->metaObject()->className()).startsWith("QQuickImage")
-		       && item->property("source").toUrl().toString().contains(u"chatimage"_s);
-	});
-	QVERIFY(lightboxPicture);
 	QTRY_VERIFY([&] {
 		const int status = lightboxPicture->property("status").toInt();
-		return status == 1 || status == 3;
+		return lightboxPicture->property("source").toUrl().toString().contains(u"img_1"_s)
+		       && (status == 1 || status == 3);
 	}());
 	QVERIFY2(warningSpy.isEmpty(), "Lightbox navigation or zoom emitted QML warnings");
 }
@@ -3685,10 +3741,104 @@ void TestMainWindow::sidebarHistoryFilterMenuAndCustomHeightCollapseWork()
 	QVERIFY(contentItem);
 	auto* userFilterItem = findItem(contentItem, [](QQuickItem* i) { return i->objectName() == u"historyFilterUser"_s; });
 	QVERIFY(userFilterItem);
+	QQuickItem* historyRow = findByTypePrefix(historyBody, "HistoryRow_QMLTYPE");
+	QVERIFY(historyRow);
+	const QString initialSessionId = f.workspace->currentId();
+	const QPointF userFilterCenter = userFilterItem->mapToScene(QPointF(userFilterItem->width() / 2.0, userFilterItem->height() / 2.0));
+	const QPointF rowTopLeft = historyRow->mapToScene(QPointF(0.0, 0.0));
+	const QPointF rowBottomRight = historyRow->mapToScene(QPointF(historyRow->width(), historyRow->height()));
+	QVERIFY(userFilterCenter.x() >= rowTopLeft.x() && userFilterCenter.x() <= rowBottomRight.x());
+	QVERIFY(userFilterCenter.y() >= rowTopLeft.y() && userFilterCenter.y() <= rowBottomRight.y());
+
+	// Clicking inside non-item padding of historyFilterMenu neither closes nor clicks through to HistoryRow.
+	const QPoint menuTopPad = contentItem->mapToScene(QPointF(contentItem->width() / 2.0, 2.0)).toPoint();
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, menuTopPad);
+	QTest::qWait(40);
+	QVERIFY(filterMenu->property("opened").toBool());
+	QCOMPARE(f.workspace->currentId(), initialSessionId);
+
 	clickCenter(userFilterItem);
+	QTRY_VERIFY(!filterMenu->property("opened").toBool());
+	QTRY_VERIFY(!filterMenu->property("visible").toBool());
 	QTRY_COMPARE(f.workspace->historyCreatorFilter(), u"user"_s);
 	QTRY_COMPARE(f.workspace->history()->rowCount(), 1);
 	QVERIFY(sidebar->property("historyFilterActive").toBool());
+	QCOMPARE(f.workspace->currentId(), initialSessionId);
+
+	// Reset filter so multiple HistoryRows exist, then verify ContextMenu modal click blocking and action triggering.
+	f.workspace->setHistoryFilter(u"all"_s, false);
+	QTRY_COMPARE(f.workspace->history()->rowCount(), 2);
+	QQuickItem* historyList = findItem(historyBody, [](QQuickItem* i) { return i->objectName() == u"historyList"_s; });
+	QVERIFY(historyList);
+	QPointer<QQuickItem> spawnedRowPtr;
+	QQuickItem* otherRow = nullptr;
+	QTRY_VERIFY([&] {
+		spawnedRowPtr = findItem(historyList, [](QQuickItem* item) {
+			return QByteArray(item->metaObject()->className()).startsWith("HistoryRow_QMLTYPE")
+			       && item->property("sessionId").toString() == u"hist_spawned"_s;
+		});
+		otherRow = findItem(historyList, [](QQuickItem* item) {
+			return QByteArray(item->metaObject()->className()).startsWith("HistoryRow_QMLTYPE")
+			       && item->property("sessionId").toString() == u"hist_other"_s;
+		});
+		return spawnedRowPtr != nullptr && otherRow != nullptr;
+	}());
+	QPointer<QObject> rowMenu;
+	for(QObject* ch : spawnedRowPtr->children())
+	{
+		if(QByteArray(ch->metaObject()->className()).startsWith("ContextMenu_QMLTYPE"))
+		{
+			rowMenu = ch;
+			break;
+		}
+	}
+	QVERIFY(rowMenu);
+	QMetaObject::invokeMethod(rowMenu.data(), "openAt", Q_ARG(QPointF, QPointF(10.0, 10.0)));
+	QTRY_VERIFY(rowMenu->property("opened").toBool());
+	// Clicking a point on a HistoryRow strictly outside the ContextMenu rect dismisses the menu without opening that row.
+	QQuickItem* rowMenuContent = rowMenu->property("contentItem").value<QQuickItem*>();
+	QVERIFY(rowMenuContent);
+	const QRectF menuRect(rowMenuContent->mapToScene(QPointF(0.0, 0.0)),
+	                      QSizeF(rowMenu->property("width").toReal(), rowMenu->property("height").toReal()));
+	const QRectF otherRowRect(otherRow->mapToScene(QPointF(0.0, 0.0)), QSizeF(otherRow->width(), otherRow->height()));
+	QQuickItem* outsideTargetRow = !menuRect.contains(otherRowRect.center()) ? otherRow : spawnedRowPtr.data();
+	const QRectF targetRect(outsideTargetRow->mapToScene(QPointF(0.0, 0.0)),
+	                        QSizeF(outsideTargetRow->width(), outsideTargetRow->height()));
+	const QPoint outsideRowPt(qRound(targetRect.right() - 10.0), qRound(targetRect.center().y()));
+	QVERIFY(targetRect.contains(outsideRowPt));
+	QVERIFY(!menuRect.contains(outsideRowPt));
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, outsideRowPt);
+	QTRY_VERIFY(!rowMenu->property("opened").toBool());
+	QTRY_VERIFY(!rowMenu->property("visible").toBool());
+	QCOMPARE(f.workspace->currentId(), initialSessionId);
+
+	// Pressing Escape closes the modal ContextMenu cleanly.
+	QMetaObject::invokeMethod(rowMenu.data(), "openAt", Q_ARG(QPointF, QPointF(10.0, 10.0)));
+	QTRY_VERIFY(rowMenu->property("opened").toBool());
+	QTest::keyClick(window, Qt::Key_Escape);
+	QTRY_VERIFY(!rowMenu->property("opened").toBool());
+	QTRY_VERIFY(!rowMenu->property("visible").toBool());
+	QCOMPARE(f.workspace->currentId(), initialSessionId);
+
+	// Re-open ContextMenu over HistoryRow and click an action entry -> triggers filter without opening underlying row.
+	QMetaObject::invokeMethod(rowMenu.data(), "openAt", Q_ARG(QPointF, QPointF(10.0, 10.0)));
+	QTRY_VERIFY(rowMenu->property("opened").toBool());
+	rowMenuContent = rowMenu->property("contentItem").value<QQuickItem*>();
+	QVERIFY(rowMenuContent);
+	QQuickItem* filterCreatorEntry = findItem(rowMenuContent, [](QQuickItem* item) {
+		return QByteArray(item->metaObject()->className()).startsWith("QQuickText")
+		       && item->property("text").toString() == u"Filter history by creator"_s;
+	});
+	QVERIFY(filterCreatorEntry);
+	clickCenter(filterCreatorEntry);
+	QTRY_COMPARE(f.workspace->historyCreatorFilter(), u"creator"_s);
+	QVERIFY(rowMenu && spawnedRowPtr);
+	QTRY_VERIFY(rowMenu && !rowMenu->property("opened").toBool());
+	QTRY_VERIFY(rowMenu && !rowMenu->property("visible").toBool());
+	QCOMPARE(f.workspace->currentId(), initialSessionId);
+
+	f.workspace->setHistoryFilter(u"all"_s, false);
+	QTRY_COMPARE(f.workspace->history()->rowCount(), 2);
 
 	// 3) Custom running height smoothly animates to remainingAfterTodo when History collapses, then back on expand.
 	f.workspace->settings()->setSidebarRunningHeight(180);
@@ -3704,6 +3854,87 @@ void TestMainWindow::sidebarHistoryFilterMenuAndCustomHeightCollapseWork()
 	QVERIFY(runningList->height() > 180.0);
 	QTRY_COMPARE(qRound(runningList->height()), 180);
 	QVERIFY2(warningSpy.isEmpty(), "Sidebar filter menu or custom-height collapse emitted QML warnings");
+}
+
+void TestMainWindow::splitViewSidebarToggleBlursFadesAndFreezesLayoutWidth()
+{
+	MainFixture f;
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	window->resize(1200, 720);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+
+	f.workspace->toggleSplit();
+	QTRY_VERIFY(f.workspace->isSplitView());
+	QQuickItem* tileGrid = findByTypePrefix(window->contentItem(), "TileGrid");
+	QVERIFY(tileGrid);
+	QQuickItem* tile = nullptr;
+	QTRY_VERIFY([&] {
+		QList<QQuickItem*> tiles;
+		collectTiles(tileGrid, tiles);
+		for(QQuickItem* candidate : tiles)
+		{
+			if(candidate->property("arrived").toBool() && !candidate->property("resizingLayout").toBool())
+			{
+				tile = candidate;
+				return true;
+			}
+		}
+		return false;
+	}());
+	QQuickItem* pane = findByTypePrefix(tile, "SessionPane");
+	QVERIFY(pane);
+	QTRY_VERIFY(qFuzzyCompare(pane->property("layoutWidth").toReal(), tile->property("settledLayoutWidth").toReal()));
+	const qreal initialSettledWidth = tile->property("settledLayoutWidth").toReal();
+	QVERIFY(initialSettledWidth > 100.0);
+
+	// Collapsing the sidebar triggers blur/fade, freezes layoutWidth, then settles to wider width.
+	f.workspace->commands()->run(u"sidebar"_s);
+	QTRY_VERIFY(tile->property("resizingLayout").toBool());
+	QTRY_VERIFY(pane->property("opacity").toReal() < 0.99);
+	QTRY_VERIFY(pane->property("resizeBlurAmount").toReal() > 0.0);
+	QCOMPARE(pane->property("layoutWidth").toReal(), initialSettledWidth);
+
+	QTRY_VERIFY_WITH_TIMEOUT(!tile->property("resizingLayout").toBool(), 2000);
+	const qreal collapsedSettledWidth = tile->property("settledLayoutWidth").toReal();
+	QVERIFY(collapsedSettledWidth > initialSettledWidth + 50.0);
+	QVERIFY(qFuzzyCompare(collapsedSettledWidth, tile->property("paneTargetWidth").toReal()));
+	QTRY_VERIFY(qFuzzyCompare(pane->property("opacity").toReal(), 1.0));
+	QTRY_VERIFY(qFuzzyIsNull(pane->property("resizeBlurAmount").toReal()));
+	QTRY_VERIFY(qFuzzyCompare(pane->property("layoutWidth").toReal(), pane->width()));
+
+	// Expanding the sidebar triggers blur/fade, freezes layoutWidth, then settles back to initial width.
+	f.workspace->commands()->run(u"sidebar"_s);
+	QTRY_VERIFY(tile->property("resizingLayout").toBool());
+	QTRY_VERIFY(pane->property("opacity").toReal() < 0.99);
+	QTRY_VERIFY(pane->property("resizeBlurAmount").toReal() > 0.0);
+	QCOMPARE(pane->property("layoutWidth").toReal(), collapsedSettledWidth);
+
+	QTRY_VERIFY_WITH_TIMEOUT(!tile->property("resizingLayout").toBool(), 2000);
+	QVERIFY(qFuzzyCompare(tile->property("settledLayoutWidth").toReal(), initialSettledWidth));
+	QTRY_VERIFY(qFuzzyCompare(pane->property("opacity").toReal(), 1.0));
+	QTRY_VERIFY(qFuzzyIsNull(pane->property("resizeBlurAmount").toReal()));
+	QTRY_VERIFY(qFuzzyCompare(pane->property("layoutWidth").toReal(), pane->width()));
+
+	// Rapid double-toggle of sidebar in split view settles cleanly to initial width without warnings.
+	f.workspace->commands()->run(u"sidebar"_s);
+	f.workspace->commands()->run(u"sidebar"_s);
+	QTRY_VERIFY_WITH_TIMEOUT(!tile->property("resizingLayout").toBool(), 2000);
+	QVERIFY(qFuzzyCompare(tile->property("settledLayoutWidth").toReal(), initialSettledWidth));
+	QTRY_VERIFY(qFuzzyCompare(pane->property("opacity").toReal(), 1.0));
+	QTRY_VERIFY(qFuzzyIsNull(pane->property("resizeBlurAmount").toReal()));
+	QVERIFY2(warningSpy.isEmpty(), "Split-view sidebar toggle transition emitted QML warnings");
 }
 
 QTEST_MAIN(TestMainWindow)

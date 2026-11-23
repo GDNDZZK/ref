@@ -1200,6 +1200,12 @@ impl Mock {
             Request::ListBinaries { query, limit } => {
                 self.on_list_binaries(request_id, &query, limit)
             }
+            Request::CompleteShell {
+                line,
+                cursor,
+                limit,
+                ..
+            } => self.on_complete_shell(request_id, &line, cursor, limit),
             Request::GetConfig { .. } => self.ok(request_id, json!({ "config": config() })),
             Request::ListSessions => self.on_list_sessions(request_id),
             Request::ListHistory {
@@ -1788,6 +1794,20 @@ impl Mock {
         self.ok(request_id, json!({ "binaries": binaries }));
     }
 
+    fn on_complete_shell(
+        &self,
+        request_id: Option<u64>,
+        line: &str,
+        cursor: Option<usize>,
+        limit: Option<usize>,
+    ) {
+        let limit = limit
+            .unwrap_or(MOCK_BINARIES_DEFAULT_LIMIT)
+            .clamp(1, MOCK_BINARIES_MAX_LIMIT);
+        let items = mock_shell_completions(line, cursor, limit);
+        self.ok(request_id, json!({ "items": items }));
+    }
+
     fn on_list_dirs(
         &self,
         request_id: Option<u64>,
@@ -1983,6 +2003,89 @@ fn next_variant(current: Option<&str>, variants: &[String]) -> Option<String> {
         Some(i) if i + 1 < variants.len() => Some(variants[i + 1].clone()),
         Some(_) => None,
     }
+}
+
+fn mock_shell_completions(
+    line: &str,
+    cursor: Option<usize>,
+    limit: usize,
+) -> Vec<ShellCompletionItem> {
+    let mut end = cursor.unwrap_or(line.len()).min(line.len());
+    while end > 0 && !line.is_char_boundary(end) {
+        end -= 1;
+    }
+    let before = &line[..end];
+    let crate::ui::autocomplete::ShellTokenPos::Arg { start, raw } =
+        crate::ui::autocomplete::shell_token_context(before)
+    else {
+        return Vec::new();
+    };
+    let seg_prefix = before[..start]
+        .rsplit([';', '|', '&', '\n'])
+        .next()
+        .unwrap_or(&before[..start]);
+    let mut tokens = seg_prefix.split_whitespace().peekable();
+    while let Some(&tok) = tokens.peek() {
+        let is_env = tok.split_once('=').is_some_and(|(k, _)| {
+            !k.is_empty() && k.chars().all(|c| c == '_' || c.is_ascii_alphanumeric())
+        });
+        if is_env || matches!(tok, "sudo" | "env" | "nohup" | "time" | "command" | "exec") {
+            tokens.next();
+        } else {
+            break;
+        }
+    }
+    let Some(cmd_tok) = tokens.next() else {
+        return Vec::new();
+    };
+    let cmd = cmd_tok.rsplit(['/', '\\']).next().unwrap_or(cmd_tok);
+    let items: &[(&str, &str)] = match cmd {
+        "docker" => &[
+            ("compose", "Define and run multi-container applications"),
+            ("build", "Build an image from a Dockerfile"),
+            ("run", "Create and run a new container from an image"),
+            ("ps", "List containers"),
+            ("images", "List images"),
+            ("--help", "Print usage"),
+        ],
+        "git" => &[
+            ("checkout", "Switch branches or restore working tree files"),
+            ("commit", "Record changes to the repository"),
+            ("status", "Show the working tree status"),
+            (
+                "diff",
+                "Show changes between commits, commit and working tree, etc",
+            ),
+            ("log", "Show commit logs"),
+            ("--amend", "Amend previous commit"),
+        ],
+        "cargo" => &[
+            ("build", "Compile the current package"),
+            ("test", "Execute all unit and integration tests"),
+            ("check", "Analyze the current package without building"),
+            ("clippy", "Checks a package to catch common mistakes"),
+            ("fmt", "Formats all bin and lib files of the current crate"),
+            ("--workspace", "Check all packages in the workspace"),
+            ("--all-targets", "Check all targets"),
+        ],
+        _ => return Vec::new(),
+    };
+    let flags_only = tokens.next().is_some();
+    let prefix = raw.trim_start_matches(['"', '\'']);
+    if flags_only && !prefix.starts_with('-') {
+        return Vec::new();
+    }
+    let p_lower = prefix.to_lowercase();
+    items
+        .iter()
+        .filter(|(v, _)| !flags_only || v.starts_with('-'))
+        .filter(|(v, _)| p_lower.is_empty() || v.to_lowercase().starts_with(&p_lower))
+        .take(limit)
+        .map(|(value, description)| ShellCompletionItem {
+            value: (*value).to_string(),
+            description: (*description).to_string(),
+        })
+        .collect()
 }
 
 fn split_mock_drive(s: &str) -> Option<(&str, &str)> {

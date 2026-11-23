@@ -15,7 +15,8 @@ struct CompletionTarget
 		CommandArg,   // "/models claude", "/cd src/", "/close-session a b": built-in command argument
 		File,         // "@src/ma": a file mention (in a prompt or custom command arguments)
 		ShellCommand, // first token in `!` shell mode (history + PATH binaries)
-		ShellPath,    // path token in `!` shell mode (path command or any argument token)
+		ShellArg,     // non-path argument token in `!` shell mode (subcommands, flags, values)
+		ShellPath,    // path token in `!` shell mode (any token containing `/`, `\`, `.`, `~`, or drive prefix)
 	};
 
 	Kind kind = Kind::None;
@@ -28,8 +29,8 @@ struct CompletionTarget
 
 // Finds the completion target at `cursor`.
 // In shell mode, the first token offers ShellCommand (or ShellPath when it contains `/` or starts
-// with `.` or `~`), and subsequent tokens offer ShellPath; an empty shell draft offers
-// ShellCommand only when `forceShellEmpty` is set (e.g. Tab).
+// with `.` or `~`), and subsequent tokens offer ShellPath when path-shaped or ShellArg otherwise;
+// an empty shell draft offers ShellCommand only when `forceShellEmpty` is set (e.g. Tab).
 // Outside shell mode, `/word` at start or after whitespace offers Command, built-in commands
 // with completable arguments offer CommandArg, and `@` after start/whitespace offers File.
 CompletionTarget completionTarget(const QString& text, qsizetype cursor, bool shellMode, bool forceShellEmpty = false);

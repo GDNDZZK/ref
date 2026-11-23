@@ -76,9 +76,7 @@ bool SessionDirectory::hasSidebarFilter() const
 void SessionDirectory::setHistoryFilter(const QString& cwd, SessionListModel::CreatorFilter creatorFilter, const QString& creatorId, bool refreshNow)
 {
 	const QString creator = creatorWireValue(creatorFilter, creatorId);
-	m_history.setCwdFilter(cwd);
-	m_history.setCreatorFilter(creatorFilter);
-	m_history.setCreatorId(creatorId);
+	m_history.setFilters(cwd, creatorFilter, creatorId);
 	if(cwd == m_historyCwd && creator == m_historyCreator)
 	{
 		return;

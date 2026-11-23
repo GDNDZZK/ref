@@ -3,6 +3,7 @@
 #include "app/chat_session.h"
 
 #include <QImage>
+#include <QPointer>
 #include <QQuickTextureFactory>
 #include <QCoroTask>
 
@@ -67,7 +68,12 @@ private:
 			emit fetched(key, {}, u"no such session"_s);
 			co_return;
 		}
+		const QPointer<Host> self(this);
 		const auto result = co_await session->fetchImage(imageId);
+		if(!self)
+		{
+			co_return;
+		}
 		if(!result)
 		{
 			emit fetched(key, {}, result.error());
@@ -97,6 +103,15 @@ public:
 
 	QQuickTextureFactory* textureFactory() const override { return QQuickTextureFactory::textureFactoryForImage(m_image); }
 	QString errorString() const override { return m_error; }
+	void cancel() override
+	{
+		if(std::exchange(m_done, true))
+		{
+			return;
+		}
+		m_error = u"cancelled"_s;
+		emit finished();
+	}
 
 public slots:
 	void onFetched(const QString& key, const QByteArray& bytes, const QString& error)

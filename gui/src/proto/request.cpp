@@ -405,6 +405,22 @@ QJsonObject listBinaries(const QString& query, const std::optional<int>& limit)
 	return json;
 }
 
+QJsonObject completeShell(const QString& cwd, const QString& line, const std::optional<int>& cursor, const std::optional<int>& limit)
+{
+	QJsonObject json = op(u"complete_shell"_s);
+	json.insert(u"cwd"_s, cwd);
+	json.insert(u"line"_s, line);
+	if(cursor)
+	{
+		json.insert(u"cursor"_s, *cursor);
+	}
+	if(limit)
+	{
+		json.insert(u"limit"_s, *limit);
+	}
+	return json;
+}
+
 QJsonObject messages(const QString& sessionId, const QString& before, int limit)
 {
 	QJsonObject json = sessionOp(u"messages"_s, sessionId);

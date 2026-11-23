@@ -485,8 +485,7 @@ fn chat_key(app: &mut App, k: KeyEvent) {
                 app.push_history(&t);
             }
             app.editor.clear();
-            app.shell_mode = false;
-            app.clear_autocomplete();
+            app.exit_shell_mode();
         } else {
             exit_or_arm(app);
         }
@@ -521,8 +520,7 @@ fn chat_key(app: &mut App, k: KeyEvent) {
             } else if app.editor.selection().is_some() {
                 app.editor.select_mode(false);
             } else if app.shell_mode {
-                app.shell_mode = false;
-                app.clear_autocomplete();
+                app.exit_shell_mode();
             } else if app.cur().is_some_and(has_delayed_tool) {
                 // "runs in Ns · esc to cancel": a single esc stops the turn before the tool runs.
                 if let Some(sid) = app.current.clone() {
@@ -595,8 +593,7 @@ fn chat_key(app: &mut App, k: KeyEvent) {
             app.clear_autocomplete();
         }
         KeyCode::Backspace if app.shell_mode && app.editor.text.is_empty() => {
-            app.shell_mode = false;
-            app.clear_autocomplete();
+            app.exit_shell_mode();
         }
         _ => edit_chat_input(app, &k, &before),
     }
@@ -625,6 +622,7 @@ fn set_from_history(app: &mut App, h: &str) {
         app.editor.set_text(rest);
     } else {
         app.shell_mode = false;
+        app.clear_shell_complete_cache();
         app.editor.set_text(h);
     }
     app.clear_autocomplete();
@@ -712,7 +710,7 @@ fn ac_keeps_open_on_tab(kind: Option<&crate::app::AcKind>, value: &str) -> bool 
     use crate::app::AcKind;
     match kind {
         Some(AcKind::SlashArg) => value.ends_with(['/', '\\']) || value.ends_with(' '),
-        Some(AcKind::ShellPath) => value.ends_with(['/', '\\']),
+        Some(AcKind::ShellPath | AcKind::ShellArg) => value.ends_with(['/', '\\']),
         Some(AcKind::Slash | AcKind::File | AcKind::ShellCmd) | None => false,
     }
 }
@@ -1008,8 +1006,7 @@ fn watch_key(app: &mut App, k: KeyEvent) {
                 if let Some(e) = app.watch.inputs.get_mut(&f) {
                     e.clear();
                 }
-                app.watch.shell_modes.remove(&f);
-                app.clear_autocomplete();
+                app.exit_watch_shell_mode(&f);
                 return;
             }
         }
@@ -1113,8 +1110,7 @@ fn watch_key(app: &mut App, k: KeyEvent) {
                 }
                 return;
             }
-            if app.watch.shell_modes.remove(&f) {
-                app.clear_autocomplete();
+            if app.exit_watch_shell_mode(&f) {
                 return;
             }
             let busy = app.views.get(&f).is_some_and(|v| v.is_busy());
@@ -1155,8 +1151,7 @@ fn watch_key(app: &mut App, k: KeyEvent) {
         }
         KeyCode::Backspace if can_leave_watch_shell_mode(app) => {
             if let Some(f) = app.watch.focus.clone() {
-                app.watch.shell_modes.remove(&f);
-                app.clear_autocomplete();
+                app.exit_watch_shell_mode(&f);
             }
         }
         _ => match app.watch.focus.clone() {

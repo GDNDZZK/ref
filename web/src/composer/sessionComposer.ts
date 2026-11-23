@@ -25,7 +25,7 @@ import type { PromptHistory } from './history.ts'
 import { readImage, rejectionOf } from './images.ts'
 
 export type ComposerApi = Pick<RefApi, 'prompt' | 'shell' | 'removeQueued' | 'listFiles' | 'expandCommand'> &
-  Partial<Pick<RefApi, 'listDirs' | 'listBinaries'>>
+  Partial<Pick<RefApi, 'listDirs' | 'listBinaries' | 'completeShell'>>
 
 export interface ComposerHost {
   sessionId: string
@@ -121,6 +121,10 @@ export class SessionComposer {
       listBinaries: (query, limit) => {
         const fn = host.api().listBinaries
         return fn ? fn(query, limit) : Promise.resolve([])
+      },
+      completeShell: (cwd, line, options) => {
+        const fn = host.api().completeShell
+        return fn ? fn(cwd, line, options) : Promise.resolve([])
       },
       models: () => host.models?.() ?? [],
       agents: () => host.agents?.() ?? [],
@@ -226,6 +230,10 @@ export class SessionComposer {
 
   selectCompletion(index: number): void {
     this.completionController.select(index)
+  }
+  triggerShellCompletion(): void {
+    if (!this.draft.shell) return
+    this.completionController.triggerShell(this.draft.text, this.cursor)
   }
 
   // Tab inserts the choice; Enter (`run`) also runs a command that needs no arguments (or enum arg).

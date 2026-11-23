@@ -265,6 +265,33 @@ private slots:
 		QVERIFY(result); // resumed before close() returned
 		QVERIFY(!result->has_value());
 	}
+
+	void completeShellSendsRequestAndParsesItems()
+	{
+		FakeBackend backend;
+		backend.onRequest = [&](const QJsonObject& request) {
+			QCOMPARE(request.value(u"op"_s).toString(), u"complete_shell"_s);
+			QCOMPARE(request.value(u"cwd"_s).toString(), u"/work"_s);
+			QCOMPARE(request.value(u"line"_s).toString(), u"git ch"_s);
+			QCOMPARE(request.value(u"cursor"_s).toInt(), 6);
+			QCOMPARE(request.value(u"limit"_s).toInt(), 50);
+			backend.respond(request,
+			                {{u"items"_s,
+			                  QJsonArray{QJsonObject{{u"value"_s, u"checkout"_s}, {u"description"_s, u"Switch branches"_s}},
+			                             QJsonObject{{u"value"_s, u"cherry-pick"_s}}}}});
+		};
+		ServerClient client;
+		QVERIFY(open(client, backend));
+
+		const auto result = await(client.completeShell(u"/work"_s, u"git ch"_s, 6, 50)).value();
+
+		QVERIFY(result);
+		QCOMPARE(result->size(), 2);
+		QCOMPARE(result->at(0).value, u"checkout"_s);
+		QCOMPARE(result->at(0).description, u"Switch branches"_s);
+		QCOMPARE(result->at(1).value, u"cherry-pick"_s);
+		QCOMPARE(result->at(1).description, QString());
+	}
 };
 
 QTEST_GUILESS_MAIN(TestServerClient)

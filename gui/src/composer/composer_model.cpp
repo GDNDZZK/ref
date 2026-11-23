@@ -104,6 +104,16 @@ QString sessionDetail(const proto::SessionInfo& info)
 	return info.cwd;
 }
 
+bool shellArgTrailingSpace(const QString& value)
+{
+	if(value.isEmpty())
+	{
+		return false;
+	}
+	const QChar last = value.back();
+	return last != u'/' && last != u'\\' && last != u'=' && last != u':';
+}
+
 } // namespace
 
 ComposerModel::ComposerModel(const workspace::BackendConfig& config,
@@ -128,6 +138,14 @@ ComposerModel::ComposerModel(const workspace::BackendConfig& config,
 
 	m_binTimer.setSingleShot(true);
 	connect(&m_binTimer, &QTimer::timeout, this, [this] { findBinaries(m_target.query, m_binSerial); });
+
+	m_shellArgTimer.setSingleShot(true);
+	connect(&m_shellArgTimer, &QTimer::timeout, this, [this] {
+		if(m_shellArgPendingPrefix)
+		{
+			findShellArg(*m_shellArgPendingPrefix, m_shellArgPendingCursor, m_shellArgPendingQuery, m_shellArgSerial);
+		}
+	});
 
 	m_interruptTimer.setSingleShot(true);
 	m_interruptTimer.setInterval(DefaultInterruptWindow);
@@ -212,6 +230,7 @@ bool ComposerModel::hasVisibleCompletion() const
 		return true;
 	case Kind::CommandArg:
 	case Kind::ShellCommand:
+	case Kind::ShellArg:
 	case Kind::ShellPath:
 		return m_completions.rowCount() > 0;
 	}
@@ -233,12 +252,13 @@ QString ComposerModel::completionKind() const
 		return u"file"_s;
 	case Kind::ShellCommand:
 		return u"shellCommand"_s;
+	case Kind::ShellArg:
+		return m_shellArgPathFallback ? u"shellPath"_s : u"shellArg"_s;
 	case Kind::ShellPath:
 		return u"shellPath"_s;
 	}
 	Q_UNREACHABLE_RETURN(u"none"_s);
 }
-
 void ComposerModel::setInterruptWindow(int milliseconds)
 {
 	if(milliseconds == interruptWindow())
@@ -383,6 +403,14 @@ void ComposerModel::cancelBinarySearch()
 	m_binQuery.reset();
 }
 
+void ComposerModel::cancelShellArgSearch()
+{
+	m_shellArgTimer.stop();
+	++m_shellArgSerial;
+	m_shellArgPendingPrefix.reset();
+	m_shellArgPathFallback = false;
+}
+
 void ComposerModel::triggerCompletion()
 {
 	m_completionDismissed = false;
@@ -403,6 +431,7 @@ void ComposerModel::updateCompletion()
 		cancelFileSearch();
 		cancelDirSearch();
 		cancelBinarySearch();
+		cancelShellArgSearch();
 		m_completions.setEntries({});
 		emit completionChanged();
 		return;
@@ -412,7 +441,12 @@ void ComposerModel::updateCompletion()
 	{
 		cancelFileSearch();
 	}
+	if(target.kind != Kind::ShellArg)
+	{
+		cancelShellArgSearch();
+	}
 	const bool isPathKind = target.kind == Kind::ShellPath
+	                        || (target.kind == Kind::ShellArg && m_shellArgPathFallback)
 	                        || (target.kind == Kind::CommandArg && (target.command == u"cd"_s || target.command == u"export"_s));
 	if(!isPathKind)
 	{
@@ -445,11 +479,13 @@ void ComposerModel::updateCompletion()
 	case Kind::ShellCommand:
 		updateShellCommandCompletion();
 		break;
+	case Kind::ShellArg:
+		updateShellArgCompletion();
+		break;
 	case Kind::ShellPath:
 		updatePathCompletion(true, false);
 		break;
 	}
-
 	emit completionChanged();
 }
 
@@ -760,7 +796,8 @@ QList<CompletionEntry> ComposerModel::buildPathEntries(const QString& typedPrefi
 
 	if(includeFiles)
 	{
-		const bool addTrailingSpace = m_target.kind == compose::CompletionTarget::Kind::ShellPath;
+		const bool addTrailingSpace = m_target.kind == compose::CompletionTarget::Kind::ShellPath
+		                              || m_target.kind == compose::CompletionTarget::Kind::ShellArg;
 		for(const QString& file : files)
 		{
 			if(!file.startsWith(leafPrefix, Qt::CaseInsensitive))
@@ -881,6 +918,112 @@ QList<CompletionEntry> ComposerModel::buildShellCommandEntries(const QString& qu
 	return result;
 }
 
+void ComposerModel::updateShellArgCompletion()
+{
+	const QString& fullText = m_draft.text();
+	const qsizetype cursor = m_draft.cursor();
+	const qsizetype lineStart = cursor > 0 ? fullText.lastIndexOf(u'\n', cursor - 1) + 1 : 0;
+	const QString beforeCursorLine = fullText.mid(lineStart, cursor - lineStart);
+	const int cursorInLine = static_cast<int>(beforeCursorLine.toUtf8().size());
+	const QString& cwd = m_controller.info().cwd;
+	if(m_shellArgCache.valid && m_shellArgCache.cwd == cwd && m_shellArgCache.linePrefix == beforeCursorLine)
+	{
+		m_shellArgTimer.stop();
+		++m_shellArgSerial;
+		m_shellArgPendingPrefix.reset();
+		if(!m_shellArgCache.items.isEmpty())
+		{
+			m_shellArgPathFallback = false;
+			cancelDirSearch();
+			m_completions.setEntries(buildShellArgEntries(m_shellArgCache.items));
+			return;
+		}
+		if(m_target.query.startsWith(u'-'))
+		{
+			m_shellArgPathFallback = false;
+			cancelDirSearch();
+			m_completions.setEntries({});
+			return;
+		}
+		m_shellArgPathFallback = true;
+		updatePathCompletion(true, false);
+		return;
+	}
+
+	const QStringView tail = m_shellArgCache.valid && beforeCursorLine.startsWith(m_shellArgCache.linePrefix)
+	                             ? QStringView(beforeCursorLine).mid(m_shellArgCache.linePrefix.size())
+	                             : QStringView{};
+	const bool sameTokenPrefix = m_shellArgCache.valid
+	                             && m_shellArgCache.cwd == cwd
+	                             && beforeCursorLine.startsWith(m_shellArgCache.linePrefix)
+	                             && !std::ranges::any_of(tail, [](QChar c) { return c.isSpace(); });
+
+	if(sameTokenPrefix)
+	{
+		if(!m_shellArgCache.items.isEmpty())
+		{
+			m_shellArgPathFallback = false;
+			cancelDirSearch();
+			QList<proto::ShellCompletionItem> prefixHits;
+			QList<proto::ShellCompletionItem> subHits;
+			for(const proto::ShellCompletionItem& item : m_shellArgCache.items)
+			{
+				if(item.value.startsWith(m_target.query, Qt::CaseInsensitive))
+				{
+					prefixHits.append(item);
+				}
+				else if(item.value.contains(m_target.query, Qt::CaseInsensitive))
+				{
+					subHits.append(item);
+				}
+			}
+			m_completions.setEntries(buildShellArgEntries(prefixHits + subHits));
+		}
+		else if(m_target.query.startsWith(u'-'))
+		{
+			m_shellArgPathFallback = false;
+			cancelDirSearch();
+			m_completions.setEntries({});
+		}
+		else if(m_shellArgPathFallback)
+		{
+			updatePathCompletion(true, false);
+		}
+	}
+	else
+	{
+		m_shellArgPathFallback = false;
+		cancelDirSearch();
+		m_completions.setEntries({});
+	}
+
+	if(m_shellArgPendingPrefix != beforeCursorLine || (m_forceShellEmpty && m_shellArgTimer.isActive()))
+	{
+		m_shellArgPendingPrefix = beforeCursorLine;
+		m_shellArgPendingCursor = cursorInLine;
+		m_shellArgPendingQuery = m_target.query;
+		++m_shellArgSerial;
+		m_shellArgTimer.setInterval(m_forceShellEmpty ? std::chrono::milliseconds{0} : ShellArgSearchDelay);
+		m_shellArgTimer.start();
+	}
+}
+
+QList<CompletionEntry> ComposerModel::buildShellArgEntries(const QList<proto::ShellCompletionItem>& items) const
+{
+	QList<CompletionEntry> result;
+	result.reserve(items.size());
+	for(const proto::ShellCompletionItem& item : items)
+	{
+		result.append({.value = item.value,
+		               .label = item.value,
+		               .detail = item.description,
+		               .icon = u"terminal"_s,
+		               .mono = true,
+		               .trailingSpace = shellArgTrailingSpace(item.value)});
+	}
+	return result;
+}
+
 QCoro::Task<> ComposerModel::findFiles(QString query, quint64 serial)
 {
 	const QPointer<ComposerModel> self(this); // the model can be gone when the answer arrives
@@ -949,6 +1092,54 @@ QCoro::Task<> ComposerModel::findBinaries(QString query, quint64 serial)
 	{
 		m_completions.setEntries(buildShellCommandEntries(query, m_binCache.binaries));
 	}
+}
+
+QCoro::Task<> ComposerModel::findShellArg(QString linePrefix, int cursorInLine, QString query, quint64 serial)
+{
+	const QPointer<ComposerModel> self(this);
+	const QString cwd = m_controller.info().cwd;
+	const auto result = co_await m_controller.completeShell(linePrefix, cursorInLine, ShellArgLimit);
+	if(!self || serial != m_shellArgSerial)
+	{
+		co_return;
+	}
+	m_shellArgPendingPrefix.reset();
+	if(!result)
+	{
+		if(!client::isConnectionLost(result.error()))
+		{
+			qCWarning(lcComposer) << "shell arg completion failed:" << result.error();
+		}
+		m_shellArgCache = {};
+		m_shellArgPathFallback = false;
+		m_completions.setEntries({});
+		emit completionChanged();
+		co_return;
+	}
+	m_shellArgCache = {.cwd = cwd, .linePrefix = std::move(linePrefix), .items = *result, .valid = true};
+	if(m_target.kind != compose::CompletionTarget::Kind::ShellArg)
+	{
+		co_return;
+	}
+	if(!result->isEmpty())
+	{
+		m_shellArgPathFallback = false;
+		cancelDirSearch();
+		m_completions.setEntries(buildShellArgEntries(*result));
+		emit completionChanged();
+		co_return;
+	}
+	if(query.startsWith(u'-'))
+	{
+		m_shellArgPathFallback = false;
+		cancelDirSearch();
+		m_completions.setEntries({});
+		emit completionChanged();
+		co_return;
+	}
+	m_shellArgPathFallback = true;
+	updatePathCompletion(true, false);
+	emit completionChanged();
 }
 
 void ComposerModel::syncShellMode(bool wasShellMode)
@@ -1349,8 +1540,8 @@ bool ComposerModel::acceptCompletionItem(int row, bool viaEnter)
 	const bool shouldSubmit = viaEnter && !entry.isDirectory && target.kind == compose::CompletionTarget::Kind::CommandArg;
 	const bool keepOpen = entry.isDirectory
 	                      || (target.kind == compose::CompletionTarget::Kind::ShellCommand && addSpace)
+	                      || (target.kind == compose::CompletionTarget::Kind::ShellArg && !addSpace)
 	                      || (isCloseSession && !viaEnter);
-
 	m_forceShellEmpty = false;
 	m_completionDismissed = !keepOpen;
 	m_draft.setText(current.left(target.start) + replacement + current.mid(restStart), target.start + replacement.size());

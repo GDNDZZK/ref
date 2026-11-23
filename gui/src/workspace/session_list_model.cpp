@@ -256,6 +256,36 @@ void SessionListModel::setCwdFilter(const QString& cwd)
 	emit cwdFilterChanged();
 }
 
+void SessionListModel::setFilters(const QString& cwd, CreatorFilter creatorFilter, const QString& creatorId)
+{
+	const bool cwdUpdated = cwd != m_cwdFilter;
+	const bool creatorFilterUpdated = creatorFilter != m_creatorFilter;
+	const bool creatorIdUpdated = creatorId != m_creatorId;
+	if(!cwdUpdated && !creatorFilterUpdated && !creatorIdUpdated)
+	{
+		return;
+	}
+	m_cwdFilter = cwd;
+	m_creatorFilter = creatorFilter;
+	m_creatorId = creatorId;
+	if(cwdUpdated || creatorFilterUpdated || (m_creatorFilter == CreatorFilter::ByCreator && creatorIdUpdated))
+	{
+		rebuild();
+	}
+	if(cwdUpdated)
+	{
+		emit cwdFilterChanged();
+	}
+	if(creatorFilterUpdated)
+	{
+		emit creatorFilterChanged();
+	}
+	if(creatorIdUpdated)
+	{
+		emit creatorIdChanged();
+	}
+}
+
 void SessionListModel::setKnownSessions(const QList<proto::SessionInfo>& sessions)
 {
 	m_known.clear();

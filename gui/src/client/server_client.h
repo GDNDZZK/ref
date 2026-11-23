@@ -111,6 +111,10 @@ public:
 	QCoro::Task<Result<QList<proto::McpServerStatus>>> mcpStatus(std::optional<QString> cwd);
 	QCoro::Task<Result<proto::DirListing>> listDirs(QString path, std::optional<QString> cwd = {}, bool includeFiles = false);
 	QCoro::Task<Result<QStringList>> listBinaries(QString query, std::optional<int> limit = {});
+	QCoro::Task<Result<QList<proto::ShellCompletionItem>>> completeShell(QString cwd,
+	                                                                     QString line,
+	                                                                     std::optional<int> cursor = {},
+	                                                                     std::optional<int> limit = {});
 	// A page of messages before `before`, see Request::Messages.
 	QCoro::Task<Result<proto::MessagesPage>> messages(QString sessionId, QString before, int limit);
 	QCoro::Task<Result<proto::ImageData>> getImage(QString sessionId, QString imageId);

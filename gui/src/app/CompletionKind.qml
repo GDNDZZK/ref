@@ -8,5 +8,6 @@ QtObject {
 	readonly property string command: "command"
 	readonly property string argument: "argument"
 	readonly property string shellCommand: "shellCommand"
+	readonly property string shellArg: "shellArg"
 	readonly property string shellPath: "shellPath"
 }

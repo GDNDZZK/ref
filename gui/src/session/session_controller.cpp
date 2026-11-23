@@ -206,6 +206,12 @@ QCoro::Task<SessionController::Result<QStringList>> SessionController::listBinar
 	co_return co_await m_backend.client().listBinaries(std::move(query), limit);
 }
 
+QCoro::Task<SessionController::Result<QList<proto::ShellCompletionItem>>> SessionController::completeShell(
+	QString line, std::optional<int> cursor, std::optional<int> limit)
+{
+	co_return co_await m_backend.client().completeShell(m_info.cwd, std::move(line), cursor, limit);
+}
+
 QCoro::Task<SessionController::Result<QString>> SessionController::expandCommand(QString name, QString args)
 {
 	co_return co_await m_backend.client().expandCommand(std::move(name), std::move(args), m_info.cwd);

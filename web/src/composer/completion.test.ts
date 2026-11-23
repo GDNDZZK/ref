@@ -324,8 +324,29 @@ describe('CompletionController', () => {
       segmentIndex: 1,
       token: 'car',
     })
-    expect(parseShellContext('ls -la', 6)).toBeUndefined()
-    expect(parseShellContext('ls -la ./sr', 11)).toMatchObject({ role: 'arg', token: './sr' })
+    expect(parseShellContext('ls -la', 6)).toMatchObject({
+      role: 'arg',
+      segmentIndex: 0,
+      tokenStart: 3,
+      token: '-la',
+      isPath: false,
+      atLineStart: false,
+    })
+    expect(parseShellContext('docker ', 7)).toMatchObject({
+      role: 'arg',
+      segmentIndex: 0,
+      tokenStart: 7,
+      token: '',
+      isPath: false,
+      atLineStart: false,
+    })
+    expect(parseShellContext('cat C:\\foo', 10)).toMatchObject({
+      role: 'arg',
+      token: 'C:\\foo',
+      isPath: true,
+    })
+    expect(parseShellContext('cat D:bar', 9)).toMatchObject({ role: 'arg', token: 'D:bar', isPath: true })
+    expect(parseShellContext('ls -la ./sr', 11)).toMatchObject({ role: 'arg', token: './sr', isPath: true })
 
     const listBinaries = vi.fn(async () => ['cargo', 'cargo-clippy'])
     const listDirs = vi.fn(async () => ({ path: '/repo/src', dirs: ['stores'], files: ['main.ts'] }))
@@ -519,5 +540,153 @@ describe('CompletionController', () => {
     await settle()
     expect(controller.completion?.kind).toBe('path')
     expect(controller.completion?.items.map((i) => i.value)).toEqual(['./src/foo.ts '])
+  })
+  it('completes shell subcommands and flags via completeShell with trailing space rules, fallback, and 0ms Tab triggers', async () => {
+    const completeShell = vi.fn(async (_cwd: string, line: string) => {
+      if (line === 'docker ') {
+        return [
+          { value: 'compose', description: 'Define and run multi-container apps' },
+          { value: 'build', description: 'Build an image' },
+        ]
+      }
+      if (line === 'docker comp') {
+        return [
+          { value: 'compose', description: 'Compose plugin' },
+          { value: '--format=', description: 'Format output' },
+          { value: 'dir/' },
+          { value: 'win\\' },
+          { value: 'host:' },
+        ]
+      }
+      if (line === 'docker --') {
+        return [{ value: '--debug', description: 'Enable debug mode' }]
+      }
+      return []
+    })
+    const listBinaries = vi.fn(async () => ['cargo', 'docker'])
+    const listDirs = vi.fn(async (path: string) => ({ path, dirs: ['src'], files: ['README.md'] }))
+    const controller = new CompletionController({
+      cwd: () => '/repo',
+      commands: () => COMMANDS,
+      listFiles: async () => [],
+      listBinaries,
+      listDirs,
+      completeShell,
+      shellHistory: () => ['!docker ps'],
+      reportError: () => {},
+    })
+
+    // Typing `docker comp` debounces completeShell and applies trailing-space rules + icon + description.
+    controller.update('docker comp', 11, true, true)
+    expect(completeShell).not.toHaveBeenCalled()
+    await settle()
+    expect(completeShell).toHaveBeenCalledWith('/repo', 'docker comp', { cursor: 11, limit: 50 })
+    expect(controller.completion).toMatchObject({
+      kind: 'shell',
+      freeformEnter: true,
+      start: 7,
+      end: 11,
+    })
+    expect(controller.completion?.items).toEqual([
+      { value: 'compose ', label: 'compose', description: 'Compose plugin', icon: 'terminal-16' },
+      { value: '--format=', label: '--format=', description: 'Format output', icon: 'terminal-16' },
+      { value: 'dir/', label: 'dir/', description: '', icon: 'terminal-16' },
+      { value: 'win\\', label: 'win\\', description: '', icon: 'terminal-16' },
+      { value: 'host:', label: 'host:', description: '', icon: 'terminal-16' },
+    ])
+
+    // `-`-prefixed tokens call completeShell; non-empty shows flags, empty closes without falling back to listDirs.
+    controller.update('docker --', 9, true, true)
+    await settle()
+    expect(controller.completion?.items).toEqual([
+      { value: '--debug ', label: '--debug', description: 'Enable debug mode', icon: 'terminal-16' },
+    ])
+    controller.update('docker --unknown', 16, true, true)
+    await settle()
+    expect(controller.completion).toBeUndefined()
+    expect(listDirs).not.toHaveBeenCalled()
+
+    // Non-`-` arg returning [] falls back to listDirs with files + trailing space.
+    controller.update('cat R', 5, true, true)
+    await settle()
+    expect(completeShell).toHaveBeenCalledWith('/repo', 'cat R', { cursor: 5, limit: 50 })
+    expect(listDirs).toHaveBeenCalledWith('.', { cwd: '/repo', includeFiles: true })
+    expect(controller.completion?.kind).toBe('path')
+    expect(controller.completion?.items.map((i) => i.value)).toEqual(['README.md '])
+
+    // Explicit Tab triggers run at 0ms (empty `!`, after `| `, and after `docker `).
+    listBinaries.mockClear()
+    completeShell.mockClear()
+    controller.triggerShell('', 0)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(listBinaries).toHaveBeenCalledWith('', 50)
+    expect(controller.completion?.items.map((i) => i.value)).toEqual(['docker ps', 'cargo ', 'docker '])
+
+    controller.triggerShell('ls | ', 5)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(listBinaries).toHaveBeenLastCalledWith('', 50)
+    expect(controller.completion?.items.map((i) => i.value)).toEqual(['cargo ', 'docker '])
+
+    controller.triggerShell('docker ', 7)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(completeShell).toHaveBeenCalledWith('/repo', 'docker ', { cursor: 7, limit: 50 })
+    expect(controller.completion?.items.map((i) => i.value)).toEqual(['compose ', 'build '])
+  })
+
+  it('ignores stale completeShell responses when a newer query is active', async () => {
+    let resolveFirst: (items: { value: string; description?: string }[]) => void = () => {}
+    const completeShell = vi.fn((_cwd: string, line: string) =>
+      line === 'docker c'
+        ? new Promise<{ value: string; description?: string }[]>((r) => (resolveFirst = r))
+        : Promise.resolve([{ value: 'compose', description: 'Compose' }]),
+    )
+    const controller = new CompletionController({
+      cwd: () => '/repo',
+      commands: () => COMMANDS,
+      listFiles: async () => [],
+      completeShell,
+      reportError: () => {},
+    })
+
+    controller.update('docker c', 8, true, true)
+    await settle()
+    controller.update('docker co', 9, true, true)
+    resolveFirst([{ value: 'config', description: 'Stale' }])
+    await vi.advanceTimersByTimeAsync(0)
+    expect(controller.completion).toBeUndefined()
+
+    await settle()
+    expect(controller.completion?.items.map((i) => i.value)).toEqual(['compose '])
+  })
+
+  it('passes UTF-8 byte cursor offset to completeShell for non-ASCII input while preserving UTF-16 token range', async () => {
+    const completeShell = vi.fn(async () => [{ value: 'checkout', description: 'Switch branches' }])
+    const controller = new CompletionController({
+      cwd: () => '/repo',
+      commands: () => COMMANDS,
+      listFiles: async () => [],
+      completeShell,
+      reportError: () => {},
+    })
+
+    const line = 'echo 你好 && git ch'
+    controller.update(line, line.length, true, true)
+    await settle()
+    expect(completeShell).toHaveBeenCalledWith('/repo', line, {
+      cursor: new TextEncoder().encode(line).length,
+      limit: 50,
+    })
+    expect(controller.completion).toMatchObject({ start: 15, end: 17 })
+    expect(controller.selectedItem?.value).toBe('checkout ')
+
+    const midPrefix = 'git commit -m "中" --'
+    const midLine = `${midPrefix} --help`
+    controller.update(midLine, midPrefix.length, true, true)
+    await settle()
+    expect(completeShell).toHaveBeenLastCalledWith('/repo', midLine, {
+      cursor: 22,
+      limit: 50,
+    })
+    expect(controller.completion).toMatchObject({ start: 18, end: 20 })
   })
 })

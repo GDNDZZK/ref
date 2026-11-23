@@ -42,6 +42,7 @@ function setup(
       files: [],
     })),
     listBinaries: vi.fn<NonNullable<ComposerApi['listBinaries']>>(async () => ['cargo', 'cargo-fmt']),
+    completeShell: vi.fn<NonNullable<ComposerApi['completeShell']>>(async () => []),
     expandCommand: vi.fn<ComposerApi['expandCommand']>(async () => ''),
   }
   const host: ComposerHost = {
@@ -387,6 +388,65 @@ describe('Composer', () => {
     expect(wrapper.findAll('[role=option]').map((r) => r.text())).toEqual(['cargo', 'cargo-fmt'])
     await press(wrapper, 'Tab')
     expect(value(wrapper)).toBe('sudo cargo ')
+    vi.useRealTimers()
+  })
+  it('triggers immediate 0ms shell completion on Tab, renders descriptions, and applies fallback rules', async () => {
+    vi.useFakeTimers()
+    const { wrapper, api, pinia } = setup()
+    const workspace = useWorkspaceStore(pinia)
+    const cycleSpy = vi.spyOn(workspace, 'cycleAgent').mockResolvedValue(undefined)
+    api.completeShell.mockImplementation(async (_cwd, line) => {
+      if (line === 'docker ') {
+        return [
+          { value: 'compose', description: 'Compose apps' },
+          { value: '--format=', description: 'Format' },
+        ]
+      }
+      return []
+    })
+
+    // Empty `!` + Tab opens binaries immediately at 0ms without cycling agent.
+    await press(wrapper, '!')
+    await press(wrapper, 'Tab')
+    expect(cycleSpy).not.toHaveBeenCalled()
+    expect(api.listBinaries).toHaveBeenCalledWith('', 50)
+    expect(wrapper.findAll('[role=option]').map((r) => r.text())).toEqual(['cargo', 'cargo-fmt'])
+    await press(wrapper, 'Escape')
+
+    // `docker ` + Tab opens completeShell items at 0ms with descriptions.
+    await type(wrapper, 'docker ')
+    await press(wrapper, 'Tab')
+    expect(api.completeShell).toHaveBeenCalledWith('/work', 'docker ', { cursor: 7, limit: 50 })
+    expect(wrapper.findAll('[role=option]').map((r) => r.text())).toEqual([
+      'composeCompose apps',
+      '--format=Format',
+    ])
+
+    // Plain Enter without ↑/↓ submits free-form instead of inserting completion.
+    await press(wrapper, 'Enter')
+    expect(api.shell).toHaveBeenCalledWith('s1', 'docker')
+
+    // Re-enter shell mode: `=` completion omits trailing space on Tab.
+    await press(wrapper, '!')
+    await type(wrapper, 'docker ')
+    await press(wrapper, 'Tab')
+    await press(wrapper, 'ArrowDown')
+    await press(wrapper, 'Tab')
+    expect(value(wrapper)).toBe('docker --format=')
+
+    // Empty completeShell on `-`-prefixed arg closes without calling listDirs.
+    await type(wrapper, 'docker --nope')
+    await wrapper.get('textarea').trigger('input')
+    await vi.advanceTimersByTimeAsync(100)
+    expect(wrapper.find('[role=option]').exists()).toBe(false)
+    expect(api.listDirs).not.toHaveBeenCalled()
+
+    // Empty completeShell on non-`-` arg falls back to listDirs.
+    await type(wrapper, 'cat s')
+    await wrapper.get('textarea').trigger('input')
+    await vi.advanceTimersByTimeAsync(100)
+    expect(api.listDirs).toHaveBeenCalledWith('.', { cwd: '/work', includeFiles: true })
+    expect(wrapper.findAll('[role=option]').map((r) => r.text())).toEqual(['src/'])
     vi.useRealTimers()
   })
 

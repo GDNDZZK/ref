@@ -387,6 +387,14 @@ struct DirListing
 	QStringList files{};
 };
 
+struct ShellCompletionItem
+{
+	QString value;
+	QString description{};
+
+	bool operator==(const ShellCompletionItem&) const = default;
+};
+
 // ---- Session events -----------------------------------------------------------------
 
 struct InfoEvent

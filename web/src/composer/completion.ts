@@ -3,6 +3,7 @@
 
 import { shallowRef } from 'vue'
 import type { IconKey } from '../icons/generated/icons.ts'
+import type { ShellCompletionItem } from '../net/api.ts'
 import { RefError } from '../net/connection.ts'
 import { fuzzyScore } from './fuzzy.ts'
 import { mentionAt } from './mention.ts'
@@ -71,6 +72,11 @@ export interface CompletionDeps {
   cwd?: () => string
   listDirs?: (path: string, options: { cwd?: string; includeFiles?: boolean }) => Promise<DirEntries>
   listBinaries?: (query: string, limit: number) => Promise<string[]>
+  completeShell?: (
+    cwd: string,
+    line: string,
+    options?: { cursor?: number; limit?: number },
+  ) => Promise<ShellCompletionItem[]>
   models?: () => readonly ModelChoice[]
   agents?: () => readonly AgentChoice[]
   variants?: () => readonly string[]
@@ -109,6 +115,8 @@ const MAX_DIR_CACHE = 64
 export const FILE_QUERY_DELAY_MS = 80
 const BUILTIN_BONUS = 5
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
+const WINDOWS_DRIVE_PREFIX = /^[A-Za-z]:/
+const UTF8_ENCODER = new TextEncoder()
 
 interface WrapperSpec {
   flagArgs: ReadonlySet<string>
@@ -439,9 +447,30 @@ function classifyShellRole(priorWords: readonly string[]): 'command' | 'wrapper-
   if (expectFlagArg || remainingPositional > 0) return 'wrapper-arg'
   return 'command'
 }
+function isShellPathToken(token: string): boolean {
+  return (
+    token.includes('/') ||
+    token.includes('\\') ||
+    token.startsWith('.') ||
+    token.startsWith('~') ||
+    WINDOWS_DRIVE_PREFIX.test(token)
+  )
+}
 
-export function parseShellContext(text: string, cursor: number): ShellContext | undefined {
-  if (text === '') return undefined
+function shellArgValue(raw: string): string {
+  if (raw === '' || raw.endsWith('/') || raw.endsWith('\\') || raw.endsWith('=') || raw.endsWith(':')) {
+    return raw
+  }
+  return `${raw} `
+}
+
+export function parseShellContext(
+  text: string,
+  cursor: number,
+  options?: { allowEmptyCommand?: boolean },
+): ShellContext | undefined {
+  const allowEmptyCommand = options?.allowEmptyCommand ?? false
+  if (text === '' && !allowEmptyCommand) return undefined
   const before = text.slice(0, cursor)
   let quote: "'" | '"' | null = null
   let segmentStart = 0
@@ -492,14 +521,13 @@ export function parseShellContext(text: string, cursor: number): ShellContext | 
   if (role === 'wrapper-arg') return undefined
 
   if (role === 'command') {
-    if (token === '' || token.startsWith('-') || ENV_ASSIGNMENT.test(token)) return undefined
-    const isPath =
-      token.includes('/') || token.includes('\\') || token.startsWith('.') || token.startsWith('~')
-    return { role: 'command', segmentIndex, tokenStart, token, isPath, atLineStart }
+    if ((!allowEmptyCommand && token === '') || token.startsWith('-') || ENV_ASSIGNMENT.test(token)) {
+      return undefined
+    }
+    return { role: 'command', segmentIndex, tokenStart, token, isPath: isShellPathToken(token), atLineStart }
   }
 
-  if (token.startsWith('-')) return undefined
-  return { role: 'arg', segmentIndex, tokenStart, token, isPath: true, atLineStart }
+  return { role: 'arg', segmentIndex, tokenStart, token, isPath: isShellPathToken(token), atLineStart }
 }
 
 function rankEnumItems(
@@ -539,6 +567,9 @@ export class CompletionController {
   private binaryTimer: ReturnType<typeof setTimeout> | undefined
   private activeBinaryQuery: { query: string; start: number; end: number; segmentIndex: number } | undefined
   private binaryFetchSeq = 0
+  private shellArgTimer: ReturnType<typeof setTimeout> | undefined
+  private activeShellArgQuery: { line: string; cursor: number; start: number } | undefined
+  private shellArgFetchSeq = 0
 
   constructor(deps: CompletionDeps) {
     this.deps = deps
@@ -591,6 +622,13 @@ export class CompletionController {
     this.fileTimer = setTimeout(() => this.requestFiles(fileQuery), FILE_QUERY_DELAY_MS)
   }
 
+  triggerShell(text: string, cursor: number): void {
+    this.suppressed = false
+    this.lastInput = { text, cursor, shell: true }
+    this.cancelTimers()
+    this.updateShell(text, cursor, true, true)
+  }
+
   move(delta: number): void {
     const completion = this.current.value
     if (!completion || completion.items.length === 0) return
@@ -617,15 +655,18 @@ export class CompletionController {
     this.slashQuery = undefined
     this.activePathSpec = undefined
     this.activeBinaryQuery = undefined
+    this.activeShellArgQuery = undefined
   }
 
   private cancelTimers(): void {
     clearTimeout(this.fileTimer)
     clearTimeout(this.pathTimer)
     clearTimeout(this.binaryTimer)
+    clearTimeout(this.shellArgTimer)
     this.mention = undefined
     this.activePathSpec = undefined
     this.activeBinaryQuery = undefined
+    this.activeShellArgQuery = undefined
   }
 
   private trySlashArgument(text: string, cursor: number, edited: boolean): boolean {
@@ -810,17 +851,34 @@ export class CompletionController {
     }
   }
 
-  private updateShell(text: string, cursor: number, edited: boolean): void {
-    const context = parseShellContext(text, cursor)
+  private updateShell(text: string, cursor: number, edited: boolean, immediate = false): void {
+    const context = parseShellContext(text, cursor, { allowEmptyCommand: immediate })
     if (!context) return this.close()
 
-    if (context.role === 'arg' || context.isPath) {
+    if (context.role === 'arg') {
+      if (context.isPath) {
+        this.requestPathCompletion(
+          context.token,
+          context.tokenStart,
+          cursor,
+          { includeFiles: true, fileSpace: true },
+          edited,
+          immediate,
+        )
+        return
+      }
+      this.requestShellArgCompletion(text, cursor, context, edited, immediate)
+      return
+    }
+
+    if (context.isPath) {
       this.requestPathCompletion(
         context.token,
         context.tokenStart,
         cursor,
         { includeFiles: true, fileSpace: true },
         edited,
+        immediate,
       )
       return
     }
@@ -831,6 +889,7 @@ export class CompletionController {
       cursor,
       context.segmentIndex,
       context.atLineStart,
+      immediate,
     )
   }
 
@@ -840,6 +899,7 @@ export class CompletionController {
     end: number,
     options: { includeFiles: boolean; fileSpace: boolean; defaultFile?: string },
     edited: boolean,
+    immediateTrigger = false,
   ): void {
     if (!this.deps.listDirs) return this.close()
     const cwd = this.deps.cwd?.()
@@ -866,7 +926,7 @@ export class CompletionController {
       return
     }
 
-    const immediate = edited && split.rawFolder.endsWith(split.separator)
+    const immediate = immediateTrigger || (edited && split.rawFolder.endsWith(split.separator))
     if (immediate) {
       this.fetchPathEntries(spec)
       return
@@ -941,6 +1001,7 @@ export class CompletionController {
     end: number,
     segmentIndex: number,
     atLineStart: boolean,
+    immediate = false,
   ): void {
     const historyItems = this.shellHistoryItems(query, atLineStart)
     this.activeBinaryQuery = { query, start, end, segmentIndex }
@@ -964,14 +1025,104 @@ export class CompletionController {
     }
 
     const seq = ++this.binaryFetchSeq
-    this.binaryTimer = setTimeout(() => {
+    const run = () => {
       this.deps.listBinaries!(query, MAX_BINARIES)
         .then((binaries) => {
           if (seq !== this.binaryFetchSeq || this.activeBinaryQuery?.query !== query) return
           this.showShellCommandItems(historyItems, binaries, start, end)
         })
-        .catch((error) => this.deps.reportError(error))
-    }, FILE_QUERY_DELAY_MS)
+        .catch((error) => {
+          if (seq !== this.binaryFetchSeq) return
+          this.deps.reportError(error)
+        })
+    }
+    if (immediate) run()
+    else this.binaryTimer = setTimeout(run, FILE_QUERY_DELAY_MS)
+  }
+
+  private requestShellArgCompletion(
+    line: string,
+    cursor: number,
+    context: ShellContext,
+    edited: boolean,
+    immediate: boolean,
+  ): void {
+    if (!this.deps.completeShell) {
+      if (context.token.startsWith('-')) this.close()
+      else {
+        this.requestPathCompletion(
+          context.token,
+          context.tokenStart,
+          cursor,
+          { includeFiles: true, fileSpace: true },
+          edited,
+          immediate,
+        )
+      }
+      return
+    }
+
+    if (this.current.value?.kind !== 'shell' || this.current.value.start !== context.tokenStart) {
+      this.current.value = undefined
+    }
+
+    const cwd = this.deps.cwd?.() ?? ''
+    this.activeShellArgQuery = { line, cursor, start: context.tokenStart }
+    const seq = ++this.shellArgFetchSeq
+    const cursorBytes = UTF8_ENCODER.encode(line.slice(0, cursor)).length
+    const run = () => {
+      this.deps.completeShell!(cwd, line, { cursor: cursorBytes, limit: MAX_ITEMS })
+        .then((items) => {
+          if (
+            seq !== this.shellArgFetchSeq ||
+            this.activeShellArgQuery?.line !== line ||
+            this.activeShellArgQuery?.cursor !== cursor
+          ) {
+            return
+          }
+          if (items.length === 0) {
+            if (context.token.startsWith('-')) {
+              this.close()
+            } else {
+              this.requestPathCompletion(
+                context.token,
+                context.tokenStart,
+                cursor,
+                { includeFiles: true, fileSpace: true },
+                edited,
+                true,
+              )
+            }
+            return
+          }
+          this.showShellArgItems(items, context.tokenStart, cursor)
+        })
+        .catch((error) => {
+          if (seq !== this.shellArgFetchSeq) return
+          this.deps.reportError(error)
+        })
+    }
+    if (immediate) run()
+    else this.shellArgTimer = setTimeout(run, FILE_QUERY_DELAY_MS)
+  }
+
+  private showShellArgItems(items: readonly ShellCompletionItem[], start: number, end: number): void {
+    const mapped: CompletionItem[] = items.slice(0, MAX_ITEMS).map((item) => ({
+      value: shellArgValue(item.value),
+      label: item.value,
+      description: item.description ?? '',
+      icon: 'terminal-16',
+    }))
+    if (mapped.length === 0) return this.close()
+    this.current.value = {
+      kind: 'shell',
+      items: mapped,
+      selected: 0,
+      explicitlySelected: false,
+      freeformEnter: true,
+      start,
+      end,
+    }
   }
 
   private showShellCommandItems(

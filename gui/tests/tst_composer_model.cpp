@@ -157,6 +157,17 @@ struct Fixture
 		{
 			fake.respond(request, {{u"binaries"_s, QJsonArray::fromStringList(binaries)}});
 		}
+		else if(op == u"complete_shell"_s)
+		{
+			if(shellArgResponder)
+			{
+				fake.respond(request, {{u"items"_s, shellArgResponder(request)}});
+			}
+			else
+			{
+				fake.respond(request, {{u"items"_s, shellArgMap.value(request.value(u"line"_s).toString())}});
+			}
+		}
 		else if(op == u"list_sessions"_s)
 		{
 			fake.respond(request, {{u"sessions"_s, liveSessions}});
@@ -221,6 +232,8 @@ struct Fixture
 	QHash<QString, QJsonObject> dirMap;
 	QString dirsError;
 	QStringList binaries;
+	QHash<QString, QJsonArray> shellArgMap;
+	std::function<QJsonArray(const QJsonObject&)> shellArgResponder;
 	QJsonArray liveSessions;
 	QJsonArray historySessions;
 	QString promptError;
@@ -270,6 +283,7 @@ private slots:
 	void imageNumberingResetsPerDraft();
 	void undoRedoSyncAttachmentsAndHistoryAvoidsTokenCollision();
 	void undoRedoSyncShellModeCanPasteAndUserEdited();
+	void shellArgCompleteShellTrailingSpaceCacheAndFallbackWork();
 };
 
 void TestComposerModel::labelsFollowTheSessionAndTheConfiguration()
@@ -868,11 +882,12 @@ void TestComposerModel::shellModeCompletionsAndHistoryFilterWork()
 	QCOMPARE(f.composer.completions()->index(1, 0).data(composer::CompletionItemModel::ValueRole).toString(), u"cargo"_s);
 	QCOMPARE(f.requestsOf(u"list_binaries"_s).last().value(u"limit"_s).toInt(), 50);
 
-	// Accepting a binary in shell mode NEVER auto-submits, appends space, and transitions to ShellPath.
+	// Accepting a binary in shell mode NEVER auto-submits, appends space, and transitions to ShellArg -> ShellPath fallback.
 	QVERIFY(!f.composer.acceptCompletionItem(2, true));
 	QCOMPARE(f.composer.text(), u"cat "_s);
-	QCOMPARE(f.composer.completionKind(), u"shellPath"_s);
+	QCOMPARE(f.composer.completionKind(), u"shellArg"_s);
 	QTRY_COMPARE(f.composer.completions()->rowCount(), 2); // src/, Cargo.toml
+	QCOMPARE(f.composer.completionKind(), u"shellPath"_s);
 	QVERIFY(!f.composer.acceptCompletionItem(1, true)); // accepting Cargo.toml never auto-submits shell!
 	QCOMPARE(f.composer.text(), u"cat Cargo.toml "_s);
 	QVERIFY(f.requestsOf(u"shell"_s).isEmpty());
@@ -1197,6 +1212,100 @@ void TestComposerModel::undoRedoSyncShellModeCanPasteAndUserEdited()
 	QVERIFY(!f.composer.shellMode());
 	QVERIFY(f.composer.redo());
 	QVERIFY(f.composer.shellMode());
+}
+
+void TestComposerModel::shellArgCompleteShellTrailingSpaceCacheAndFallbackWork()
+{
+	Fixture f;
+	f.dirs = {u"src"_s};
+	f.dirFiles = {u"Cargo.toml"_s};
+	f.shellArgMap.insert(u"git "_s,
+	                     QJsonArray{shellCompletionItemJson(u"checkout"_s, u"Switch branches"_s),
+	                                shellCompletionItemJson(u"cherry-pick"_s, u"Apply commit"_s)});
+	f.shellArgMap.insert(u"git ch"_s,
+	                     QJsonArray{shellCompletionItemJson(u"checkout"_s, u"Switch branches"_s),
+	                                shellCompletionItemJson(u"--format="_s, u"Output format"_s),
+	                                shellCompletionItemJson(u"remote:"_s, u"Remote prefix"_s),
+	                                shellCompletionItemJson(u"dir/"_s, u"Directory prefix"_s),
+	                                shellCompletionItemJson(u"win\\"_s, u"Windows prefix"_s)});
+	f.type(u"!"_s);
+	f.type(u"git "_s);
+	QCOMPARE(f.composer.completionKind(), u"shellArg"_s);
+	QTRY_COMPARE(f.requestsOf(u"complete_shell"_s).size(), 1);
+	QCOMPARE(f.requestsOf(u"complete_shell"_s).last().value(u"cwd"_s).toString(), u"/work"_s);
+	QCOMPARE(f.requestsOf(u"complete_shell"_s).last().value(u"line"_s).toString(), u"git "_s);
+	QCOMPARE(f.requestsOf(u"complete_shell"_s).last().value(u"cursor"_s).toInt(), 4);
+	QCOMPARE(f.requestsOf(u"complete_shell"_s).last().value(u"limit"_s).toInt(), 50);
+	QTRY_COMPARE(f.composer.completions()->rowCount(), 2);
+	QCOMPARE(f.composer.completions()->index(0, 0).data(composer::CompletionItemModel::IconRole).toString(), u"terminal"_s);
+	QCOMPARE(f.composer.completions()->index(0, 0).data(composer::CompletionItemModel::DetailRole).toString(), u"Switch branches"_s);
+	QCOMPARE(f.composer.completions()->index(0, 0).data(composer::CompletionItemModel::MonoRole).toBool(), true);
+	QVERIFY(f.requestsOf(u"list_dirs"_s).isEmpty());
+
+	// Typing forward filters cached items synchronously without flickering to empty, then updates on RPC.
+	f.type(u"git ch"_s);
+	QCOMPARE(f.composer.completions()->rowCount(), 2); // interim filter keeps checkout and cherry-pick visible
+	QTRY_COMPARE(f.requestsOf(u"complete_shell"_s).size(), 2);
+	QTRY_COMPARE(f.composer.completions()->rowCount(), 5);
+
+	// Cache hit on exact same prefix makes 0 extra complete_shell RPCs (e.g. Esc + Tab).
+	const int completeCount = int(f.requestsOf(u"complete_shell"_s).size());
+	QVERIFY(f.composer.escape());
+	QCOMPARE(f.composer.completionKind(), u"none"_s);
+	f.composer.triggerCompletion();
+	QCOMPARE(f.composer.completionKind(), u"shellArg"_s);
+	QCOMPARE(f.composer.completions()->rowCount(), 5);
+	QTest::qWait(SearchSettleMs);
+	QCOMPARE(int(f.requestsOf(u"complete_shell"_s).size()), completeCount);
+
+	// Trailing space rules: `=`, `:`, `/`, `\\` do NOT append trailing space; normal value DOES append space and never submits.
+	QVERIFY(!f.composer.acceptCompletionItem(1, true)); // --format=
+	QCOMPARE(f.composer.text(), u"git --format="_s);
+	f.type(u"git ch"_s);
+	QTRY_COMPARE(f.composer.completions()->rowCount(), 5);
+	QVERIFY(!f.composer.acceptCompletionItem(2, false)); // remote:
+	QCOMPARE(f.composer.text(), u"git remote:"_s);
+	f.type(u"git ch"_s);
+	QTRY_COMPARE(f.composer.completions()->rowCount(), 5);
+	QVERIFY(!f.composer.acceptCompletionItem(3, false)); // dir/
+	QCOMPARE(f.composer.text(), u"git dir/"_s);
+	f.type(u"git ch"_s);
+	QTRY_COMPARE(f.composer.completions()->rowCount(), 5);
+	QVERIFY(!f.composer.acceptCompletionItem(4, false)); // win\ (trailing backslash)
+	QCOMPARE(f.composer.text(), u"git win\\"_s);
+	f.type(u"git ch"_s);
+	QTRY_COMPARE(f.composer.completions()->rowCount(), 5);
+	QVERIFY(!f.composer.acceptCompletionItem(0, true)); // checkout -> appends space, never submits
+	QCOMPARE(f.composer.text(), u"git checkout "_s);
+	QVERIFY(f.requestsOf(u"shell"_s).isEmpty());
+
+	// `-`-prefixed flag with empty complete_shell does NOT fall back to ListDirs.
+	const int dirCountBeforeFlag = int(f.requestsOf(u"list_dirs"_s).size());
+	f.type(u"git --"_s);
+	QCOMPARE(f.composer.completionKind(), u"shellArg"_s);
+	QTRY_COMPARE(f.requestsOf(u"complete_shell"_s).last().value(u"line"_s).toString(), u"git --"_s);
+	QTRY_COMPARE(f.composer.completions()->rowCount(), 0);
+	QTest::qWait(SearchSettleMs);
+	QCOMPARE(int(f.requestsOf(u"list_dirs"_s).size()), dirCountBeforeFlag);
+
+	// Tab (triggerCompletion) triggers complete_shell cleanly even while debounce timer is pending.
+	f.shellArgMap.insert(u"cargo c"_s, QJsonArray{shellCompletionItemJson(u"check"_s, u"Check package"_s)});
+	f.type(u"cargo c"_s);
+	const int beforeTab = int(f.requestsOf(u"complete_shell"_s).size());
+	f.composer.triggerCompletion();
+	QTRY_COMPARE(int(f.requestsOf(u"complete_shell"_s).size()), beforeTab + 1);
+	QTRY_COMPARE(f.composer.completions()->rowCount(), 1);
+	QCOMPARE(f.composer.completions()->index(0, 0).data(composer::CompletionItemModel::ValueRole).toString(), u"check"_s);
+
+	// Non-ASCII prefix sends UTF-8 byte offset as `cursor` (not UTF-16 code-unit length).
+	const QString nonAsciiLine = u"git 你"_s;
+	QCOMPARE(nonAsciiLine.size(), 5);
+	QCOMPARE(nonAsciiLine.toUtf8().size(), 7);
+	f.shellArgMap.insert(nonAsciiLine, QJsonArray{shellCompletionItemJson(u"status"_s)});
+	f.type(nonAsciiLine);
+	QTRY_COMPARE(f.requestsOf(u"complete_shell"_s).last().value(u"line"_s).toString(), nonAsciiLine);
+	QCOMPARE(f.requestsOf(u"complete_shell"_s).last().value(u"cursor"_s).toInt(), 7);
+	QTRY_COMPARE(f.composer.completions()->rowCount(), 1);
 }
 
 QTEST_MAIN(TestComposerModel)

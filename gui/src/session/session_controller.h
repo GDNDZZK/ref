@@ -103,6 +103,10 @@ public:
 	QCoro::Task<Result<proto::DirListing>> listDirs(QString path, bool includeFiles = false);
 	// Executables and shell builtins matching `query`, at most `limit`.
 	QCoro::Task<Result<QStringList>> listBinaries(QString query, int limit);
+	// Shell argument completions for `line` at `cursor` in the session's directory, at most `limit`.
+	QCoro::Task<Result<QList<proto::ShellCompletionItem>>> completeShell(QString line,
+	                                                                     std::optional<int> cursor = {},
+	                                                                     std::optional<int> limit = {});
 	// The prompt text of the user-defined command `name` with `args`, for the session's directory.
 	QCoro::Task<Result<QString>> expandCommand(QString name, QString args);
 	// The bytes of an image the backend holds for the session.

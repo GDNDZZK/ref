@@ -114,6 +114,10 @@ void checkResponseResult(const QString& name, const QJsonObject& result)
 	{
 		QVERIFY(parseBinariesResult(result));
 	}
+	else if(name == u"response_complete_shell"_s)
+	{
+		QVERIFY(parseShellCompletionResult(result));
+	}
 	else if(name == u"response_peer_command" || name == u"response_expand_command")
 	{
 		QVERIFY(parseTextResult(result));
@@ -245,6 +249,10 @@ private slots:
 		QCOMPARE(request::deleteConfigFile(u"ref.json.1.bak"_s, u"/home/user/project"_s), withoutId(u"delete_config_file"_s));
 		QCOMPARE(request::listBinaries(u"car"_s, 20), withoutId(u"list_binaries"_s));
 		QVERIFY(!request::listBinaries(u"car"_s).contains(u"limit"_s));
+		QCOMPARE(request::completeShell(u"/home/user/project"_s, u"git che"_s, 7, 50), withoutId(u"complete_shell"_s));
+		const QJsonObject minimalCompleteReq = request::completeShell(u"/work"_s, u"git "_s);
+		QVERIFY(!minimalCompleteReq.contains(u"cursor"_s));
+		QVERIFY(!minimalCompleteReq.contains(u"limit"_s));
 		QCOMPARE(request::shutdown(), withoutId(u"shutdown"_s));
 		QCOMPARE(request::ping(), withoutId(u"ping"_s));
 		QCOMPARE(request::setModel(u"ses_a1b2c3d4"_s, {.provider = u"anthropic"_s, .model = u"claude-sonnet-4"_s, .variant = u"high"_s}),
@@ -315,6 +323,24 @@ private slots:
 		const QJsonObject binsFrame = fixtureObject(u"server_frame"_s, u"response_list_binaries"_s);
 		const QStringList bins = parsedOrFail(parseBinariesResult(binsFrame.value(u"result"_s).toObject()));
 		QCOMPARE(bins, (QStringList{u"cargo"_s, u"cargo-clippy"_s, u"cargo-fmt"_s}));
+
+		const QJsonObject shellCompFrame = fixtureObject(u"server_frame"_s, u"response_complete_shell"_s);
+		const QList<ShellCompletionItem> fixtureShellItems = parsedOrFail(parseShellCompletionResult(shellCompFrame.value(u"result"_s).toObject()));
+		QCOMPARE(fixtureShellItems.size(), 2);
+		QCOMPARE(fixtureShellItems.at(0).value, u"checkout"_s);
+		QVERIFY(!fixtureShellItems.at(0).description.isEmpty());
+
+		const QJsonObject shellCompResult{{u"items"_s,
+		                                   QJsonArray{QJsonObject{{u"value"_s, u"checkout"_s}, {u"description"_s, u"Switch branches"_s}},
+		                                              QJsonObject{{u"value"_s, u"--format="_s}},
+		                                              QJsonObject{{u"value"_s, u"status"_s}, {u"description"_s, QJsonValue::Null}}}}};
+		const QList<ShellCompletionItem> shellItems = parsedOrFail(parseShellCompletionResult(shellCompResult));
+		QCOMPARE(shellItems.size(), 3);
+		QCOMPARE(shellItems.at(0), (ShellCompletionItem{.value = u"checkout"_s, .description = u"Switch branches"_s}));
+		QCOMPARE(shellItems.at(1), (ShellCompletionItem{.value = u"--format="_s, .description = QString()}));
+		QCOMPARE(shellItems.at(2), (ShellCompletionItem{.value = u"status"_s, .description = QString()}));
+		QVERIFY(!parseShellCompletionResult({{u"items"_s, QJsonArray{QJsonObject{{u"description"_s, u"missing value"_s}}}}}));
+		QVERIFY(!parseShellCompletionResult({{u"items"_s, u"not an array"_s}}));
 	}
 
 	void malformedConfigIsAnError()

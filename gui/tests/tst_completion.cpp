@@ -142,9 +142,9 @@ void TestCompletion::shellModeTargetsCommandsAndPaths()
 	QCOMPARE(completionTarget(u"/usr/bin/e"_s, 10, true).kind, Kind::ShellPath);
 	QCOMPARE(completionTarget(u"~"_s, 1, true).kind, Kind::ShellPath);
 
-	// Subsequent tokens in shell mode always complete paths, never @-mentions or /commands.
+	// Subsequent non-path tokens in shell mode offer ShellArg, never @-mentions or /commands.
 	target = completionTarget(u"ls "_s, 3, true);
-	QCOMPARE(target.kind, Kind::ShellPath);
+	QCOMPARE(target.kind, Kind::ShellArg);
 	QCOMPARE(target.query, QString());
 	QCOMPARE(target.start, 3);
 
@@ -204,9 +204,22 @@ void TestCompletion::shellSegmentsFlagsMidTokenAndWindowsPathsWork()
 	QCOMPARE(target.end, 18);
 	QVERIFY(!target.atLineStart);
 
-	// Option flags starting with `-` suppress path completion noise.
-	QCOMPARE(completionTarget(u"ls -l"_s, 5, true).kind, Kind::None);
-	QCOMPARE(completionTarget(u"cargo --release"_s, 15, true).kind, Kind::None);
+	// Flags and subcommands at argument position target ShellArg; flags at command position still stay quiet.
+	target = completionTarget(u"ls -l"_s, 5, true);
+	QCOMPARE(target.kind, Kind::ShellArg);
+	QCOMPARE(target.query, u"-l"_s);
+	QCOMPARE(target.start, 3);
+	target = completionTarget(u"cargo --release"_s, 15, true);
+	QCOMPARE(target.kind, Kind::ShellArg);
+	QCOMPARE(target.query, u"--release"_s);
+	target = completionTarget(u"cargo comp"_s, 10, true);
+	QCOMPARE(target.kind, Kind::ShellArg);
+	QCOMPARE(target.query, u"comp"_s);
+	QCOMPARE(completionTarget(u"-l"_s, 2, true).kind, Kind::None);
+	QCOMPARE(completionTarget(u"sudo -l"_s, 7, true).kind, Kind::None);
+	target = completionTarget(u"echo hi | grep pa"_s, 17, true);
+	QCOMPARE(target.kind, Kind::ShellArg);
+	QCOMPARE(target.query, u"pa"_s);
 
 	// Mid-token cursor sets `end` to the full active token end instead of leaving a broken tail.
 	target = completionTarget(u"cargo src/main.rs"_s, 3, true);
@@ -234,6 +247,7 @@ void TestCompletion::shellSegmentsFlagsMidTokenAndWindowsPathsWork()
 	QCOMPARE(target.start, 5);
 	QCOMPARE(target.end, 11);
 }
+
 void TestCompletion::shellWrappersTargetWrappedCommand()
 {
 	auto target = completionTarget(u"sudo doc"_s, 8, true);
@@ -266,6 +280,9 @@ void TestCompletion::shellWrappersTargetWrappedCommand()
 	QCOMPARE(target.kind, Kind::ShellPath);
 	QCOMPARE(target.query, u"src/ma"_s);
 	QCOMPARE(completionTarget(u"sudo ./run"_s, 10, true).kind, Kind::ShellPath);
+	target = completionTarget(u"sudo doc comp"_s, 13, true);
+	QCOMPARE(target.kind, Kind::ShellArg);
+	QCOMPARE(target.query, u"comp"_s);
 	target = completionTarget(u"sudo "_s, 5, true, true);
 	QCOMPARE(target.kind, Kind::ShellCommand);
 	QCOMPARE(target.query, QString());

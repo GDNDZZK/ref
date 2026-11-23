@@ -389,7 +389,7 @@ pub fn default_shell() -> PathBuf {
 /// Git Bash first. `bash.exe` under System32 or WindowsApps is the WSL launcher, which runs
 /// the command inside a Linux VM with different paths, so it is skipped.
 #[cfg(windows)]
-fn windows_shells() -> Vec<PathBuf> {
+pub fn windows_shells() -> Vec<PathBuf> {
     static SHELLS: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
     SHELLS
         .get_or_init(|| {

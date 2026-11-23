@@ -397,10 +397,6 @@ CompletionTarget shellCompletionTarget(const QString& text, qsizetype cursor, bo
 	}
 
 	const QString query = text.mid(tokenStart, cursor - tokenStart);
-	if(query.startsWith(u'-'))
-	{
-		return {};
-	}
 	const QStringView beforeToken = QStringView(text).mid(seg.start, tokenStart - seg.start);
 	const ShellPosition position = classifyShellPosition(beforeToken);
 	if(position == ShellPosition::WrapperArg)
@@ -409,7 +405,15 @@ CompletionTarget shellCompletionTarget(const QString& text, qsizetype cursor, bo
 	}
 	if(position == ShellPosition::Arg)
 	{
-		return {.kind = CompletionTarget::Kind::ShellPath, .query = query, .start = tokenStart, .end = tokenEnd};
+		if(isShellPathToken(query))
+		{
+			return {.kind = CompletionTarget::Kind::ShellPath, .query = query, .start = tokenStart, .end = tokenEnd};
+		}
+		return {.kind = CompletionTarget::Kind::ShellArg, .query = query, .start = tokenStart, .end = tokenEnd};
+	}
+	if(query.startsWith(u'-'))
+	{
+		return {};
 	}
 	if(query.isEmpty())
 	{

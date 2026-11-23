@@ -50,7 +50,7 @@ Item {
 	// Whether pressing Enter while `popup.open` should accept the popup item instead of submitting the typed draft.
 	function shouldAcceptOnEnter() {
 		const kind = model.completionKind
-		if (kind === CompletionKind.shellCommand || kind === CompletionKind.shellPath)
+		if (kind === CompletionKind.shellCommand || kind === CompletionKind.shellPath || kind === CompletionKind.shellArg)
 			return popup.explicitlySelected
 		if (kind === CompletionKind.argument) {
 			const cmd = model.completionCommand

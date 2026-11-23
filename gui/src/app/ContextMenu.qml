@@ -24,6 +24,9 @@ Popup {
 	width: menuInner.width * uiScale
 	height: menuInner.height * uiScale
 	padding: 0
+	modal: true
+	focus: true
+	Overlay.modal: Rectangle { color: "transparent" }
 	closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 	background: null
 
@@ -36,8 +39,14 @@ Popup {
 	}
 
 	contentItem: Item {
+		// Swallow clicks inside the popup padding so they cannot bleed through to rows underneath.
+		MouseArea {
+			anchors.fill: parent
+		}
+
 		Item {
 			id: menuInner
+			objectName: "contextMenuInner"
 			width: menuList.implicitWidth + 2 * menu.menuPadding
 			height: menuList.implicitHeight + 2 * menu.menuPadding
 			transformOrigin: Item.TopLeft
@@ -71,7 +80,7 @@ Popup {
 						Rectangle {
 							anchors.fill: parent
 							radius: Theme.radiusSmall + 2
-							color: hover.hovered ? Theme.surfaceHover : "transparent"
+							color: entryMouse.containsMouse ? Theme.surfaceHover : "transparent"
 
 							Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 						}
@@ -83,12 +92,12 @@ Popup {
 							color: entry.modelData.danger ? Theme.dangerText : Theme.text
 							font.pixelSize: Theme.secondaryFontSize
 						}
-						HoverHandler {
-							id: hover
+						MouseArea {
+							id: entryMouse
+							anchors.fill: parent
+							hoverEnabled: true
 							cursorShape: Qt.PointingHandCursor
-						}
-						TapHandler {
-							onTapped: {
+							onClicked: {
 								menu.close()
 								menu.triggered(entry.index)
 							}

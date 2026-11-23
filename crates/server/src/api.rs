@@ -166,6 +166,12 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> Reply {
             crate::config_files::delete_config_file(hub, file, cwd).await
         }
         Request::ListBinaries { query, limit } => list_binaries(hub, &query, limit).await,
+        Request::CompleteShell {
+            cwd,
+            line,
+            cursor,
+            limit,
+        } => complete_shell(hub, conn, &cwd, &line, cursor, limit).await,
         Request::ListSessions => Ok(json!({ "sessions": hub.infos() })),
         Request::McpStatus { cwd } => {
             let cwd = resolve_req_cwd(hub, conn, cwd);
@@ -899,6 +905,37 @@ async fn list_binaries(hub: &Arc<Hub>, query: &str, limit: Option<usize>) -> Rep
         .await
         .map_err(|e| e.to_string())?;
     Ok(json!({ "binaries": matched }))
+}
+
+/// Max command line length accepted by `complete_shell` (bytes).
+const COMPLETE_SHELL_MAX_LINE_BYTES: usize = 8192;
+
+async fn complete_shell(
+    hub: &Arc<Hub>,
+    conn: &Arc<Conn>,
+    cwd: &str,
+    line: &str,
+    cursor: Option<usize>,
+    limit: Option<usize>,
+) -> Reply {
+    if line.len() > COMPLETE_SHELL_MAX_LINE_BYTES {
+        return Ok(json!({ "items": [] }));
+    }
+    let conn_cwd = conn.lock().cwd.clone();
+    let dir = if hub.opts.sandbox_cwd.is_some() {
+        hub.effective_cwd(cwd)
+    } else if cwd.trim().is_empty() {
+        conn_cwd
+    } else {
+        let home = hub.opts.home.clone().or_else(dirs::home_dir);
+        let p = crate::util::expand_home(cwd.trim(), home.as_deref());
+        Path::new(&conn_cwd).join(p).to_string_lossy().into_owned()
+    };
+    let dir = tokio::task::spawn_blocking(move || crate::ops::validate_cwd(&dir))
+        .await
+        .map_err(|e| e.to_string())??;
+    let items = crate::shell_complete::complete_shell(hub, &dir, line, cursor, limit).await;
+    Ok(json!({ "items": items }))
 }
 
 fn parse_pathext(pathext: Option<&std::ffi::OsStr>) -> Vec<String> {

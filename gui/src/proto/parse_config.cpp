@@ -134,6 +134,13 @@ ConfigFilesInfo readConfigFilesInfo(const Fields& fields)
 	        .projectOverrides = readStrings(fields, "project_overrides"_L1),
 	        .warnings = readStrings(fields, "warnings"_L1)};
 }
+
+ShellCompletionItem readShellCompletionItem(const Fields& fields)
+{
+	return {.value = fields.string("value"_L1),
+	        .description = fields.optionalString("description"_L1).value_or(QString())};
+}
+
 } // namespace
 } // namespace json
 
@@ -189,6 +196,13 @@ Parsed<QStringList> parseBinariesResult(const QJsonObject& result)
 			binaries.append(array.at(i).toString());
 		}
 		return binaries;
+	});
+}
+
+Parsed<QList<ShellCompletionItem>> parseShellCompletionResult(const QJsonObject& result)
+{
+	return json::guarded([&] {
+		return json::resultFields(result).list<ShellCompletionItem>("items"_L1, json::readShellCompletionItem);
 	});
 }
 

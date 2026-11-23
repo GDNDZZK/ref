@@ -144,3 +144,64 @@ fn bare_get_config_and_list_dirs_still_parse() {
         other => panic!("not list_dirs: {other:?}"),
     }
 }
+
+/// `complete_shell` parses with and without optional `cursor`/`limit`, and `ShellCompletionItem` round-trips.
+#[test]
+fn complete_shell_optional_fields_and_roundtrip() {
+    let minimal: ClientFrame = serde_json::from_value(json!({
+        "id": 44,
+        "op": "complete_shell",
+        "cwd": "/home/user/project",
+        "line": "git che",
+    }))
+    .expect("minimal complete_shell parses");
+    match &minimal.req {
+        Request::CompleteShell {
+            cwd,
+            line,
+            cursor,
+            limit,
+        } => {
+            assert_eq!(cwd, "/home/user/project");
+            assert_eq!(line, "git che");
+            assert_eq!(*cursor, None);
+            assert_eq!(*limit, None);
+        }
+        other => panic!("not complete_shell: {other:?}"),
+    }
+    let min_val = serde_json::to_value(&minimal).unwrap();
+    assert_eq!(
+        min_val,
+        json!({
+            "id": 44,
+            "op": "complete_shell",
+            "cwd": "/home/user/project",
+            "line": "git che",
+        })
+    );
+
+    let full = ClientFrame {
+        id: Some(45),
+        req: Request::CompleteShell {
+            cwd: "/home/user/project".into(),
+            line: "git che".into(),
+            cursor: Some(7),
+            limit: Some(50),
+        },
+    };
+    let json = serde_json::to_string(&full).unwrap();
+    let back: ClientFrame = serde_json::from_str(&json).unwrap();
+    match back.req {
+        Request::CompleteShell { cursor, limit, .. } => {
+            assert_eq!(cursor, Some(7));
+            assert_eq!(limit, Some(50));
+        }
+        other => panic!("not complete_shell: {other:?}"),
+    }
+
+    let bare_item: ShellCompletionItem =
+        serde_json::from_value(json!({"value": "status"})).unwrap();
+    assert_eq!(bare_item.description, "");
+    let bare_json = serde_json::to_value(&bare_item).unwrap();
+    assert_eq!(bare_json, json!({"value": "status"}));
+}

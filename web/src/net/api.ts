@@ -16,6 +16,8 @@ import type {
 } from '../proto/generated'
 import type { RefConnection } from './connection.ts'
 
+export type ShellCompletionItem = { value: string; description?: string }
+
 export class RefApi {
   private readonly connection: RefConnection
 
@@ -170,6 +172,23 @@ export class RefApi {
 
   async listBinaries(query: string, limit?: number): Promise<string[]> {
     return this.call({ op: 'list_binaries', query, ...(limit !== undefined ? { limit } : {}) }, 'binaries')
+  }
+
+  async completeShell(
+    cwd: string,
+    line: string,
+    options?: { cursor?: number; limit?: number },
+  ): Promise<ShellCompletionItem[]> {
+    return this.call(
+      {
+        op: 'complete_shell',
+        cwd,
+        line,
+        ...(options?.cursor !== undefined ? { cursor: options.cursor } : {}),
+        ...(options?.limit !== undefined ? { limit: options.limit } : {}),
+      },
+      'items',
+    )
   }
 
   async shutdown(): Promise<void> {

@@ -52,6 +52,17 @@ inline QJsonObject sessionInfoJson(const QString& id, const SessionJson& fields 
 	}
 	return obj;
 }
+
+inline QJsonObject shellCompletionItemJson(const QString& value, const QString& description = {})
+{
+	QJsonObject obj{{QStringLiteral("value"), value}};
+	if(!description.isEmpty())
+	{
+		obj.insert(QStringLiteral("description"), description);
+	}
+	return obj;
+}
+
 // A ref-server stand-in on a loopback WebSocket. It records the request frames it gets and
 // leaves answering them to `onRequest`; Hello is answered by default.
 class FakeBackend : public QObject

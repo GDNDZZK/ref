@@ -90,7 +90,7 @@ public:
 	int queueCount() const { return m_queue.rowCount(); }
 	QAbstractItemModel* files() { return &m_files; }
 	QAbstractItemModel* completions() { return &m_completions; }
-	// "none", "command", "argument", "file", "shellCommand" or "shellPath".
+	// "none", "command", "argument", "file", "shellCommand", "shellArg" or "shellPath".
 	QString completionKind() const;
 	QString completionCommand() const { return m_target.command; }
 	QString completionQuery() const { return m_target.query; }
@@ -191,8 +191,10 @@ private:
 	static constexpr std::chrono::milliseconds FileSearchDelay{80};
 	static constexpr std::chrono::milliseconds DirSearchDelay{60};
 	static constexpr std::chrono::milliseconds BinarySearchDelay{50};
+	static constexpr std::chrono::milliseconds ShellArgSearchDelay{50};
 	static constexpr int FileLimit = 50;
 	static constexpr int BinaryLimit = 50;
+	static constexpr int ShellArgLimit = 50;
 	static constexpr qsizetype MaxShellHistoryMatches = 10;
 	// A draft this long goes to the history when it is thrown away with Ctrl+C.
 	static constexpr qsizetype DiscardKeepLength = 20;
@@ -215,12 +217,21 @@ private:
 		bool valid = false;
 	};
 
+	struct ShellArgCache
+	{
+		QString cwd{};
+		QString linePrefix{};
+		QList<proto::ShellCompletionItem> items{};
+		bool valid = false;
+	};
+
 	bool isCompletionOpen() const;
 	bool hasVisibleCompletion() const;
 	void updateCompletion();
 	void cancelFileSearch();
 	void cancelDirSearch();
 	void cancelBinarySearch();
+	void cancelShellArgSearch();
 	void updateArgCompletion();
 	void updateVariantArgCompletion(const QString& query);
 	void updateModelArgCompletion(const QString& query);
@@ -228,6 +239,7 @@ private:
 	void updateSessionArgCompletion(const QString& query, bool closeMode);
 	void updatePathCompletion(bool includeFiles, bool isExport);
 	void updateShellCommandCompletion();
+	void updateShellArgCompletion();
 	QList<CompletionEntry> buildPathEntries(const QString& typedPrefix,
 	                                        const QString& leafPrefix,
 	                                        const QStringList& dirs,
@@ -236,6 +248,7 @@ private:
 	                                        bool isExport,
 	                                        QChar separator = u'/') const;
 	QList<CompletionEntry> buildShellCommandEntries(const QString& query, const QStringList& binaries) const;
+	QList<CompletionEntry> buildShellArgEntries(const QList<proto::ShellCompletionItem>& items) const;
 	// The draft was changed from here: the text area must show it.
 	void changeDraft();
 	// The draft was edited in the text area, which already shows it.
@@ -258,6 +271,7 @@ private:
 	QCoro::Task<> findFiles(QString query, quint64 serial);
 	QCoro::Task<> findDirs(QString cwd, QString dir, bool includeFiles, quint64 serial);
 	QCoro::Task<> findBinaries(QString query, quint64 serial);
+	QCoro::Task<> findShellArg(QString linePrefix, int cursorInLine, QString query, quint64 serial);
 	const proto::AgentInfo* agentInfo() const;
 	const proto::ModelInfo* modelInfo() const;
 
@@ -287,6 +301,13 @@ private:
 	std::optional<QString> m_binQuery;
 	quint64 m_binSerial = 0;
 	BinaryCache m_binCache;
+	QTimer m_shellArgTimer;
+	std::optional<QString> m_shellArgPendingPrefix;
+	int m_shellArgPendingCursor = 0;
+	QString m_shellArgPendingQuery;
+	quint64 m_shellArgSerial = 0;
+	ShellArgCache m_shellArgCache;
+	bool m_shellArgPathFallback = false;
 	QTimer m_interruptTimer;
 };
 

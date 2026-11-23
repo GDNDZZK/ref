@@ -23,6 +23,7 @@ function setup(options: { busy?: boolean; delayed?: boolean } = {}) {
     removeQueued: vi.fn<ComposerApi['removeQueued']>(async () => ({ removed: true, text: '', images: [] })),
     listFiles: vi.fn<ComposerApi['listFiles']>(async () => []),
     expandCommand: vi.fn<ComposerApi['expandCommand']>(async () => 'expanded text'),
+    completeShell: vi.fn<NonNullable<ComposerApi['completeShell']>>(async () => []),
   }
   const toasts: [ToastLevel, string, Record<string, string> | undefined][] = []
   const host = {
@@ -306,6 +307,31 @@ describe('completion', () => {
     const caret = composer.acceptCompletion(false)
     expect(composer.draft.text).toBe('see @src/main.ts  and more')
     expect(caret).toBe('see @src/main.ts '.length)
+    vi.useRealTimers()
+  })
+  it('completes shell args via completeShell and triggers 0ms shell completion on Tab', async () => {
+    vi.useFakeTimers()
+    const { composer, api } = setup()
+    api.completeShell.mockImplementation(async (_cwd, line) => {
+      if (line === 'docker ') return [{ value: 'compose', description: 'Multi-container' }]
+      if (line === 'docker --f') return [{ value: '--format=', description: 'Output format' }]
+      return []
+    })
+
+    composer.enterShell()
+    type(composer, 'docker ')
+    composer.triggerShellCompletion()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(api.completeShell).toHaveBeenCalledWith('/work', 'docker ', { cursor: 7, limit: 50 })
+    const caret = composer.acceptCompletion(false)
+    expect(composer.draft.text).toBe('docker compose ')
+    expect(caret).toBe('docker compose '.length)
+
+    type(composer, 'docker --f')
+    composer.triggerShellCompletion()
+    await vi.advanceTimersByTimeAsync(0)
+    composer.acceptCompletion(false)
+    expect(composer.draft.text).toBe('docker --format=')
     vi.useRealTimers()
   })
 })

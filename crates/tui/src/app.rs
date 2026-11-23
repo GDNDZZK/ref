@@ -16,8 +16,9 @@ use crate::state::{Queued, SessionView};
 use crate::text;
 pub use crate::ui::autocomplete::{AcKind, Autocomplete};
 use crate::ui::autocomplete::{
-    DirCache, DirKey, DirListing, ShellTokenPos, build_dir_items, has_drive_prefix,
-    has_drive_root_prefix, is_bare_drive, last_arg_token, shell_token_context, split_dir_query,
+    DirCache, DirKey, DirListing, ShellCompleteCache, ShellCompleteKey, ShellTokenPos,
+    build_dir_items, build_shell_arg_items, has_drive_prefix, has_drive_root_prefix, is_bare_drive,
+    last_arg_token, shell_token_context, split_dir_query,
 };
 use crate::ui::dialog::{CreatorFilter, Dialog, HelpDialog, Item, Kind, ListDialog, OPEN_SETTLE};
 use crate::ui::editor::{Editor, History};
@@ -101,6 +102,10 @@ pub enum Pending {
     },
     Binaries {
         query: String,
+    },
+    ShellComplete {
+        cwd: String,
+        line: String,
     },
     /// Generic: toast `ok` on success (if non-empty); errors always toast.
     Simple {
@@ -440,9 +445,14 @@ pub struct App {
     /// Debounced `@` file query: (fire at, query).
     pub files_due: Option<(Instant, String)>,
     dir_cache: DirCache,
-    dirs_inflight: HashSet<(String, String, bool)>,
+    pub(crate) dirs_inflight: HashSet<(String, String, bool)>,
     bin_cache: HashMap<String, Vec<String>>,
     bins_inflight: HashSet<String>,
+    shell_complete_cache: ShellCompleteCache,
+    shell_complete_inflight: HashSet<(String, String)>,
+    /// Debounced `CompleteShell` query: `(fire_at, cwd, line)`.
+    pub shell_complete_due: Option<(Instant, String, String)>,
+    shell_complete_errors: HashSet<(String, String)>,
     history_loaded: bool,
     history_inflight: bool,
     /// Latest server-filtered history response for the open `Kind::Sessions` dialog:
@@ -514,6 +524,8 @@ const HINT_DURATION: Duration = Duration::from_millis(1500);
 const CONFIRM_WINDOW: Duration = Duration::from_secs(4);
 /// Debounce before an `@` file query is sent.
 const FILE_QUERY_DEBOUNCE: Duration = Duration::from_millis(80);
+/// Debounce before a `CompleteShell` query is sent while typing.
+const SHELL_COMPLETE_DEBOUNCE: Duration = Duration::from_millis(60);
 /// Debounce before a `Kind::Sessions` filter query requests filtered history.
 const HISTORY_QUERY_DEBOUNCE: Duration = Duration::from_millis(80);
 /// `ListHistory.creator` value meaning "sessions without a creator (user-created)".
@@ -621,6 +633,10 @@ impl App {
             dirs_inflight: HashSet::new(),
             bin_cache: HashMap::new(),
             bins_inflight: HashSet::new(),
+            shell_complete_cache: ShellCompleteCache::default(),
+            shell_complete_inflight: HashSet::new(),
+            shell_complete_due: None,
+            shell_complete_errors: HashSet::new(),
             history_loaded: false,
             history_inflight: false,
             history_filtered: None,
@@ -660,6 +676,9 @@ impl App {
                 }
                 Pending::Binaries { query } => {
                     self.bins_inflight.remove(&query);
+                }
+                Pending::ShellComplete { cwd, line } => {
+                    self.shell_complete_inflight.remove(&(cwd, line));
                 }
                 Pending::HistoryBg => self.history_inflight = self.has_history_inflight(),
                 Pending::HistoryDialog { .. } => {
@@ -726,12 +745,34 @@ impl App {
         self.suppress_ac = false;
         self.shell_tab_requested = false;
         self.files_due = None;
+        self.shell_complete_due = None;
     }
 
     pub fn dismiss_autocomplete(&mut self) {
         self.ac = None;
         self.suppress_ac = true;
         self.shell_tab_requested = false;
+        self.shell_complete_due = None;
+    }
+
+    pub fn clear_shell_complete_cache(&mut self) {
+        self.shell_complete_cache.clear();
+        self.shell_complete_errors.clear();
+    }
+
+    pub fn exit_shell_mode(&mut self) {
+        self.shell_mode = false;
+        self.clear_autocomplete();
+        self.clear_shell_complete_cache();
+    }
+
+    pub fn exit_watch_shell_mode(&mut self, tile: &str) -> bool {
+        let removed = self.watch.shell_modes.remove(tile);
+        if removed {
+            self.clear_autocomplete();
+            self.clear_shell_complete_cache();
+        }
+        removed
     }
 
     pub fn set_watch_focus(&mut self, focus: Option<String>) {
@@ -1103,6 +1144,12 @@ impl App {
             Pending::Binaries { query } => {
                 self.bins_inflight.remove(&query);
             }
+            Pending::ShellComplete { cwd, line } => {
+                self.shell_complete_inflight
+                    .remove(&(cwd.clone(), line.clone()));
+                self.shell_complete_errors.insert((cwd, line));
+                self.update_autocomplete();
+            }
             Pending::HistoryDialog { .. } => {
                 self.history_inflight = self.has_history_inflight();
                 self.toasts.error(err.message);
@@ -1305,6 +1352,9 @@ impl App {
             Pending::Files { query } => self.on_files_response(&query, &result),
             Pending::Dirs { key } => self.on_dirs_response(key, &result),
             Pending::Binaries { query } => self.on_binaries_response(query, &result),
+            Pending::ShellComplete { cwd, line } => {
+                self.on_complete_shell_response(cwd, line, &result)
+            }
             Pending::Cwd { sid } => match session_info_of(&result) {
                 Ok(info) => {
                     if self.current.as_deref() == Some(sid.as_str()) {
@@ -1564,6 +1614,26 @@ impl App {
         }
     }
 
+    fn on_complete_shell_response(&mut self, cwd: String, line: String, result: &Value) {
+        self.shell_complete_inflight
+            .remove(&(cwd.clone(), line.clone()));
+        let items = match parse_field::<Vec<ref_proto::ShellCompletionItem>>(result, "items") {
+            Ok(items) => items,
+            Err(e) => {
+                self.toasts
+                    .warn(format!("Malformed shell completions: {e}"));
+                self.shell_complete_errors.insert((cwd, line));
+                self.update_autocomplete();
+                return;
+            }
+        };
+        self.shell_complete_errors
+            .remove(&(cwd.clone(), line.clone()));
+        self.shell_complete_cache
+            .insert(ShellCompleteKey { cwd, line }, items);
+        self.update_autocomplete();
+    }
+
     fn on_older_response(&mut self, sid: &str, generation: u64, before: &str, result: &Value) {
         let parsed = (|| -> Result<(Vec<ref_proto::Message>, bool), String> {
             Ok((
@@ -1814,9 +1884,8 @@ impl App {
         self.send_attach(sid.to_string(), true);
         self.perm = None;
         self.question = None;
-        self.shell_mode = false;
+        self.exit_shell_mode();
         self.clear_selection();
-        self.clear_autocomplete();
     }
 
     pub fn create_session(&mut self, prompt: Option<(String, Vec<ImageData>)>) {
@@ -3945,7 +4014,7 @@ impl App {
             let cmd = trimmed.to_string();
             self.push_history(&format!("!{cmd}"));
             self.editor.clear();
-            self.shell_mode = false;
+            self.exit_shell_mode();
             if let Some(sid) = self.current.clone() {
                 self.req(
                     Request::Shell {
@@ -4024,8 +4093,9 @@ impl App {
             if let Some(ed) = self.watch.inputs.get_mut(tile) {
                 ed.clear();
             }
-            self.watch.shell_modes.remove(tile);
+            self.exit_watch_shell_mode(tile);
             self.clear_autocomplete();
+            self.clear_shell_complete_cache();
             self.req(
                 Request::Shell {
                     session_id: tile.to_string(),
@@ -4150,6 +4220,7 @@ impl App {
     /// Recomputes autocomplete after a user text edit, clearing any prior manual popup selection.
     pub fn update_autocomplete_on_edit(&mut self) {
         self.shell_tab_requested = false;
+        self.shell_complete_errors.clear();
         if let Some(ac) = self.ac.as_mut() {
             ac.explicitly_selected = false;
             ac.sel = 0;
@@ -4171,10 +4242,12 @@ impl App {
         if self.suppress_ac {
             self.ac = None;
             self.shell_tab_requested = false;
+            self.shell_complete_due = None;
             return;
         }
         if self.mode == Mode::Watch && self.watch.focus.is_none() {
             self.files_due = None;
+            self.shell_complete_due = None;
             self.ac = None;
             return;
         }
@@ -4183,6 +4256,7 @@ impl App {
             self.update_shell_autocomplete(explicit_tab);
             return;
         }
+        self.shell_complete_due = None;
         let Some(ed) = self.active_editor() else {
             self.files_due = None;
             self.ac = None;
@@ -4379,12 +4453,11 @@ impl App {
         let Some(ed) = self.active_editor() else {
             if show_empty {
                 let items = self.shell_cmd_completions("", true);
-                let prev = self.ac.take();
-                self.ac =
-                    Autocomplete::new(AcKind::ShellCmd, " shell ", items, 0, true, prev.as_ref());
+                self.set_ac(AcKind::ShellCmd, " shell ", items, 0, true);
             } else {
                 self.ac = None;
             }
+            self.shell_complete_due = None;
             return;
         };
         let cursor = ed.cursor.min(ed.text.len());
@@ -4395,6 +4468,7 @@ impl App {
                 raw,
                 at_line_start,
             } => {
+                self.shell_complete_due = None;
                 if raw.is_empty() && !show_empty {
                     self.ac = None;
                     return;
@@ -4405,49 +4479,110 @@ impl App {
                     || raw.starts_with('~')
                     || has_drive_prefix(&raw);
                 if is_path_cmd {
-                    let items = self.path_completion_items(&raw, true, true, true, None);
-                    let prev = self.ac.take();
-                    self.ac = Autocomplete::new(
-                        AcKind::ShellPath,
-                        " files ",
-                        items,
-                        start,
-                        true,
-                        prev.as_ref(),
-                    );
+                    self.show_shell_path_ac(start, &raw, true);
                     return;
                 }
                 let items = self.shell_cmd_completions(&raw, at_line_start);
-                let prev = self.ac.take();
-                self.ac = Autocomplete::new(
-                    AcKind::ShellCmd,
-                    " shell ",
-                    items,
-                    start,
-                    true,
-                    prev.as_ref(),
-                );
+                self.set_ac(AcKind::ShellCmd, " shell ", items, start, true);
             }
             ShellTokenPos::Arg { start, raw } => {
-                if raw.starts_with('-') {
-                    self.ac = None;
-                    return;
-                }
-                if raw.is_empty() && !show_empty {
-                    self.ac = None;
-                    return;
-                }
-                let items = self.path_completion_items(&raw, true, true, true, None);
-                let prev = self.ac.take();
-                self.ac = Autocomplete::new(
-                    AcKind::ShellPath,
-                    " files ",
-                    items,
-                    start,
-                    true,
-                    prev.as_ref(),
-                );
+                self.update_shell_arg_autocomplete(&before, start, &raw, show_empty, explicit_tab);
             }
+        }
+    }
+
+    fn set_ac(
+        &mut self,
+        kind: AcKind,
+        title: &str,
+        items: Vec<(String, String, String)>,
+        start: usize,
+        freeform_enter: bool,
+    ) {
+        let prev = self.ac.take();
+        self.ac = Autocomplete::new(kind, title, items, start, freeform_enter, prev.as_ref());
+    }
+
+    fn show_shell_path_ac(&mut self, start: usize, raw: &str, show_empty: bool) {
+        if raw.is_empty() && !show_empty {
+            self.ac = None;
+            return;
+        }
+        let items = self.path_completion_items(raw, true, true, true, None);
+        self.set_ac(AcKind::ShellPath, " files ", items, start, true);
+    }
+
+    fn update_shell_arg_autocomplete(
+        &mut self,
+        before: &str,
+        start: usize,
+        raw: &str,
+        show_empty: bool,
+        explicit_tab: bool,
+    ) {
+        let raw_unquoted = raw.trim_start_matches(['"', '\'']);
+        let is_flag = raw_unquoted.starts_with('-');
+        let is_path = !is_flag
+            && (raw.contains('/')
+                || (cfg!(windows) && raw.contains('\\'))
+                || raw_unquoted.starts_with('.')
+                || raw_unquoted.starts_with('~')
+                || has_drive_prefix(raw_unquoted));
+        if is_path {
+            self.shell_complete_due = None;
+            self.show_shell_path_ac(start, raw, show_empty);
+            return;
+        }
+        let cwd = self.session_cwd();
+        let key = ShellCompleteKey {
+            cwd: cwd.clone(),
+            line: before.to_string(),
+        };
+        if let Some(cached) = self.shell_complete_cache.get(&key).map(|s| s.to_vec()) {
+            self.shell_complete_due = None;
+            if !cached.is_empty() {
+                let items = build_shell_arg_items(&cached, raw, false, MAX_COMPLETIONS);
+                self.set_ac(AcKind::ShellArg, " shell ", items, start, true);
+                return;
+            }
+            if is_flag {
+                self.ac = None;
+            } else {
+                self.show_shell_path_ac(start, raw, show_empty);
+            }
+            return;
+        }
+        let err_key = (cwd.clone(), before.to_string());
+        let can_query =
+            self.connected && (explicit_tab || !self.shell_complete_errors.contains(&err_key));
+        if !can_query {
+            self.shell_complete_due = None;
+        } else if explicit_tab {
+            self.shell_complete_due = None;
+            self.shell_complete_errors.remove(&err_key);
+            self.request_shell_complete(cwd.clone(), before.to_string());
+        } else {
+            self.shell_complete_due = Some((
+                Instant::now() + SHELL_COMPLETE_DEBOUNCE,
+                cwd.clone(),
+                before.to_string(),
+            ));
+        }
+        if let Some(prefix_items) = self
+            .shell_complete_cache
+            .longest_prefix(&cwd, before, start)
+            .map(|s| s.to_vec())
+        {
+            let items = build_shell_arg_items(&prefix_items, raw, true, MAX_COMPLETIONS);
+            if !items.is_empty() {
+                self.set_ac(AcKind::ShellArg, " shell ", items, start, true);
+                return;
+            }
+        }
+        if is_flag {
+            self.ac = None;
+        } else {
+            self.show_shell_path_ac(start, raw, show_empty);
         }
     }
 
@@ -4797,6 +4932,23 @@ impl App {
         );
     }
 
+    fn request_shell_complete(&mut self, cwd: String, line: String) {
+        let inflight_key = (cwd.clone(), line.clone());
+        if !self.connected || !self.shell_complete_inflight.insert(inflight_key) {
+            return;
+        }
+        let cursor = Some(line.len());
+        self.req(
+            Request::CompleteShell {
+                cwd: cwd.clone(),
+                line: line.clone(),
+                cursor,
+                limit: Some(MAX_COMPLETIONS),
+            },
+            Pending::ShellComplete { cwd, line },
+        );
+    }
+
     /// Slash commands (built-in and from the backend config) matching `q`, best match first.
     fn slash_completions(&self, q: &str) -> Vec<(String, String, String)> {
         let mut items: Vec<(i64, (String, String, String))> = Vec::new();
@@ -4910,7 +5062,7 @@ impl App {
                     return true;
                 }
             }
-            AcKind::File | AcKind::ShellCmd | AcKind::ShellPath => {
+            AcKind::File | AcKind::ShellCmd | AcKind::ShellPath | AcKind::ShellArg => {
                 if let Some(ed) = self.active_editor_mut() {
                     ed.replace_before_cursor(ac.start, &value);
                 }
@@ -4978,6 +5130,12 @@ impl App {
             return Some(DEFERRED_POLL);
         }
         if let Some((at, _)) = &self.files_due {
+            return Some(
+                at.saturating_duration_since(Instant::now())
+                    .max(MIN_DEADLINE_WAIT),
+            );
+        }
+        if let Some((at, _, _)) = &self.shell_complete_due {
             return Some(
                 at.saturating_duration_since(Instant::now())
                     .max(MIN_DEADLINE_WAIT),
@@ -5075,6 +5233,12 @@ impl App {
             && let Some((_, q)) = self.files_due.take()
         {
             self.request_files(q);
+        }
+        if let Some((at, _, _)) = &self.shell_complete_due
+            && Instant::now() >= *at
+            && let Some((_, cwd, line)) = self.shell_complete_due.take()
+        {
+            self.request_shell_complete(cwd, line);
         }
         if self.sessions_due.is_some_and(|at| Instant::now() >= at) {
             self.sessions_due = None;

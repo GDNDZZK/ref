@@ -89,6 +89,7 @@ const REQUEST_OPS = [
   'select_config_file',
   'delete_config_file',
   'list_binaries',
+  'complete_shell',
   'shutdown',
   'ping',
 ] satisfies ClientFrame['op'][]

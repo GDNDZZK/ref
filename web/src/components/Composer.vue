@@ -204,7 +204,10 @@ function onLineBreak(event: KeyboardEvent, area: HTMLTextAreaElement): boolean {
 function onTab(event: KeyboardEvent): boolean {
   const hasModifier = event.ctrlKey || event.metaKey || event.altKey
   if (event.key !== Key.Tab || hasModifier) return false
-  if (draft.value.shell) return true
+  if (draft.value.shell) {
+    if (!event.shiftKey) props.composer.triggerShellCompletion()
+    return true
+  }
   workspace.cycleAgent(props.session.id, event.shiftKey ? -1 : 1).catch(notices.pushError)
   return true
 }

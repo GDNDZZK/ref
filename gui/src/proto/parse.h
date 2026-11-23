@@ -46,6 +46,7 @@ Parsed<ConfigFilesInfo> parseConfigFilesResult(const QJsonObject& result);     /
 Parsed<QList<McpServerStatus>> parseMcpResult(const QJsonObject& result);      // mcp_status
 Parsed<DirListing> parseDirsResult(const QJsonObject& result);                 // list_dirs
 Parsed<QStringList> parseBinariesResult(const QJsonObject& result);            // list_binaries
+Parsed<QList<ShellCompletionItem>> parseShellCompletionResult(const QJsonObject& result); // complete_shell
 Parsed<QString> parseTextResult(const QJsonObject& result);                    // peer_command, expand_command
 Parsed<QString> parsePathResult(const QJsonObject& result);                    // export
 Parsed<RemovedPrompt> parseRemovedPromptResult(const QJsonObject& result);     // remove_queued

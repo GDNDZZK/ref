@@ -1,0 +1,18 @@
+{
+  "kind": "response",
+  "id": 44,
+  "ok": true,
+  "result": {
+    "items": [
+      {
+        "value": "checkout",
+        "description": "Switch branches or restore working tree files"
+      },
+      {
+        "value": "cherry-pick",
+        "description": "Apply the changes introduced by some existing commits"
+      }
+    ]
+  },
+  "error": null
+}

@@ -7679,3 +7679,303 @@ fn sessions_dialog_requests_filtered_history_without_clobbering_unfiltered_cache
         } if q == "parser"
     ));
 }
+
+#[test]
+fn shell_arg_complete_shell_cache_accept_flag_suppression_and_listdirs_fallback() {
+    let (mut app, mut rx) = test_app_with_requests(false);
+    let _ = drain_requests(&mut rx);
+
+    // 1. Typing `!docker ` schedules debounced CompleteShell; housekeeping sends it.
+    type_text(&mut app, "!docker ");
+    assert!(app.shell_complete_due.is_some());
+    assert!(
+        !drain_requests(&mut rx)
+            .iter()
+            .any(|f| matches!(f.req, Request::CompleteShell { .. }))
+    );
+    app.shell_complete_due = Some((
+        std::time::Instant::now() - std::time::Duration::from_millis(1),
+        TEST_CWD.into(),
+        "docker ".into(),
+    ));
+    app.housekeeping();
+    let req = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(&f.req, Request::CompleteShell { line, .. } if line == "docker "))
+        .expect("CompleteShell for `docker `");
+    assert!(matches!(
+        &req.req,
+        Request::CompleteShell {
+            cwd,
+            cursor: Some(7),
+            limit: Some(50),
+            ..
+        } if cwd == TEST_CWD
+    ));
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: req.id.unwrap(),
+        ok: true,
+        result: json!({
+            "items": [
+                {"value": "compose", "description": "Define and run multi-container applications"},
+                {"value": "build", "description": "Build an image"},
+                {"value": "--help", "description": "Print usage"}
+            ]
+        }),
+        error: None,
+        code: None,
+    }));
+    let ac = app.ac.as_ref().expect("ShellArg popup");
+    assert_eq!(ac.kind, crate::app::AcKind::ShellArg);
+    assert!(ac.freeform_enter && !ac.explicitly_selected);
+    assert_eq!(ac.items[0].0, "compose ");
+    assert_eq!(ac.items[0].1, "compose");
+
+    // 2. Typing `co` filters immediately from cache (0 flicker) while scheduling debounced query.
+    type_text(&mut app, "co");
+    let ac = app.ac.as_ref().expect("0-flicker cached ShellArg");
+    assert_eq!(ac.kind, crate::app::AcKind::ShellArg);
+    assert_eq!(ac.items.len(), 1);
+    assert_eq!(ac.items[0].1, "compose");
+    assert!(app.shell_complete_due.is_some());
+
+    // Accepting `compose` appends trailing space and closes popup.
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.editor.text, "docker compose ");
+    assert!(app.ac.is_none());
+
+    // 3. Item ending with `=` inserts without trailing space and closes popup.
+    app.editor.clear();
+    type_text(&mut app, "git --git");
+    press(&mut app, KeyCode::Tab); // 0ms debounce on Tab
+    let git_req = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(&f.req, Request::CompleteShell { line, .. } if line == "git --git"))
+        .expect("immediate CompleteShell on Tab");
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: git_req.id.unwrap(),
+        ok: true,
+        result: json!({ "items": [{"value": "--git-dir=", "description": "Set path to repository"}] }),
+        error: None,
+        code: None,
+    }));
+    assert_eq!(app.ac.as_ref().unwrap().kind, crate::app::AcKind::ShellArg);
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.editor.text, "git --git-dir=");
+    assert!(app.ac.is_none());
+
+    // 4. Item ending with `/` inserts without space and keeps open (refreshing into ShellPath).
+    app.editor.clear();
+    type_text(&mut app, "git checkout sr");
+    press(&mut app, KeyCode::Tab);
+    let step4_reqs = drain_requests(&mut rx);
+    if let Some(pending_dir) = step4_reqs
+        .iter()
+        .find(|f| matches!(&f.req, Request::ListDirs { path, .. } if path == "."))
+    {
+        app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+            id: pending_dir.id.unwrap(),
+            ok: false,
+            result: serde_json::Value::Null,
+            error: Some("cancelled".into()),
+            code: None,
+        }));
+    }
+    let branch_req = step4_reqs
+        .into_iter()
+        .find(
+            |f| matches!(&f.req, Request::CompleteShell { line, .. } if line == "git checkout sr"),
+        )
+        .expect("CompleteShell for git checkout sr");
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: branch_req.id.unwrap(),
+        ok: true,
+        result: json!({ "items": [{"value": "src/"}] }),
+        error: None,
+        code: None,
+    }));
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.editor.text, "git checkout src/");
+    let src_dir_req = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(&f.req, Request::ListDirs { path, .. } if path == "src"))
+        .expect("accepting trailing `/` ShellArg keeps open and queries ListDirs");
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: src_dir_req.id.unwrap(),
+        ok: false,
+        result: serde_json::Value::Null,
+        error: Some("cancelled".into()),
+        code: None,
+    }));
+
+    // 5. `-`-prefixed flag with empty CompleteShell closes popup (NO ListDirs fallback).
+    app.editor.clear();
+    type_text(&mut app, "docker --zzz");
+    press(&mut app, KeyCode::Tab);
+    let flag_req = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(&f.req, Request::CompleteShell { line, .. } if line == "docker --zzz"))
+        .expect("CompleteShell for docker --zzz");
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: flag_req.id.unwrap(),
+        ok: true,
+        result: json!({ "items": [] }),
+        error: None,
+        code: None,
+    }));
+    assert!(app.ac.is_none());
+    assert!(
+        drain_requests(&mut rx)
+            .iter()
+            .all(|f| !matches!(&f.req, Request::ListDirs { .. })),
+        "empty `-` flag completion must NOT fall back to ListDirs"
+    );
+
+    // 6. Non-flag arg shows ListDirs fallback while CompleteShell is pending (0-flicker) and on empty reply.
+    app.editor.clear();
+    type_text(&mut app, "ls foo");
+    press(&mut app, KeyCode::Tab);
+    let reqs = drain_requests(&mut rx);
+    let ls_req = reqs
+        .iter()
+        .find(|f| matches!(&f.req, Request::CompleteShell { line, .. } if line == "ls foo"))
+        .expect("CompleteShell for ls foo");
+    let dir_req = reqs
+        .iter()
+        .find(|f| matches!(&f.req, Request::ListDirs { path, .. } if path == "."))
+        .expect("ListDirs fallback sent while CompleteShell is pending");
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: dir_req.id.unwrap(),
+        ok: true,
+        result: json!({ "path": TEST_CWD, "dirs": [], "files": ["foobar.txt"] }),
+        error: None,
+        code: None,
+    }));
+    assert_eq!(app.ac.as_ref().unwrap().kind, crate::app::AcKind::ShellPath);
+    assert_eq!(app.ac.as_ref().unwrap().items[0].1, "foobar.txt");
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: ls_req.id.unwrap(),
+        ok: true,
+        result: json!({ "items": [] }),
+        error: None,
+        code: None,
+    }));
+    assert_eq!(app.ac.as_ref().unwrap().kind, crate::app::AcKind::ShellPath);
+    assert_eq!(app.ac.as_ref().unwrap().items[0].1, "foobar.txt");
+
+    // 7. Path arg token (`ls src/`) skips CompleteShell and goes directly to ListDirs.
+    app.editor.clear();
+    type_text(&mut app, "ls src/");
+    let reqs = drain_requests(&mut rx);
+    assert!(
+        reqs.iter()
+            .all(|f| !matches!(&f.req, Request::CompleteShell { .. }))
+    );
+    let step7_dir_req = reqs
+        .into_iter()
+        .find(|f| matches!(&f.req, Request::ListDirs { path, .. } if path == "src"))
+        .expect("path arg token queries ListDirs directly");
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: step7_dir_req.id.unwrap(),
+        ok: false,
+        result: serde_json::Value::Null,
+        error: Some("cancelled".into()),
+        code: None,
+    }));
+
+    // 8. Flags containing `/` or `.` (`--manifest-path=sub/`, `-I./inc`) route through CompleteShell, NOT ListDirs.
+    for flag_cmd in ["cargo --manifest-path=sub/", "cc -I./inc"] {
+        app.editor.clear();
+        type_text(&mut app, flag_cmd);
+        press(&mut app, KeyCode::Tab);
+        let reqs = drain_requests(&mut rx);
+        assert!(
+            reqs.iter()
+                .all(|f| !matches!(&f.req, Request::ListDirs { .. })),
+            "{flag_cmd} must not query ListDirs"
+        );
+        let f_req = reqs
+            .into_iter()
+            .find(|f| matches!(&f.req, Request::CompleteShell { line, .. } if line == flag_cmd))
+            .expect("flag with path chars queries CompleteShell");
+        app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+            id: f_req.id.unwrap(),
+            ok: true,
+            result: json!({ "items": [] }),
+            error: None,
+            code: None,
+        }));
+        assert!(app.ac.is_none());
+    }
+
+    // 9a. CompleteShell error on prefix matching cached `foobar.txt` falls back to ListDirs (ShellPath).
+    app.editor.clear();
+    type_text(&mut app, "git foo");
+    assert_eq!(app.ac.as_ref().unwrap().kind, crate::app::AcKind::ShellPath);
+    assert!(app.shell_complete_due.is_some());
+    app.shell_complete_due = Some((
+        std::time::Instant::now() - std::time::Duration::from_millis(1),
+        TEST_CWD.into(),
+        "git foo".into(),
+    ));
+    app.housekeeping();
+    let err_match_req = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(&f.req, Request::CompleteShell { line, .. } if line == "git foo"))
+        .unwrap();
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: err_match_req.id.unwrap(),
+        ok: false,
+        result: serde_json::Value::Null,
+        error: Some("timeout".into()),
+        code: None,
+    }));
+    assert_eq!(app.ac.as_ref().unwrap().kind, crate::app::AcKind::ShellPath);
+    assert_eq!(app.ac.as_ref().unwrap().items[0].1, "foobar.txt");
+
+    // 9b. CompleteShell error on prefix with no matching cached files leaves ac None and Tab retries CompleteShell.
+    app.editor.clear();
+    type_text(&mut app, "git ch");
+    press(&mut app, KeyCode::Tab);
+    let err_req = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(&f.req, Request::CompleteShell { line, .. } if line == "git ch"))
+        .unwrap();
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: err_req.id.unwrap(),
+        ok: false,
+        result: serde_json::Value::Null,
+        error: Some("timeout".into()),
+        code: None,
+    }));
+    assert!(app.ac.is_none());
+    press(&mut app, KeyCode::Tab);
+    let retry_req = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(&f.req, Request::CompleteShell { line, .. } if line == "git ch"))
+        .expect("Tab retries CompleteShell after prior error");
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: retry_req.id.unwrap(),
+        ok: true,
+        result: json!({ "items": [{"value": "checkout", "description": "Switch branches"}] }),
+        error: None,
+        code: None,
+    }));
+    assert_eq!(app.ac.as_ref().unwrap().kind, crate::app::AcKind::ShellArg);
+    // Leaving shell mode clears cached CompleteShell entries.
+    app.editor.clear();
+    app.exit_shell_mode();
+    type_text(&mut app, "!git ch");
+    press(&mut app, KeyCode::Tab);
+    assert!(
+        drain_requests(&mut rx)
+            .iter()
+            .any(|f| matches!(&f.req, Request::CompleteShell { line, .. } if line == "git ch")),
+        "cache cleared after exiting shell mode"
+    );
+    assert!(
+        app.dirs_inflight.is_empty(),
+        "stale dirs_inflight: {:?}",
+        app.dirs_inflight
+    );
+}

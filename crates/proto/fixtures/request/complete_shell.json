@@ -1,0 +1,8 @@
+{
+  "id": 44,
+  "op": "complete_shell",
+  "cwd": "/home/user/project",
+  "line": "git che",
+  "cursor": 7,
+  "limit": 50
+}

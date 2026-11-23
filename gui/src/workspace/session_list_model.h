@@ -77,6 +77,7 @@ public:
 	const QString& creatorId() const { return m_creatorId; }
 	void setCwdFilter(const QString& cwd);
 	const QString& cwdFilter() const { return m_cwdFilter; }
+	void setFilters(const QString& cwd, CreatorFilter creatorFilter, const QString& creatorId);
 	void setKnownSessions(const QList<proto::SessionInfo>& sessions);
 	QString displayName(const QString& sessionId) const;
 	void setCurrentId(const QString& id);

@@ -201,7 +201,7 @@ Rectangle {
 		Rectangle {
 			anchors.fill: parent
 			radius: Theme.radiusSmall + 2
-			color: itemHover.hovered ? Theme.surfaceHover : "transparent"
+			color: itemMouse.containsMouse ? Theme.surfaceHover : "transparent"
 
 			Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 		}
@@ -230,12 +230,12 @@ Rectangle {
 			elide: Text.ElideRight
 		}
 
-		HoverHandler {
-			id: itemHover
+		MouseArea {
+			id: itemMouse
+			anchors.fill: parent
+			hoverEnabled: true
 			cursorShape: Qt.PointingHandCursor
-		}
-		TapHandler {
-			onTapped: menuItem.triggered()
+			onClicked: menuItem.triggered()
 		}
 	}
 	Rectangle {
@@ -753,7 +753,10 @@ Rectangle {
 							width: menuInner.width * uiScale
 							height: menuInner.height * uiScale
 							padding: 0
-							closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+							modal: true
+							focus: true
+							Overlay.modal: Rectangle { color: "transparent" }
+							closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 							background: null
 
 							enter: Transition {
@@ -765,6 +768,11 @@ Rectangle {
 							}
 
 							contentItem: Item {
+								// Swallow clicks inside the popup padding so they cannot bleed through to rows underneath.
+								MouseArea {
+									anchors.fill: parent
+								}
+
 								Item {
 									id: menuInner
 									width: historyFilterMenu.menuWidth

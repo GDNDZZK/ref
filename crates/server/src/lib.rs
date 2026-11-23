@@ -18,6 +18,7 @@ pub mod peers;
 mod prompt;
 mod question;
 pub mod session;
+mod shell_complete;
 mod store;
 pub mod title;
 mod toolset;

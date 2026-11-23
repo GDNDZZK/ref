@@ -42,6 +42,16 @@ const usedFraction = computed(() => {
   const { used, max } = context.value ?? { used: 0, max: 0 }
   return max > 0 ? Math.min(1, used / max) : 0
 })
+const recommendPercent = computed(() => {
+  const ctx = context.value
+  if (!ctx || ctx.max <= 0 || ctx.recommend <= 0 || ctx.recommend >= ctx.max) return undefined
+  return (ctx.recommend / ctx.max) * PERCENT
+})
+const autoPercent = computed(() => {
+  const ctx = context.value
+  if (!ctx || ctx.max <= 0 || ctx.auto <= 0 || ctx.auto >= ctx.max) return undefined
+  return (ctx.auto / ctx.max) * PERCENT
+})
 const contextTone = computed(() => {
   const { used, recommend, auto } = context.value ?? { used: 0, recommend: 0, auto: 0 }
   if (auto > 0 && used >= auto) return 'danger'
@@ -90,7 +100,21 @@ const contextTitle = computed(() => {
     <StatusTodo :session-id="session.id" :todos="session.info?.todos" />
     <div v-if="context && context.max > 0" class="context" :class="contextTone" :title="contextTitle">
       <span>{{ formatTokens(context.used) }} / {{ formatTokens(context.max) }}</span>
-      <span class="bar"><span class="fill" :style="{ width: `${usedFraction * PERCENT}%` }" /></span>
+      <span class="bar">
+        <span class="track"><span class="fill" :style="{ width: `${usedFraction * PERCENT}%` }" /></span>
+        <span
+          v-if="recommendPercent !== undefined"
+          class="tick recommend"
+          aria-hidden="true"
+          :style="{ left: `${recommendPercent}%` }"
+        />
+        <span
+          v-if="autoPercent !== undefined"
+          class="tick auto"
+          aria-hidden="true"
+          :style="{ left: `${autoPercent}%` }"
+        />
+      </span>
     </div>
   </div>
 </template>
@@ -174,11 +198,18 @@ const contextTitle = computed(() => {
 }
 
 .bar {
-  width: 48px;
-  height: 4px;
-  overflow: hidden;
-  border-radius: 2px;
+  position: relative;
+  width: 56px;
+  height: 5px;
+  border-radius: 2.5px;
   background: var(--border);
+}
+
+.track {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
 }
 
 .fill {
@@ -186,6 +217,24 @@ const contextTitle = computed(() => {
   height: 100%;
   background: var(--accent);
   transition: width var(--motion-standard) var(--motion-ease);
+}
+
+.tick {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  border-radius: 1px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.tick.recommend {
+  background: var(--warning);
+}
+
+.tick.auto {
+  background: var(--danger);
 }
 
 .context.warning .fill {

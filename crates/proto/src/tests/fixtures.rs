@@ -445,6 +445,18 @@ fn requests() -> Samples<ClientFrame> {
                 },
             ),
         ),
+        (
+            "complete_shell",
+            frame(
+                44,
+                Request::CompleteShell {
+                    cwd: PROJECT_DIR.into(),
+                    line: "git che".into(),
+                    cursor: Some(7),
+                    limit: Some(50),
+                },
+            ),
+        ),
     ]
 }
 
@@ -626,6 +638,13 @@ fn server_frames() -> Samples<ServerFrame> {
             response(
                 43,
                 json!({"binaries": ["cargo", "cargo-clippy", "cargo-fmt"]}),
+            ),
+        ),
+        (
+            "response_complete_shell",
+            response(
+                44,
+                json!({"items": [{"value": "checkout", "description": "Switch branches or restore working tree files"}, {"value": "cherry-pick", "description": "Apply the changes introduced by some existing commits"}]}),
             ),
         ),
         (

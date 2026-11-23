@@ -21,6 +21,8 @@ mod web;
 mod write;
 
 pub use bash::default_shell;
+#[cfg(windows)]
+pub use bash::windows_shells;
 pub use hashline::HashStore;
 
 /// Static description of a tool exposed to the model.
