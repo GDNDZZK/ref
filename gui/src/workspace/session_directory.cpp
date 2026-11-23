@@ -87,7 +87,8 @@ void SessionDirectory::setHistoryFilter(const QString& cwd, SessionListModel::Cr
 	m_historyCreator = creator;
 	if(refreshNow)
 	{
-		refreshHistory(true);
+		m_historySearchTimer.stop();
+		loadHistory();
 	}
 }
 
@@ -279,7 +280,12 @@ QCoro::Task<> SessionDirectory::resubscribe()
 
 QCoro::Task<> SessionDirectory::loadLive()
 {
+	const QPointer<SessionDirectory> self(this);
 	const auto sessions = co_await m_backend.client().listSessions();
+	if(!self)
+	{
+		co_return;
+	}
 	if(!sessions)
 	{
 		emit failed(sessions.error());
@@ -294,10 +300,11 @@ QCoro::Task<> SessionDirectory::loadHistory()
 	{
 		co_return;
 	}
+	const QPointer<SessionDirectory> self(this);
 	const int request = ++m_historyRequest;
 	const bool filtered = hasSidebarFilter();
 	const auto sessions = co_await m_backend.client().listHistory(m_historyCwd, HistoryLimit, m_historyCreator, m_historyQuery);
-	if(request != m_historyRequest)
+	if(!self || request != m_historyRequest)
 	{
 		co_return;
 	}
@@ -334,9 +341,10 @@ QCoro::Task<> SessionDirectory::loadUnfilteredHistory()
 	{
 		co_return;
 	}
+	const QPointer<SessionDirectory> self(this);
 	const int request = ++m_unfilteredHistoryRequest;
 	const auto sessions = co_await m_backend.client().listHistory({}, HistoryLimit);
-	if(request != m_unfilteredHistoryRequest)
+	if(!self || request != m_unfilteredHistoryRequest)
 	{
 		co_return;
 	}

@@ -61,6 +61,7 @@ Item {
 	// bindings that read the view then run against a half-destroyed object (TypeErrors). Dropping the rows first, while
 	// the view is whole, ends them in the normal way.
 	Component.onDestruction: chat.model = null
+	clip: true
 
 	ChatView {
 		id: chat
@@ -208,7 +209,7 @@ Item {
 		anchors { horizontalCenter: parent.horizontalCenter; bottom: statusLine.top }
 		width: chat.columnWidth
 		prompt: pane.session.question
-		maxHeight: pane.height * pane.questionMaxHeightRatio
+		maxHeight: Math.max(0, Math.min(pane.height * pane.questionMaxHeightRatio, pane.height - statusLine.height - composerLoader.height - pane.margin))
 	}
 
 	StatusLine {
@@ -224,7 +225,6 @@ Item {
 		objectName: "composerLoader"
 		anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: Math.min(pane.margin, composerLoader.height) }
 		width: chat.columnWidth
-		height: item ? item.height : 0
 		active: true
 		readonly property real sendButtonCenterX: item ? (item as Composer).sendButtonCenterX : width - pane.sendButtonFallbackInset
 		sourceComponent: Composer {

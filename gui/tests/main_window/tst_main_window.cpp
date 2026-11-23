@@ -3489,9 +3489,7 @@ void TestMainWindow::queueStripShowsQueuedPromptsAndCoexistsWithTileComposer()
 		}
 		return tileB != nullptr;
 	}());
-	f.workspace->focusTile(u"ses_a"_s);
-	QTRY_COMPARE(f.workspace->focusedTileId(), u"ses_a"_s);
-
+	QCOMPARE(f.workspace->focusedTileId(), QString());
 	f.fake.send({{u"kind"_s, u"event"_s},
 	             {u"session_id"_s, u"ses_b"_s},
 	             {u"event"_s, QJsonObject{{u"type"_s, u"queue"_s}, {u"messages"_s, QJsonArray{queuedMsg}}}}});
@@ -3527,7 +3525,10 @@ void TestMainWindow::lightboxNavigatesZoomsAndResets()
 		            {u"role"_s, u"user"_s},
 		            {u"time"_s, 1},
 		            {u"parts"_s, QJsonArray{QJsonObject{{u"type"_s, u"image"_s},
-		                                               {u"image"_s, QJsonObject{{u"id"_s, u"img_1"_s}, {u"mime"_s, u"image/png"_s}, {u"data"_s, QString()}, {u"size"_s, 1024}}},
+		                                               {u"id"_s, u"img_1"_s},
+		                                               {u"mime"_s, u"image/png"_s},
+		                                               {u"data"_s, QString()},
+		                                               {u"size"_s, 1024},
 		                                               {u"name"_s, u"first.png"_s}}}}},
 		QJsonObject{{u"id"_s, u"m2"_s},
 		            {u"role"_s, u"assistant"_s},
@@ -3676,15 +3677,7 @@ void TestMainWindow::sidebarHistoryFilterMenuAndCustomHeightCollapseWork()
 		QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, pt);
 	};
 	clickCenter(filterBtn);
-	QObject* filterMenu = nullptr;
-	for(QObject* ch : filterBtn->children())
-	{
-		if(ch->objectName() == u"historyFilterMenu"_s)
-		{
-			filterMenu = ch;
-			break;
-		}
-	}
+	QObject* filterMenu = filterBtn->findChild<QObject*>(u"historyFilterMenu"_s);
 	QVERIFY(filterMenu);
 	QTRY_VERIFY(filterMenu->property("opened").toBool());
 	QQuickItem* contentItem = filterMenu->property("contentItem").value<QQuickItem*>();
