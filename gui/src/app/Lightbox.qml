@@ -134,10 +134,24 @@ Item {
 	}
 
 	Rectangle {
+		id: scrimRect
 		anchors.fill: parent
 		color: Qt.rgba(0, 0, 0, lightbox.scrimOpacity)
 
-		TapHandler { onTapped: lightbox.close() }
+		TapHandler {
+			onTapped: eventPoint => {
+				const p = eventPoint.position
+				if (zoomToolbar.contains(scrimRect.mapToItem(zoomToolbar, p)))
+					return
+				if (prevButton.visible && prevButton.contains(scrimRect.mapToItem(prevButton, p)))
+					return
+				if (nextButton.visible && nextButton.contains(scrimRect.mapToItem(nextButton, p)))
+					return
+				if (viewport.contains(scrimRect.mapToItem(viewport, p)) && stage.contains(scrimRect.mapToItem(stage, p)))
+					return
+				lightbox.close()
+			}
+		}
 		MouseArea {
 			anchors.fill: parent
 			acceptedButtons: Qt.NoButton

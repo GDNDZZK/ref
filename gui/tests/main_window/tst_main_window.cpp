@@ -3407,6 +3407,7 @@ void TestMainWindow::splitUnfocusClampsScrollAndTileHeaderHasNoBindingLoop()
 		       && qFuzzyCompare(item->property("radius").toReal(), 18.0);
 	});
 	QVERIFY(boxB);
+	QTRY_VERIFY(boxB->height() > 40.0 && qRound(boxB->height()) == qRound(boxB->property("fullHeight").toReal()));
 	const qreal openBoxHeight = boxB->height();
 	QVERIFY(openBoxHeight > 40.0);
 
