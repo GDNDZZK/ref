@@ -799,6 +799,27 @@ pub struct ConfigFilesInfo {
     pub warnings: Vec<String>,
 }
 
+/// Values of [`PartLayoutMeta::kind`].
+pub const PART_KIND_TEXT: &str = "text";
+pub const PART_KIND_REASONING: &str = "reasoning";
+pub const PART_KIND_IMAGE: &str = "image";
+pub const PART_KIND_TOOL: &str = "tool";
+
+/// Values of [`MessageLayoutMeta::source_kind`].
+pub const SOURCE_KIND_HUMAN: &str = "human";
+pub const SOURCE_KIND_PEER: &str = "peer";
+pub const SOURCE_KIND_SPAWN: &str = "spawn";
+pub const SOURCE_KIND_REMINDER: &str = "reminder";
+pub const SOURCE_KIND_COMPACTION: &str = "compaction";
+pub const SOURCE_KIND_SHELL: &str = "shell";
+
+/// Name of the built-in `todo` tool (special-cased in layout metadata and UI).
+pub const TOOL_TODO: &str = "todo";
+
+/// Default and maximum message page sizes for `Attach` / `Messages`.
+pub const PAGE_DEFAULT: usize = 100;
+pub const PAGE_MAX: usize = 1000;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct PartLayoutMeta {
     /// "text" | "reasoning" | "image" | "tool"
@@ -838,6 +859,185 @@ pub struct MessageLayoutMeta {
     pub has_error: bool,
     #[serde(default)]
     pub parts: Vec<PartLayoutMeta>,
+}
+
+fn source_kind(src: &MessageSource) -> &'static str {
+    match src {
+        MessageSource::Human => SOURCE_KIND_HUMAN,
+        MessageSource::Peer { .. } => SOURCE_KIND_PEER,
+        MessageSource::Spawn { .. } => SOURCE_KIND_SPAWN,
+        MessageSource::Reminder => SOURCE_KIND_REMINDER,
+        MessageSource::Compaction => SOURCE_KIND_COMPACTION,
+        MessageSource::Shell => SOURCE_KIND_SHELL,
+    }
+}
+
+fn count_lines(s: &str) -> u32 {
+    if s.is_empty() {
+        0
+    } else {
+        s.split('\n').count().min(u32::MAX as usize) as u32
+    }
+}
+
+fn fence_marker(line: &str) -> Option<(char, usize)> {
+    let trimmed = line.trim_start();
+    let ch = trimmed.chars().next()?;
+    if ch != '`' && ch != '~' {
+        return None;
+    }
+    let count = trimmed.chars().take_while(|&c| c == ch).count();
+    (count >= 3).then_some((ch, count))
+}
+
+fn is_table_separator(line: &str) -> bool {
+    let trimmed = line.trim();
+    if !trimmed.contains('|') || !trimmed.contains('-') {
+        return false;
+    }
+    trimmed
+        .chars()
+        .all(|c| matches!(c, '|' | '-' | ':' | ' ' | '\t'))
+}
+
+fn analyze_markdown(text: &str) -> (u16, u32, u16) {
+    let mut code_blocks: u16 = 0;
+    let mut code_lines: u32 = 0;
+    let mut tables: u16 = 0;
+    let mut fence: Option<(char, usize)> = None;
+    let mut prev_has_pipe = false;
+    let mut in_table = false;
+
+    for line in text.split('\n') {
+        if let Some((fch, flen)) = fence {
+            let trimmed = line.trim_start();
+            let count = trimmed.chars().take_while(|&c| c == fch).count();
+            let closes = count >= flen && trimmed[count * fch.len_utf8()..].trim().is_empty();
+            if closes {
+                fence = None;
+            } else {
+                code_lines = code_lines.saturating_add(1);
+            }
+            prev_has_pipe = false;
+            in_table = false;
+            continue;
+        }
+        if let Some(marker) = fence_marker(line) {
+            fence = Some(marker);
+            code_blocks = code_blocks.saturating_add(1);
+            prev_has_pipe = false;
+            in_table = false;
+            continue;
+        }
+        let has_pipe = line.contains('|');
+        if prev_has_pipe && is_table_separator(line) {
+            if !in_table {
+                tables = tables.saturating_add(1);
+                in_table = true;
+            }
+        } else if !(in_table && has_pipe) {
+            in_table = false;
+        }
+        prev_has_pipe = has_pipe;
+    }
+    (code_blocks, code_lines, tables)
+}
+
+/// Computes lightweight [`MessageLayoutMeta`] from an in-memory [`Message`].
+pub fn compute_layout_meta(seq: u64, msg: &Message) -> MessageLayoutMeta {
+    let parts = msg
+        .parts
+        .iter()
+        .map(|p| match p {
+            Part::Text { text, .. } => {
+                let (code_blocks, code_lines, tables) = analyze_markdown(text);
+                PartLayoutMeta {
+                    kind: PART_KIND_TEXT.into(),
+                    chars: text.chars().count().min(u32::MAX as usize) as u32,
+                    lines: count_lines(text),
+                    code_blocks,
+                    code_lines,
+                    tables,
+                    tool: None,
+                    tool_lines: 0,
+                    width: None,
+                    height: None,
+                }
+            }
+            Part::Reasoning { text, .. } => PartLayoutMeta {
+                kind: PART_KIND_REASONING.into(),
+                chars: text.chars().count().min(u32::MAX as usize) as u32,
+                lines: count_lines(text),
+                code_blocks: 0,
+                code_lines: 0,
+                tables: 0,
+                tool: None,
+                tool_lines: 0,
+                width: None,
+                height: None,
+            },
+            Part::Image { .. } => PartLayoutMeta {
+                kind: PART_KIND_IMAGE.into(),
+                chars: 0,
+                lines: 0,
+                code_blocks: 0,
+                code_lines: 0,
+                tables: 0,
+                tool: None,
+                tool_lines: 0,
+                width: None,
+                height: None,
+            },
+            Part::Tool {
+                name,
+                purpose,
+                input,
+                output,
+                meta,
+                ..
+            } => {
+                let lines = if name == TOOL_TODO {
+                    input
+                        .get("todos")
+                        .and_then(|v| v.as_array())
+                        .map_or(0, Vec::len)
+                } else if let Some(diff) = meta
+                    .as_ref()
+                    .and_then(|m| m.get("diff"))
+                    .and_then(|v| v.as_str())
+                {
+                    diff.lines().count()
+                } else {
+                    output.as_deref().map_or(0, |o| o.lines().count())
+                };
+                let tool_lines = lines.min(u16::MAX as usize) as u16;
+                let chars = (purpose.chars().count()
+                    + output.as_deref().map_or(0, |o| o.chars().count()))
+                .min(u32::MAX as usize) as u32;
+                PartLayoutMeta {
+                    kind: PART_KIND_TOOL.into(),
+                    chars,
+                    lines: tool_lines as u32,
+                    code_blocks: 0,
+                    code_lines: 0,
+                    tables: 0,
+                    tool: Some(name.clone()),
+                    tool_lines,
+                    width: None,
+                    height: None,
+                }
+            }
+        })
+        .collect();
+
+    MessageLayoutMeta {
+        seq,
+        id: msg.id.clone(),
+        role: msg.role,
+        source_kind: source_kind(&msg.source).into(),
+        has_error: msg.error.is_some(),
+        parts,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

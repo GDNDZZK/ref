@@ -513,6 +513,49 @@ async fn compact_context_tool_keeps_history_but_sends_summary_only() {
 }
 
 #[tokio::test]
+async fn compact_context_injects_current_todos_with_staleness_note() {
+    let (m, hub, _, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 => Reply::Tools(vec![tool(
+                "c1",
+                "todo",
+                json!({
+                    "purpose": "Track steps",
+                    "todos": [
+                        {"content": "Read code", "status": "completed"},
+                        {"content": "Fix bug", "status": "in_progress"}
+                    ]
+                }),
+            )]),
+            1 => Reply::Tools(vec![tool(
+                "c2",
+                "compact_context",
+                json!({"purpose": "Compact context", "summary": "Read code; fixing bug."}),
+            )]),
+            _ => Reply::Text("continuing".into()),
+        }),
+        "compact_todos",
+    )
+    .await;
+    prompt(&hub, &s, "start");
+    wait_idle(&s).await;
+    assert_eq!(last_text(&s), "continuing");
+
+    let bodies = m.bodies();
+    let compacted_req = non_system(&bodies[2]);
+    assert_eq!(compacted_req.len(), 1, "{compacted_req:#?}");
+    let text = compacted_req[0]["content"].as_str().unwrap();
+    assert!(text.contains("Read code; fixing bug."), "{text}");
+    assert!(
+        text.contains(
+            "[Todo list at compaction time (may be stale or inaccurate; prefer the summary above):]\n[x] Read code\n[~] Fix bug"
+        ),
+        "{text}"
+    );
+    assert!(text.ends_with("[Continue from here.]"), "{text}");
+}
+
+#[tokio::test]
 async fn manual_compaction_uses_model_summary_and_undo_restores_context() {
     let (m, hub, _, s) = run_turn(
         Arc::new(|n, _| match n {

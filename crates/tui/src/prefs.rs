@@ -71,28 +71,59 @@ pub fn save_prefs(prefs: &TuiPrefs) -> Result<(), String> {
     save_prefs_to(&path, prefs)
 }
 
-#[cfg(unix)]
-fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    use std::io::Write;
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .mode(PREFS_FILE_MODE)
-        .open(path)
-        .map_err(|e| format!("cannot open {}: {e}", path.display()))?;
-    file.set_permissions(std::fs::Permissions::from_mode(PREFS_FILE_MODE))
-        .map_err(|e| format!("cannot set permissions on {}: {e}", path.display()))?;
-    file.write_all(bytes)
-        .and_then(|_| file.flush())
-        .map_err(|e| format!("cannot write {}: {e}", path.display()))
+fn temp_path_for(path: &Path, attempt: u32) -> PathBuf {
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(PREFS_FILE_NAME);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    path.with_file_name(format!(
+        ".{name}.tmp-{}-{nanos}-{attempt}",
+        std::process::id()
+    ))
 }
 
-#[cfg(not(unix))]
 fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    std::fs::write(path, bytes).map_err(|e| format!("cannot write {}: {e}", path.display()))
+    use std::io::Write;
+    #[cfg(unix)]
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut attempt = 0u32;
+    let (tmp_path, mut file) = loop {
+        let candidate = temp_path_for(path, attempt);
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        opts.mode(PREFS_FILE_MODE);
+        match opts.open(&candidate) {
+            Ok(f) => break (candidate, f),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && attempt < 32 => {
+                attempt += 1;
+            }
+            Err(e) => {
+                return Err(format!(
+                    "cannot create temp prefs file {}: {e}",
+                    candidate.display()
+                ));
+            }
+        }
+    };
+
+    let res = (|| -> std::io::Result<()> {
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&tmp_path, path)?;
+        Ok(())
+    })();
+
+    if let Err(e) = res {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(format!("cannot write {}: {e}", path.display()));
+    }
+    Ok(())
 }
 
 pub fn normalize_token(token: Option<&str>) -> Option<String> {
@@ -165,6 +196,40 @@ mod tests {
         assert!(raw.contains("\"backendUrl\""), "{raw}");
         assert!(raw.contains("\"backendToken\""), "{raw}");
         assert_eq!(load_prefs_from(&path).unwrap(), prefs);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, PREFS_FILE_MODE);
+        }
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn save_prefs_overwrites_atomically_without_leaving_temp_files() {
+        let path = temp_prefs_path("atomic");
+        let dir = path.parent().unwrap().to_path_buf();
+
+        let first = TuiPrefs {
+            backend_url: Some("ws://first:1".into()),
+            backend_token: Some("tok1".into()),
+        };
+        save_prefs_to(&path, &first).unwrap();
+
+        let second = TuiPrefs {
+            backend_url: Some("wss://second:2".into()),
+            backend_token: Some("tok2".into()),
+        };
+        save_prefs_to(&path, &second).unwrap();
+        assert_eq!(load_prefs_from(&path).unwrap(), second);
+
+        let entries: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(entries, vec![PREFS_FILE_NAME.to_string()]);
 
         #[cfg(unix)]
         {

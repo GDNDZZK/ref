@@ -121,8 +121,6 @@ async fn stash_live_session(hub: &Arc<Hub>, s: &Arc<Session>) -> Result<(), ApiE
         (kind, pending_queue)
     };
 
-    crate::ops::close_session(hub, s).await;
-
     let resume_json = if matches!(kind, StashResumeKind::None) && pending_queue.is_empty() {
         None
     } else {
@@ -132,6 +130,9 @@ async fn stash_live_session(hub: &Arc<Hub>, s: &Arc<Session>) -> Result<(), ApiE
         };
         Some(serde_json::to_string(&payload).map_err(|e| ApiError::from(e.to_string()))?)
     };
+
+    crate::ops::close_session(hub, s).await;
+
     let store = hub.store.clone();
     let sid = s.id.clone();
     tokio::task::spawn_blocking(move || store.set_stashed_resume(&sid, resume_json))
@@ -150,8 +151,9 @@ async fn prepare_session_for_group(
         if stash_live {
             stash_live_session(hub, &s).await?;
         } else {
-            s.lock().force_persist = true;
-            crate::ops::persist(hub, &s);
+            let mut persisted = s.persisted();
+            persisted.force_persist = true;
+            hub.store.save(persisted);
         }
         return Ok(());
     }
@@ -231,20 +233,52 @@ pub(crate) async fn stash_all(hub: &Arc<Hub>, name: Option<String>) -> Result<Va
         let bi = b.info();
         ai.created_at.cmp(&bi.created_at).then(ai.id.cmp(&bi.id))
     });
-    let mut session_ids = Vec::with_capacity(live.len());
-    for s in live {
-        session_ids.push(s.id.clone());
-        stash_live_session(hub, &s).await?;
-    }
     let group_id = format!("grp_{}", crate::util::random_hex(8));
     let group_name = normalize_group_name(name);
     let store = hub.store.clone();
     let gid = group_id.clone();
-    let raw = tokio::task::spawn_blocking(move || store.create_group(gid, group_name, session_ids))
+    tokio::task::spawn_blocking(move || store.create_group(gid, group_name, Vec::new()))
         .await
         .map_err(|e| ApiError::from(e.to_string()))?
         .map_err(ApiError::from)?;
-    let groups = hydrate_groups(hub, raw);
+
+    let mut added = 0usize;
+    for s in live {
+        let step: Result<(), ApiError> = async {
+            stash_live_session(hub, &s).await?;
+            let store = hub.store.clone();
+            let gid = group_id.clone();
+            let sid = s.id.clone();
+            if let Err(e) = tokio::task::spawn_blocking(move || store.add_to_group(gid, sid, None))
+                .await
+                .map_err(|e| ApiError::from(e.to_string()))
+                .and_then(|r| r.map_err(ApiError::from))
+            {
+                let store = hub.store.clone();
+                let sid = s.id.clone();
+                let _ =
+                    tokio::task::spawn_blocking(move || store.set_stashed_resume(&sid, None)).await;
+                return Err(e);
+            }
+            Ok(())
+        }
+        .await;
+        match step {
+            Ok(()) => added += 1,
+            Err(e) => {
+                if added == 0 {
+                    let store = hub.store.clone();
+                    let gid = group_id.clone();
+                    let _ = tokio::task::spawn_blocking(move || store.delete_group(gid)).await;
+                } else if let Ok(groups) = list_groups_hydrated(hub).await {
+                    hub.broadcast_groups_changed(groups);
+                }
+                return Err(e);
+            }
+        }
+    }
+
+    let groups = list_groups_hydrated(hub).await?;
     let group = groups.iter().find(|g| g.id == group_id).cloned();
     hub.broadcast_groups_changed(groups.clone());
     Ok(json!({ "group": group, "groups": groups }))
@@ -464,4 +498,128 @@ pub(crate) async fn restore_group_member(
     let groups = hydrate_groups(hub, raw);
     hub.broadcast_groups_changed(groups.clone());
     Ok(json!({ "restored": restored, "groups": groups }))
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ref_config::Config;
+    use ref_proto::{ModelRef, ServerFrame, SessionInfo};
+
+    fn test_hub(tag: &str) -> (Arc<Hub>, std::path::PathBuf) {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/tmp")
+            .join(format!(
+                "ref-stash-test-{tag}-{}",
+                crate::util::random_hex(8)
+            ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut opts = crate::HubOptions::new(dir.clone());
+        opts.home = None;
+        (Hub::new(opts), dir)
+    }
+
+    fn make_session(id: &str, created_at: i64) -> Arc<Session> {
+        Session::new(
+            SessionInfo {
+                id: id.into(),
+                name: id.into(),
+                title: String::new(),
+                agent: "build".into(),
+                model: ModelRef::default(),
+                cwd: "/tmp".into(),
+                created_at,
+                updated_at: created_at,
+                status: SessionStatus::Idle,
+                attached: 0,
+                live: true,
+                parent: None,
+                must_report: false,
+                context: Default::default(),
+                todos: Vec::new(),
+                busy_since: None,
+                last_error: None,
+            },
+            Vec::new(),
+            Arc::new(Config::default()),
+            false,
+            false,
+        )
+    }
+
+    #[tokio::test]
+    async fn stash_all_failure_after_partial_progress_keeps_group_and_broadcasts() {
+        let (hub, dir) = test_hub("partial");
+        let conn = hub.add_conn();
+        conn.lock().hello = true;
+
+        let ok = make_session("ses_ok", 1);
+        // Invalid id (contains `/`) causes `set_stashed_resume` to fail after `ses_ok` succeeds.
+        let bad = make_session("bad/id", 2);
+        hub.insert_session(ok);
+        hub.insert_session(bad);
+
+        let err = stash_all(&hub, Some("Partial".into())).await.unwrap_err();
+        assert!(err.message.contains("Invalid session id"), "{err:?}");
+
+        let groups = list_groups_hydrated(&hub).await.unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].name, "Partial");
+        assert_eq!(groups[0].members.len(), 1);
+        assert_eq!(groups[0].members[0].session_id, "ses_ok");
+
+        let frames = conn.out.drain();
+        assert!(
+            frames.iter().any(|f| matches!(
+                f,
+                ServerFrame::GroupsChanged { groups }
+                    if groups.len() == 1 && groups[0].members.len() == 1
+            )),
+            "expected GroupsChanged broadcast on partial failure"
+        );
+
+        let _ = hub.store.close();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn stash_all_failure_before_any_member_deletes_empty_group() {
+        let (hub, dir) = test_hub("empty-cleanup");
+        let bad = make_session("bad/id", 1);
+        hub.insert_session(bad);
+
+        let err = stash_all(&hub, Some("Doomed".into())).await.unwrap_err();
+        assert!(err.message.contains("Invalid session id"), "{err:?}");
+
+        let groups = list_groups_hydrated(&hub).await.unwrap();
+        assert!(
+            groups.is_empty(),
+            "empty group must be deleted on 0-member failure"
+        );
+
+        let _ = hub.store.close();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn prepare_without_stash_live_does_not_mutate_live_force_persist() {
+        let (hub, dir) = test_hub("unstashed-force-persist");
+        let s = make_session("ses_live", 1);
+        hub.insert_session(s.clone());
+        assert!(!s.lock().force_persist);
+
+        create_group(&hub, Some("G".into()), vec!["ses_live".into()], false)
+            .await
+            .unwrap();
+
+        assert!(
+            !s.lock().force_persist,
+            "live session must not retain force_persist = true when stash_live is false"
+        );
+        hub.store.flush().unwrap();
+        let persisted = hub.store.load("ses_live").unwrap();
+        assert_eq!(persisted.info.id, "ses_live");
+
+        let _ = hub.store.close();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

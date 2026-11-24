@@ -29,6 +29,15 @@ pub enum StashPane {
     Members,
 }
 
+impl StashPane {
+    fn delete_btn(self) -> StashButton {
+        match self {
+            StashPane::Groups => StashButton::DeleteGroup,
+            StashPane::Members => StashButton::RemoveMember,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StashInputAction {
     CreateGroup,
@@ -257,97 +266,111 @@ impl StashDialog {
     ) -> Option<StashCommand> {
         self.sync(groups);
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
-        let shift = k.modifiers.contains(KeyModifiers::SHIFT);
-        match &mut self.mode {
-            StashMode::Input { action, editor } => {
-                match k.code {
-                    KeyCode::Esc => {
-                        self.mode = StashMode::Browse;
-                    }
-                    KeyCode::Char('c') if ctrl => {
-                        self.mode = StashMode::Browse;
-                    }
-                    KeyCode::Enter => {
-                        let text = editor.text.trim().to_string();
-                        let act = action.clone();
-                        self.mode = StashMode::Browse;
-                        return match act {
-                            StashInputAction::CreateGroup => Some(StashCommand::CreateGroup {
-                                name: (!text.is_empty()).then_some(text),
-                            }),
-                            StashInputAction::RenameGroup { group_id } => (!text.is_empty())
-                                .then_some(StashCommand::RenameGroup {
-                                    group_id,
-                                    name: text,
-                                }),
-                        };
-                    }
-                    _ => {
-                        edit_key(editor, k, false);
-                    }
-                }
-                return None;
-            }
-            StashMode::PickTarget {
-                action,
-                targets,
-                sel,
-                ..
-            } => {
-                match k.code {
-                    KeyCode::Esc => {
-                        self.mode = StashMode::Browse;
-                    }
-                    KeyCode::Char('c') if ctrl => {
-                        self.mode = StashMode::Browse;
-                    }
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        if !targets.is_empty() {
-                            *sel = (*sel as i32 - 1).rem_euclid(targets.len() as i32) as usize;
-                        }
-                    }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        if !targets.is_empty() {
-                            *sel = (*sel as i32 + 1).rem_euclid(targets.len() as i32) as usize;
-                        }
-                    }
-                    KeyCode::Enter => {
-                        let picked = targets.get(*sel).map(|(id, _)| id.clone());
-                        let act = action.clone();
-                        self.mode = StashMode::Browse;
-                        if let Some(target_id) = picked {
-                            return match act {
-                                StashPickAction::MergeGroup { source_id } => {
-                                    Some(StashCommand::MergeGroups {
-                                        source_group_id: source_id,
-                                        target_group_id: target_id,
-                                    })
-                                }
-                                StashPickAction::MoveMember {
-                                    from_group_id,
-                                    session_id,
-                                } => Some(StashCommand::MoveMember {
-                                    from_group_id,
-                                    to_group_id: target_id,
-                                    session_id,
-                                    position: 0,
-                                }),
-                                StashPickAction::AddLive { group_id } => {
-                                    Some(StashCommand::AddToGroup {
-                                        group_id,
-                                        session_id: target_id,
-                                    })
-                                }
-                            };
-                        }
-                    }
-                    _ => {}
-                }
-                return None;
-            }
-            StashMode::Browse => {}
+        match &self.mode {
+            StashMode::Input { .. } => self.handle_input_key(k, ctrl),
+            StashMode::PickTarget { .. } => self.handle_pick_key(k, ctrl),
+            StashMode::Browse => self.handle_browse_key(k, groups, live),
         }
+    }
 
+    fn confirm_input(action: StashInputAction, text: String) -> Option<StashCommand> {
+        match action {
+            StashInputAction::CreateGroup => Some(StashCommand::CreateGroup {
+                name: (!text.is_empty()).then_some(text),
+            }),
+            StashInputAction::RenameGroup { group_id } => {
+                (!text.is_empty()).then_some(StashCommand::RenameGroup {
+                    group_id,
+                    name: text,
+                })
+            }
+        }
+    }
+
+    fn handle_input_key(&mut self, k: &KeyEvent, ctrl: bool) -> Option<StashCommand> {
+        let StashMode::Input { action, editor } = &mut self.mode else {
+            return None;
+        };
+        match k.code {
+            KeyCode::Esc => self.mode = StashMode::Browse,
+            KeyCode::Char('c') if ctrl => self.mode = StashMode::Browse,
+            KeyCode::Enter => {
+                let text = editor.text.trim().to_string();
+                let act = action.clone();
+                self.mode = StashMode::Browse;
+                return Self::confirm_input(act, text);
+            }
+            _ => {
+                edit_key(editor, k, false);
+            }
+        }
+        None
+    }
+
+    fn pick_command(action: StashPickAction, target_id: String) -> StashCommand {
+        match action {
+            StashPickAction::MergeGroup { source_id } => StashCommand::MergeGroups {
+                source_group_id: source_id,
+                target_group_id: target_id,
+            },
+            StashPickAction::MoveMember {
+                from_group_id,
+                session_id,
+            } => StashCommand::MoveMember {
+                from_group_id,
+                to_group_id: target_id,
+                session_id,
+                position: 0,
+            },
+            StashPickAction::AddLive { group_id } => StashCommand::AddToGroup {
+                group_id,
+                session_id: target_id,
+            },
+        }
+    }
+
+    fn handle_pick_key(&mut self, k: &KeyEvent, ctrl: bool) -> Option<StashCommand> {
+        let StashMode::PickTarget {
+            action,
+            targets,
+            sel,
+            ..
+        } = &mut self.mode
+        else {
+            return None;
+        };
+        match k.code {
+            KeyCode::Esc => self.mode = StashMode::Browse,
+            KeyCode::Char('c') if ctrl => self.mode = StashMode::Browse,
+            KeyCode::Up | KeyCode::Char('k') => {
+                if !targets.is_empty() {
+                    *sel = (*sel as i32 - 1).rem_euclid(targets.len() as i32) as usize;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if !targets.is_empty() {
+                    *sel = (*sel as i32 + 1).rem_euclid(targets.len() as i32) as usize;
+                }
+            }
+            KeyCode::Enter => {
+                let picked = targets.get(*sel).map(|(id, _)| id.clone());
+                let act = action.clone();
+                self.mode = StashMode::Browse;
+                return picked.map(|target_id| Self::pick_command(act, target_id));
+            }
+            _ => {}
+        }
+        None
+    }
+
+    fn handle_browse_key(
+        &mut self,
+        k: &KeyEvent,
+        groups: &[StashGroup],
+        live: &[SessionInfo],
+    ) -> Option<StashCommand> {
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        let shift = k.modifiers.contains(KeyModifiers::SHIFT);
         match k.code {
             KeyCode::Esc | KeyCode::Char('q') if !ctrl => {
                 if self.confirm_delete.take().is_some() {
@@ -416,18 +439,20 @@ impl StashDialog {
             KeyCode::Char('g') => return Some(StashCommand::Refresh),
             KeyCode::Char('d') if ctrl => {
                 let btn = match self.pane {
-                    StashPane::Groups => StashButton::DeleteGroup,
-                    StashPane::Members => StashButton::RemoveMember,
+                    StashPane::Groups => StashPane::Groups.delete_btn(),
+                    StashPane::Members => StashPane::Members.delete_btn(),
                 };
                 return self.trigger_button(btn, groups, live);
             }
             KeyCode::Char('x') | KeyCode::Delete => {
                 let btn = match self.pane {
-                    StashPane::Groups => StashButton::DeleteGroup,
-                    StashPane::Members => StashButton::RemoveMember,
+                    StashPane::Groups => StashPane::Groups.delete_btn(),
+                    StashPane::Members => StashPane::Members.delete_btn(),
                 };
                 return self.trigger_button(btn, groups, live);
             }
+            // In the Groups pane, Enter drills into a non-empty group's members (`R` or
+            // double-click restores the whole group); empty groups trigger RestoreGroup directly.
             KeyCode::Enter => match self.pane {
                 StashPane::Groups => {
                     if let Some(g) = self.current_group(groups) {
@@ -629,121 +654,117 @@ impl StashDialog {
         double_click: bool,
     ) -> (bool, Option<StashCommand>) {
         self.sync(groups);
-        let (x, y) = (me.column, me.row);
-        let pos = Position::new(x, y);
+        let pos = Position::new(me.column, me.row);
         match me.kind {
             MouseEventKind::Down(MouseButton::Left) => {
-                if !self.rect.contains(pos) {
-                    return (true, Some(StashCommand::Close));
-                }
-                if let StashMode::PickTarget {
-                    action,
-                    targets,
-                    sel,
-                    rows,
-                } = &mut self.mode
-                {
-                    if let Some((_, idx)) = rows.iter().find(|(ry, _)| *ry == y) {
-                        *sel = *idx;
-                        let picked = targets.get(*sel).map(|(id, _)| id.clone());
-                        let act = action.clone();
-                        self.mode = StashMode::Browse;
-                        if let Some(target_id) = picked {
-                            let cmd = match act {
-                                StashPickAction::MergeGroup { source_id } => {
-                                    StashCommand::MergeGroups {
-                                        source_group_id: source_id,
-                                        target_group_id: target_id,
-                                    }
-                                }
-                                StashPickAction::MoveMember {
-                                    from_group_id,
-                                    session_id,
-                                } => StashCommand::MoveMember {
-                                    from_group_id,
-                                    to_group_id: target_id,
-                                    session_id,
-                                    position: 0,
-                                },
-                                StashPickAction::AddLive { group_id } => StashCommand::AddToGroup {
-                                    group_id,
-                                    session_id: target_id,
-                                },
-                            };
-                            return (true, Some(cmd));
-                        }
-                    }
-                    return (true, None);
-                }
-                if let Some((_, btn)) = self
-                    .action_rects
-                    .iter()
-                    .find(|(r, _)| r.contains(pos))
-                    .copied()
-                {
-                    let cmd = self.trigger_button(btn, groups, live);
-                    return (true, cmd);
-                }
-                if let Some((_, idx)) = self.group_rows.iter().find(|(ry, _)| *ry == y).copied() {
-                    self.pane = StashPane::Groups;
-                    self.group_sel = idx;
-                    self.member_sel = 0;
-                    self.confirm_delete = None;
-                    self.record_selection(groups);
-                    if double_click && let Some(g) = groups.get(idx) {
-                        return (
-                            true,
-                            Some(StashCommand::RestoreGroup {
-                                group_id: g.id.clone(),
-                            }),
-                        );
-                    }
-                    return (true, None);
-                }
-                if let Some((_, idx)) = self.member_rows.iter().find(|(ry, _)| *ry == y).copied() {
-                    self.pane = StashPane::Members;
-                    self.member_sel = idx;
-                    self.confirm_delete = None;
-                    self.record_selection(groups);
-                    if double_click
-                        && let Some(g) = self.current_group(groups)
-                        && let Some(m) = g.members.get(idx)
-                    {
-                        return (
-                            true,
-                            Some(StashCommand::RestoreMember {
-                                group_id: g.id.clone(),
-                                session_id: m.session_id.clone(),
-                            }),
-                        );
-                    }
-                    return (true, None);
-                }
-                if self.groups_rect.contains(pos) {
-                    self.pane = StashPane::Groups;
-                } else if self.members_rect.contains(pos) {
-                    self.pane = StashPane::Members;
-                }
-                (true, None)
+                self.handle_left_click(pos, me.row, groups, live, double_click)
             }
-            MouseEventKind::ScrollUp => {
-                if self.members_rect.contains(pos) {
-                    self.move_member(-1, groups);
-                } else {
-                    self.move_group(-1, groups);
-                }
-                (true, None)
-            }
-            MouseEventKind::ScrollDown => {
-                if self.members_rect.contains(pos) {
-                    self.move_member(1, groups);
-                } else {
-                    self.move_group(1, groups);
-                }
-                (true, None)
-            }
+            MouseEventKind::ScrollUp => self.handle_scroll(pos, -1, groups),
+            MouseEventKind::ScrollDown => self.handle_scroll(pos, 1, groups),
             _ => (false, None),
         }
+    }
+
+    fn handle_left_click(
+        &mut self,
+        pos: Position,
+        y: u16,
+        groups: &[StashGroup],
+        live: &[SessionInfo],
+        double_click: bool,
+    ) -> (bool, Option<StashCommand>) {
+        if !self.rect.contains(pos) {
+            return (true, Some(StashCommand::Close));
+        }
+        if let StashMode::PickTarget {
+            action,
+            targets,
+            sel,
+            rows,
+        } = &mut self.mode
+        {
+            if let Some((_, idx)) = rows.iter().find(|(ry, _)| *ry == y) {
+                *sel = *idx;
+                let picked = targets.get(*sel).map(|(id, _)| id.clone());
+                let act = action.clone();
+                self.mode = StashMode::Browse;
+                if let Some(target_id) = picked {
+                    return (true, Some(Self::pick_command(act, target_id)));
+                }
+            }
+            return (true, None);
+        }
+        if let Some((_, btn)) = self
+            .action_rects
+            .iter()
+            .find(|(r, _)| r.contains(pos))
+            .copied()
+        {
+            let cmd = self.trigger_button(btn, groups, live);
+            return (true, cmd);
+        }
+        if let Some((_, idx)) = self.group_rows.iter().find(|(ry, _)| *ry == y).copied() {
+            self.pane = StashPane::Groups;
+            self.group_sel = idx;
+            self.member_sel = 0;
+            self.confirm_delete = None;
+            self.record_selection(groups);
+            // Double-click restores the whole group immediately (single Enter drills into members).
+            if double_click && let Some(g) = groups.get(idx) {
+                return (
+                    true,
+                    Some(StashCommand::RestoreGroup {
+                        group_id: g.id.clone(),
+                    }),
+                );
+            }
+            return (true, None);
+        }
+        if let Some((_, idx)) = self.member_rows.iter().find(|(ry, _)| *ry == y).copied() {
+            self.pane = StashPane::Members;
+            self.member_sel = idx;
+            self.confirm_delete = None;
+            self.record_selection(groups);
+            if double_click
+                && let Some(g) = self.current_group(groups)
+                && let Some(m) = g.members.get(idx)
+            {
+                return (
+                    true,
+                    Some(StashCommand::RestoreMember {
+                        group_id: g.id.clone(),
+                        session_id: m.session_id.clone(),
+                    }),
+                );
+            }
+            return (true, None);
+        }
+        if self.groups_rect.contains(pos) {
+            self.pane = StashPane::Groups;
+        } else if self.members_rect.contains(pos) {
+            self.pane = StashPane::Members;
+        }
+        (true, None)
+    }
+
+    fn handle_scroll(
+        &mut self,
+        pos: Position,
+        delta: i32,
+        groups: &[StashGroup],
+    ) -> (bool, Option<StashCommand>) {
+        if !self.rect.contains(pos) {
+            return (false, None);
+        }
+        if !matches!(self.mode, StashMode::Browse) {
+            return (true, None);
+        }
+        if self.members_rect.contains(pos) {
+            self.move_member(delta, groups);
+        } else if self.groups_rect.contains(pos) {
+            self.move_group(delta, groups);
+        }
+        (true, None)
     }
 
     pub fn draw(&mut self, buf: &mut Buffer, screen: Rect, groups: &[StashGroup]) {
@@ -911,8 +932,8 @@ impl StashDialog {
             );
         }
 
-        self.draw_groups_pane(buf, groups, t, fade);
-        self.draw_members_pane(buf, groups, t, fade);
+        self.draw_groups_pane(buf, groups, fade);
+        self.draw_members_pane(buf, groups, fade);
 
         let hint_y = inner.y + inner.height.saturating_sub(1);
         let hint = match self.pane {
@@ -935,7 +956,6 @@ impl StashDialog {
         &mut self,
         buf: &mut Buffer,
         groups: &[StashGroup],
-        _t: f32,
         fade: impl Fn(Color) -> Color,
     ) {
         let r = self.groups_rect;
@@ -1033,7 +1053,6 @@ impl StashDialog {
         &mut self,
         buf: &mut Buffer,
         groups: &[StashGroup],
-        _t: f32,
         fade: impl Fn(Color) -> Color,
     ) {
         let r = self.members_rect;

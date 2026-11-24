@@ -149,7 +149,7 @@ enum ConnectMode {
 #[derive(Serialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 enum ControlResponse {
-    UpstreamReady,
+    UpstreamReady { cwd: String },
     UpstreamError { error: String },
 }
 
@@ -294,7 +294,12 @@ async fn tunnel(
             return;
         }
     };
-    let ready = seal_control(&mut sealer, &ControlResponse::UpstreamReady);
+    let ready = seal_control(
+        &mut sealer,
+        &ControlResponse::UpstreamReady {
+            cwd: state.cwd.clone(),
+        },
+    );
     if !send_to_browser(&mut browser, ready, state.heartbeat).await {
         close_upstream(&mut upstream).await;
         return;
@@ -640,7 +645,7 @@ mod tests {
             handshakes: Arc::new(Semaphore::new(MAX_HANDSHAKES)),
             handshake_timeout: HANDSHAKE_TIMEOUT,
             hosts: HostPolicy::new(LOOPBACK, 0, false),
-            cwd: String::new(),
+            cwd: "/tmp/ref-web-tunnel-test".to_string(),
             upstream: Upstream::Remote(Target::Explicit {
                 url: upstream_url,
                 token: None,
@@ -804,6 +809,7 @@ mod tests {
                     assert_eq!(kind, Kind::Binary);
                     let reply: serde_json::Value = serde_json::from_slice(&plain).unwrap();
                     assert_eq!(reply["op"], "upstream_ready");
+                    assert_eq!(reply["cwd"], frame_zero["cwd"]);
                     break;
                 }
                 UpMessage::Ping(_) | UpMessage::Pong(_) => continue,

@@ -39,7 +39,7 @@ pub type Reply = Option<Vec<Vec<String>>>;
 
 /// Start and end of the tool result that carries the answers (see `format_answers`).
 pub(crate) const ANSWERED_PREFIX: &str = "User has answered your questions: ";
-pub(crate) const ANSWERED_SUFFIX: &str = ". You can now continue with the user's answers in mind.";
+pub(crate) const ANSWERED_SUFFIX: &str = ".";
 
 fn description() -> String {
     format!(

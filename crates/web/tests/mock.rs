@@ -61,6 +61,23 @@ async fn mock_mode_serves_tabs_from_a_private_backend() {
     // Nothing is registered for other frontends to find.
     assert!(!env.state_dir().join("instances").exists());
 }
+
+#[tokio::test]
+async fn mock_mode_honors_auto_connect_upstream_without_spawning_shared_backend() {
+    require_ref_server();
+    let env = Env::new("mock-auto");
+    let web = env.start(&["--mock"]).await;
+    let mut tab = Channel::sign_in_only(web.ws().await, &web.key)
+        .await
+        .unwrap();
+    assert_eq!(tab.info["mock"], true);
+    assert_eq!(tab.info["cli_server"], false);
+    tab.connect_upstream("auto", None, None).await.unwrap();
+    let (response, _) = hello(&mut tab).await;
+    assert_eq!(response["ok"], true, "{response}");
+    assert_eq!(response["result"]["protocol"], ref_proto::PROTOCOL_VERSION);
+    assert!(!env.state_dir().join("instances").exists());
+}
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn a_mock_that_exited_is_started_again_for_the_next_tab() {

@@ -202,9 +202,23 @@ pub async fn get_or_load(hub: &Arc<Hub>, id: &str) -> Result<Arc<Session>, Strin
     }
     let store = hub.store.clone();
     let id2 = id.to_string();
-    let mut p = tokio::task::spawn_blocking(move || store.load_active_window(&id2))
-        .await
-        .map_err(|e| format!("loading session failed: {e}"))??;
+    let (mut p, layout_metas_prefix) = tokio::task::spawn_blocking(move || {
+        let p = store.load_active_window(&id2)?;
+        let prefix = if p.window_start_seq > 0 {
+            match store.load_layout_metas(&id2, 0, p.window_start_seq) {
+                Ok(metas) => metas,
+                Err(e) => {
+                    tracing::warn!(session = %id2, "loading layout_metas failed: {e}");
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
+        Ok::<_, String>((p, prefix))
+    })
+    .await
+    .map_err(|e| format!("loading session failed: {e}"))??;
     if let Some(s) = hub.session(id) {
         return Ok(s);
     }
@@ -229,6 +243,7 @@ pub async fn get_or_load(hub: &Arc<Hub>, id: &str) -> Result<Arc<Session>, Strin
         let mut st = s.lock();
         st.model_explicit = p.model_explicit;
         st.window_start_seq = p.window_start_seq;
+        st.layout_metas_prefix = layout_metas_prefix;
         apply_reloaded_config(hub, &mut st, cfg)
     };
     hub.insert_session(s.clone());
