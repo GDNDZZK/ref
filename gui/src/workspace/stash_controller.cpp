@@ -317,7 +317,7 @@ void StashController::createGroupFromMember(const QString& fromGroupId, const QS
 	{
 		return;
 	}
-	createGroupFromMemberTask(fromGroupId, sessionId, optionalName(name));
+	createGroupFromMemberTask(fromGroupId, sessionId, name);
 }
 
 QStringList StashController::groupIdsForSession(const QString& sessionId) const
@@ -513,12 +513,15 @@ QCoro::Task<> StashController::assignSessionTask(QString sessionId, QStringList 
 	}
 }
 
-QCoro::Task<> StashController::createGroupFromMemberTask(QString fromGroupId, QString sessionId, std::optional<QString> name)
+QCoro::Task<> StashController::createGroupFromMemberTask(QString fromGroupId, QString sessionId, QString name)
 {
 	const QPointer<StashController> self(this);
 	const int serial = m_serial;
 	const InFlightGuard guard(m_inFlight, m_serial, serial, this);
-	const auto created = co_await m_backend.client().createGroup(std::move(name), {sessionId}, true);
+	const std::optional<QString> groupName = optionalName(name);
+	const QStringList sessionIds{sessionId};
+	auto createTask = m_backend.client().createGroup(groupName, sessionIds, true);
+	const auto created = co_await createTask;
 	if(!self || serial != m_serial)
 	{
 		co_return;
@@ -531,7 +534,8 @@ QCoro::Task<> StashController::createGroupFromMemberTask(QString fromGroupId, QS
 	setGroups(created->groups);
 	if(!fromGroupId.isEmpty() && (!created->group || created->group->id != fromGroupId))
 	{
-		const auto removed = co_await m_backend.client().removeFromGroup(std::move(fromGroupId), std::move(sessionId));
+		auto removeTask = m_backend.client().removeFromGroup(fromGroupId, sessionId);
+		const auto removed = co_await removeTask;
 		if(!self || serial != m_serial)
 		{
 			co_return;

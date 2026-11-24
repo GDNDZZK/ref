@@ -69,7 +69,7 @@ private:
 	QCoro::Task<> run(QCoro::Task<client::Result<T>> request, OnOk onOk);
 	QCoro::Task<> refreshTask();
 	QCoro::Task<> assignSessionTask(QString sessionId, QStringList targetGroupIds);
-	QCoro::Task<> createGroupFromMemberTask(QString fromGroupId, QString sessionId, std::optional<QString> name);
+	QCoro::Task<> createGroupFromMemberTask(QString fromGroupId, QString sessionId, QString name);
 
 	Connection& m_connection;
 	client::Backend& m_backend;

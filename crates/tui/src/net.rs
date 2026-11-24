@@ -229,6 +229,7 @@ async fn pump(
 }
 
 /// Runs the transport until the app drops the client.
+#[cfg(test)]
 pub async fn run(
     target: Target,
     cwd: String,

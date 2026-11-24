@@ -273,6 +273,7 @@ signals:
 	void floatingModeChanged();
 	void dialogChanged();
 	void backendChanged();
+	void themeChangeRequested(const QString& theme);
 	// A message for the user that is not about one session. `level` is info, warn or error.
 	void toastRequested(const QString& level, const QString& text);
 	// The user asked for a new session in a folder of their choice; the window shows a folder dialog

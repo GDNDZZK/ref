@@ -102,6 +102,7 @@ pub enum Pending {
         sid: String,
         generation: u64,
         start_seq: usize,
+        #[cfg_attr(not(test), allow(dead_code))]
         end_seq: usize,
     },
     /// A session was closed; refresh dialogs / history afterwards.

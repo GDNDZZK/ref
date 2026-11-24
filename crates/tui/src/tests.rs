@@ -4552,7 +4552,7 @@ fn history_app_with_count(
     let metas: Vec<_> = old
         .iter()
         .enumerate()
-        .map(|(i, m)| crate::util::compute_layout_meta(i as u64, m))
+        .map(|(i, m)| ref_proto::compute_layout_meta(i as u64, m))
         .collect();
     let inf = app.views[TEST_SESSION].info.clone();
     app.views

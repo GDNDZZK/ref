@@ -50,7 +50,7 @@ fn next_version() -> u64 {
 
 #[derive(Debug, Clone)]
 pub enum MessageSlot {
-    Materialized(Message),
+    Materialized(Box<Message>),
     Placeholder(MessageLayoutMeta),
 }
 
@@ -61,14 +61,6 @@ impl MessageSlot {
             MessageSlot::Placeholder(meta) => &meta.id,
         }
     }
-
-    pub fn role(&self) -> Role {
-        match self {
-            MessageSlot::Materialized(m) => m.role,
-            MessageSlot::Placeholder(meta) => meta.role,
-        }
-    }
-
     pub fn is_compaction(&self) -> bool {
         match self {
             MessageSlot::Materialized(m) => {
@@ -98,6 +90,7 @@ impl MessageSlot {
         }
     }
 
+    #[cfg(test)]
     pub fn as_meta(&self) -> Option<&MessageLayoutMeta> {
         match self {
             MessageSlot::Placeholder(meta) => Some(meta),
@@ -222,7 +215,7 @@ fn estimate_compact_lines(meta: &MessageLayoutMeta, w: usize) -> usize {
                 .filter(|p| p.kind == PART_KIND_TEXT)
                 .map(|p| (p.chars as usize).div_ceil(inner).max(p.lines as usize))
                 .sum();
-            let capped = lines.max(1).min(COMPACT_USER_MAX_LINES);
+            let capped = lines.clamp(1, COMPACT_USER_MAX_LINES);
             1 + capped + usize::from(lines > COMPACT_USER_MAX_LINES)
         }
         Role::Assistant => {
@@ -451,7 +444,7 @@ impl SessionView {
         }
         for (offset, m) in msgs.into_iter().enumerate() {
             if start + offset < total {
-                slots[start + offset] = MessageSlot::Materialized(m);
+                slots[start + offset] = MessageSlot::Materialized(Box::new(m));
             }
         }
         self.slots = slots;
@@ -488,8 +481,8 @@ impl SessionView {
         let probe_start = if at_top { vs.saturating_sub(2) } else { vs };
         let mut first_p = None;
         let mut last_p = None;
-        for seq in probe_start..ve {
-            if !self.slots[seq].is_materialized() {
+        for (seq, slot) in self.slots.iter().enumerate().take(ve).skip(probe_start) {
+            if !slot.is_materialized() {
                 if first_p.is_none() {
                     first_p = Some(seq);
                 }
@@ -560,7 +553,7 @@ impl SessionView {
             } else {
                 self.index.entry(msg.id.clone()).or_insert(seq);
             }
-            self.slots[seq] = MessageSlot::Materialized(msg);
+            self.slots[seq] = MessageSlot::Materialized(Box::new(msg));
             self.versions[seq] = next_version();
             changed = true;
         }
@@ -678,11 +671,12 @@ impl SessionView {
             }
             SessionEvent::Message { message } => {
                 if let Some(i) = self.find(&message.id) {
-                    self.slots[i] = MessageSlot::Materialized(message);
+                    self.slots[i] = MessageSlot::Materialized(Box::new(message));
                     self.touch(i);
                 } else {
                     self.index.insert(message.id.clone(), self.slots.len());
-                    self.slots.push(MessageSlot::Materialized(message));
+                    self.slots
+                        .push(MessageSlot::Materialized(Box::new(message)));
                     self.versions.push(next_version());
                     self.total_messages = self.slots.len() as u64;
                 }
@@ -1161,7 +1155,7 @@ mod tests {
         assert!(!v.slots[440].is_materialized());
 
         // Trim to tail keeps only newest TAIL_KEEP_MESSAGES.
-        v.slots[440] = MessageSlot::Materialized(msg("m440", Role::User));
+        v.slots[440] = MessageSlot::Materialized(Box::new(msg("m440", Role::User)));
         v.trim_to_tail(TAIL_KEEP_MESSAGES);
         assert!(!v.slots[15].is_materialized());
         assert!(v.slots[440].is_materialized());

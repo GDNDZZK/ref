@@ -184,10 +184,6 @@ impl StashDialog {
         }
     }
 
-    pub fn animating(&self) -> bool {
-        self.opened.elapsed() < OPEN_SETTLE
-    }
-
     /// Reconciles selection indices after `groups` changes (e.g. `GroupsChanged`).
     pub fn sync(&mut self, groups: &[StashGroup]) {
         if groups.is_empty() {
