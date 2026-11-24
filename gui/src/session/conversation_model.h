@@ -231,6 +231,7 @@ private:
 	                        quint64 totalMessages = 0,
 	                        quint64 startSeq = 0,
 	                        const QList<proto::MessageLayoutMeta>& layoutMetas = {});
+	void rebuildPart(qsizetype messageIndex, qsizetype partIndex);
 	void rebuildOwnRows(qsizetype messageIndex);
 	// Rebuilds what a change elsewhere in the message made stale: parts whose
 	// streaming state changed, and the error.

@@ -1297,6 +1297,7 @@ fn drag_selection_across_wrapped_cjk_lines() {
         }
         v.versions[0] += 1000;
     }
+    let (w, h) = (40u16, 30u16);
     let (_, s) = render(&mut app, w, h);
     app.screen = ratatui::layout::Rect::new(0, 0, w, h);
     let lines: Vec<&str> = s.lines().collect();
@@ -6166,7 +6167,7 @@ fn tiny_terminal_bounds_safety_across_all_views_and_overlays() {
     for &(w, h) in &sizes {
         render(&mut app, w, h);
     }
-    app.open_cd(TEST_SESSION);
+    app.open_cd(Some(TEST_SESSION));
     for &(w, h) in &sizes {
         render(&mut app, w, h);
     }
@@ -6652,7 +6653,7 @@ fn cd_dialog_windows_roots_parent_nav_and_backspace_edges() {
     let (mut app, mut rx) = test_app_with_requests(false);
     // 1. Windows drive root `C:/` in `open_cd`, `cur_target`, `at_root`, and `dialog_submit`.
     app.views.get_mut(TEST_SESSION).unwrap().info.cwd = r"C:\".into();
-    app.open_cd(TEST_SESSION);
+    app.open_cd(Some(TEST_SESSION));
     if let Some(crate::ui::dialog::Dialog::List(d)) = &app.dialog {
         assert_eq!(d.filter.text, "C:/");
     }
@@ -6683,7 +6684,7 @@ fn cd_dialog_windows_roots_parent_nav_and_backspace_edges() {
 
     //Restore TEST_CWD and verify `nav:..` vs `Backspace` at `~/`, `""`, `./`, `../`, and `../../`.
     app.views.get_mut(TEST_SESSION).unwrap().info.cwd = TEST_CWD.into();
-    app.open_cd(TEST_SESSION);
+    app.open_cd(Some(TEST_SESSION));
     let _ = drain_requests(&mut rx);
     if let Some(crate::ui::dialog::Dialog::List(d)) = &mut app.dialog {
         d.filter.set_text("~/");

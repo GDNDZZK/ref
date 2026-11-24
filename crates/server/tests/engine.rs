@@ -2137,6 +2137,7 @@ async fn history_is_served_in_pages() {
                     more_before,
                     ..
                 },
+            ..
         } => Some((messages.len(), more_before)),
         _ => None,
     });

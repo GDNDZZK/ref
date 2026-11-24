@@ -83,7 +83,7 @@ enum PumpExit {
 }
 
 enum ConnectOutcome {
-    Connected(Result<ConnectedBackend, ConnectError>),
+    Connected(Box<Result<ConnectedBackend, ConnectError>>),
     Switch(BackendTarget),
     Stop,
 }
@@ -452,7 +452,7 @@ async fn run_driver(
             tokio::pin!(conn_fut);
             loop {
                 tokio::select! {
-                    res = &mut conn_fut => break ConnectOutcome::Connected(res),
+                    res = &mut conn_fut => break ConnectOutcome::Connected(Box::new(res)),
                     cmd = rx.recv() => match cmd {
                         Some(Cmd::Request { reply, .. }) => {
                             let _ = reply.send(Err(ClientError::Disconnected));
@@ -470,28 +470,30 @@ async fn run_driver(
                 target = next;
                 continue;
             }
-            ConnectOutcome::Connected(Ok(c)) => c,
-            ConnectOutcome::Connected(Err(e)) => {
-                if events
-                    .send(ClientEvent::Disconnected(e.to_string()))
-                    .is_err()
-                {
-                    return;
-                }
-                let mut pending_switch = None;
-                fail_queued_commands(&mut rx, &mut pending_switch);
-                if let Some(next) = pending_switch {
-                    target = next;
+            ConnectOutcome::Connected(res) => match *res {
+                Ok(c) => c,
+                Err(e) => {
+                    if events
+                        .send(ClientEvent::Disconnected(e.to_string()))
+                        .is_err()
+                    {
+                        return;
+                    }
+                    let mut pending_switch = None;
+                    fail_queued_commands(&mut rx, &mut pending_switch);
+                    if let Some(next) = pending_switch {
+                        target = next;
+                        continue;
+                    }
+                    if !pause_or_switch(&mut rx, &mut target, RECONNECT_DELAY).await {
+                        return;
+                    }
+                    if events.is_closed() {
+                        return;
+                    }
                     continue;
                 }
-                if !pause_or_switch(&mut rx, &mut target, RECONNECT_DELAY).await {
-                    return;
-                }
-                if events.is_closed() {
-                    return;
-                }
-                continue;
-            }
+            },
         };
 
         let mut ws = connected.ws;

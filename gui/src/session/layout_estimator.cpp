@@ -100,7 +100,7 @@ proto::PartLayoutMeta summarizeTextPart(const QString& text)
 					const auto tableEvents = table.feed(appended->text);
 					for(const auto& tev : tableEvents)
 					{
-						if(std::holds_alternative<TableSplitter::TableBlock>(tev))
+						if(std::holds_alternative<TableSplitter::TableStarted>(tev))
 						{
 							++meta.tables;
 						}
@@ -114,7 +114,7 @@ proto::PartLayoutMeta summarizeTextPart(const QString& text)
 	const auto trailing = table.finish();
 	for(const auto& tev : trailing)
 	{
-		if(std::holds_alternative<TableSplitter::TableBlock>(tev))
+		if(std::holds_alternative<TableSplitter::TableStarted>(tev))
 		{
 			++meta.tables;
 		}

@@ -1552,232 +1552,234 @@ fn mouse(app: &mut App, me: MouseEvent) {
         }
         _ => app.dirty = false,
     }
+}
 
-    /// Mouse over the autocomplete popup: click accepts, hover selects, wheel moves.
-    /// Returns true if the popup took the event.
-    fn autocomplete_mouse(app: &mut App, me: MouseEvent) -> bool {
-        let Some(ac) = app.ac.as_mut() else {
-            return false;
-        };
-        let (x, y) = (me.column, me.row);
-        let r = ac.rect;
-        if !r.contains(Position::new(x, y)) || y <= r.y {
-            return false;
-        }
-        let idx = ac.item_at(x, y);
-        match me.kind {
-            MouseEventKind::Down(MouseButton::Left) => {
-                let Some(i) = idx else {
-                    return true;
-                };
-                ac.sel = i;
-                ac.explicitly_selected = true;
-                let keep_open = ac
-                    .items
-                    .get(i)
-                    .is_some_and(|(v, _, _)| ac_keeps_open_on_tab(Some(&ac.kind), v));
-                let executed = app.accept_completion(true);
-                if !executed {
-                    if keep_open {
-                        refresh_autocomplete_after_accept(app);
-                    } else {
-                        app.ac = None;
-                    }
+/// Mouse over the autocomplete popup: click accepts, hover selects, wheel moves.
+/// Returns true if the popup took the event.
+fn autocomplete_mouse(app: &mut App, me: MouseEvent) -> bool {
+    let Some(ac) = app.ac.as_mut() else {
+        return false;
+    };
+    let (x, y) = (me.column, me.row);
+    let r = ac.rect;
+    if !r.contains(Position::new(x, y)) || y <= r.y {
+        return false;
+    }
+    let idx = ac.item_at(x, y);
+    match me.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            let Some(i) = idx else {
+                return true;
+            };
+            ac.sel = i;
+            ac.explicitly_selected = true;
+            let keep_open = ac
+                .items
+                .get(i)
+                .is_some_and(|(v, _, _)| ac_keeps_open_on_tab(Some(&ac.kind), v));
+            let executed = app.accept_completion(true);
+            if !executed {
+                if keep_open {
+                    refresh_autocomplete_after_accept(app);
+                } else {
+                    app.ac = None;
                 }
             }
-            MouseEventKind::Moved => {
-                if let Some(i) = idx {
-                    if ac.sel != i {
-                        ac.sel = i;
-                        ac.explicitly_selected = true;
-                    } else {
-                        app.dirty = false;
-                    }
+        }
+        MouseEventKind::Moved => {
+            if let Some(i) = idx {
+                if ac.sel != i {
+                    ac.sel = i;
+                    ac.explicitly_selected = true;
                 } else {
                     app.dirty = false;
                 }
+            } else {
+                app.dirty = false;
             }
-            MouseEventKind::ScrollUp => ac_move(app, -1),
-            MouseEventKind::ScrollDown => ac_move(app, 1),
-            _ => app.dirty = false,
         }
-        true
+        MouseEventKind::ScrollUp => ac_move(app, -1),
+        MouseEventKind::ScrollDown => ac_move(app, 1),
+        _ => app.dirty = false,
     }
+    true
+}
 
-    fn watch_mouse(app: &mut App, me: MouseEvent) {
-        if autocomplete_mouse(app, me) {
-            return;
-        }
-        let (x, y) = (me.column, me.row);
-        let pos = Position::new(x, y);
-        let inside = |r: &Rect| r.contains(pos);
-        // Handle active drag/release in the focused tile's single-line input first.
-        if let Some(f) = app.watch.focus.clone()
-            && let Some(tr) = app
-                .watch
-                .tiles
-                .iter()
-                .find(|(s, _)| s == &f)
-                .map(|(_, r)| *r)
-            && let Some(ir) = split::input_rect(tr)
-            && app.watch.inputs.get(&f).is_some_and(|e| e.dragging)
-        {
-            match me.kind {
-                MouseEventKind::Drag(MouseButton::Left) => {
-                    let cursor_moved = if let Some(ed) = app.watch.inputs.get_mut(&f) {
-                        let before = ed.cursor;
-                        let off = ed.offset_at_single_line(ir, x);
-                        ed.mouse_drag(off);
-                        ed.cursor != before
-                    } else {
-                        false
-                    };
-                    if cursor_moved && app.ac.is_some() {
-                        app.update_autocomplete();
-                    }
-                    return;
-                }
-                MouseEventKind::Up(MouseButton::Left) => {
-                    if let Some(ed) = app.watch.inputs.get_mut(&f) {
-                        ed.mouse_up();
-                    }
-                    return;
-                }
-                _ => {}
-            }
-        }
-        // Handle active drag/release of a tile's transcript text selection.
-        if let Some(sid) = app.watch.drag_tile.clone() {
-            match me.kind {
-                MouseEventKind::Drag(MouseButton::Left) => {
-                    if let Some(v) = app.views.get_mut(&sid) {
-                        v.chat.mouse_drag(x, y);
-                        if v.chat.has_selection() {
-                            app.sel_owner = Some(sid);
-                        }
-                    }
-                    return;
-                }
-                MouseEventKind::Up(MouseButton::Left) => {
-                    app.watch.drag_tile = None;
-                    if let Some(v) = app.views.get_mut(&sid) {
-                        v.chat.mouse_up(x, y);
-                        if v.chat.has_selection() {
-                            app.sel_owner = Some(sid);
-                        }
-                    }
-                    return;
-                }
-                _ => {}
-            }
-        }
-        let tile = app.watch.tiles.iter().find(|(_, r)| inside(r)).cloned();
-        match me.kind {
-            // The wheel scrolls the tile under the pointer, focused or not.
-            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
-                let d = if me.kind == MouseEventKind::ScrollUp {
-                    -WHEEL_SCROLL_ROWS
-                } else {
-                    WHEEL_SCROLL_ROWS
-                };
-                match tile.and_then(|(sid, _)| app.views.get_mut(&sid)) {
-                    Some(v) => v.chat.scroll_by(d, false),
-                    None => app.dirty = false,
-                }
-            }
-            MouseEventKind::Down(MouseButton::Right) => {
-                if !app.copy_selection() {
-                    app.dirty = false;
-                }
-            }
-            MouseEventKind::Down(MouseButton::Left) => watch_mouse_down(app, tile, x, y),
-            _ => app.dirty = false,
-        }
+fn watch_mouse(app: &mut App, me: MouseEvent) {
+    if autocomplete_mouse(app, me) {
+        return;
     }
-
-    fn click_watch_input(app: &mut App, sid: &str, tr: Rect, x: u16, y: u16) {
-        app.clear_selection();
-        let Some(ir) = split::input_rect(tr) else {
-            return;
-        };
-        let n = click_count(app, x, y);
-        let cursor_moved = {
-            let ed = app.watch.inputs.entry(sid.to_string()).or_default();
-            let before = ed.cursor;
-            let off = ed.offset_at_single_line(ir, x);
-            ed.mouse_down(off, n);
-            ed.cursor != before
-        };
-        if cursor_moved && app.ac.is_some() {
-            app.update_autocomplete();
-        }
-    }
-
-    fn watch_mouse_down(app: &mut App, tile: Option<(String, Rect)>, x: u16, y: u16) {
-        if app
+    let (x, y) = (me.column, me.row);
+    let pos = Position::new(x, y);
+    let inside = |r: &Rect| r.contains(pos);
+    // Handle active drag/release in the focused tile's single-line input first.
+    if let Some(f) = app.watch.focus.clone()
+        && let Some(tr) = app
             .watch
-            .filter_pill_rect
-            .is_some_and(|r| r.contains(Position::new(x, y)))
-        {
-            app.cycle_watch_filter();
-            return;
-        }
-        let Some((sid, tr)) = tile else {
-            // Empty space / footer: clear selection and unfocus.
-            app.clear_selection();
-            app.set_watch_focus(None);
-            return;
-        };
-        let already_focused = app.watch.focus.as_deref() == Some(sid.as_str());
-        let in_focused_input = already_focused
-            && tr.height >= 5
-            && y == tr.y + tr.height - 2
-            && x > tr.x
-            && x + 1 < tr.x + tr.width;
-        if in_focused_input {
-            click_watch_input(app, &sid, tr, x, y);
-            return;
-        }
-        if let Some(v) = app.views.get_mut(&sid)
-            && chat::pill_hit(&v.chat, x, y)
-        {
-            v.chat.scroll_to_bottom(true);
-            return;
-        }
-        // Click targets: expand a tool call, show all output, withdraw a queued prompt.
-        let hit = app.views.get(&sid).and_then(|v| v.chat.hit_at(x, y));
-        let is_tool = |app: &App, msg: &str, part: usize| {
-            app.views
-                .get(&sid)
-                .and_then(|v| {
-                    v.find(msg)
-                        .and_then(|i| v.message_at(i).and_then(|m| m.parts.get(part)))
-                })
-                .is_some_and(|p| matches!(p, ref_proto::Part::Tool { .. }))
-        };
-        let handled = match hit {
-            Some(Hit::Toggle { msg, part }) if is_tool(app, &msg, part) => {
-                if let Some(v) = app.views.get_mut(&sid) {
-                    v.chat.toggle(&msg, part);
+            .tiles
+            .iter()
+            .find(|(s, _)| s == &f)
+            .map(|(_, r)| *r)
+        && let Some(ir) = split::input_rect(tr)
+        && app.watch.inputs.get(&f).is_some_and(|e| e.dragging)
+    {
+        match me.kind {
+            MouseEventKind::Drag(MouseButton::Left) => {
+                let cursor_moved = if let Some(ed) = app.watch.inputs.get_mut(&f) {
+                    let before = ed.cursor;
+                    let off = ed.offset_at_single_line(ir, x);
+                    ed.mouse_drag(off);
+                    ed.cursor != before
+                } else {
+                    false
+                };
+                if cursor_moved && app.ac.is_some() {
+                    app.update_autocomplete();
                 }
-                true
+                return;
             }
-            Some(Hit::ShowAll { msg, part }) => {
-                if let Some(v) = app.views.get_mut(&sid) {
-                    v.chat.show_all(&msg, part);
+            MouseEventKind::Up(MouseButton::Left) => {
+                if let Some(ed) = app.watch.inputs.get_mut(&f) {
+                    ed.mouse_up();
                 }
-                true
+                return;
             }
-            Some(Hit::Unqueue { key }) => {
-                app.unqueue(&sid, key);
-                true
+            _ => {}
+        }
+    }
+    // Handle active drag/release of a tile's transcript text selection.
+    if let Some(sid) = app.watch.drag_tile.clone() {
+        match me.kind {
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let Some(v) = app.views.get_mut(&sid) {
+                    v.chat.mouse_drag(x, y);
+                    if v.chat.has_selection() {
+                        app.sel_owner = Some(sid);
+                    }
+                }
+                return;
             }
-            Some(Hit::RetryNow) => {
-                app.retry_now(&sid);
-                true
+            MouseEventKind::Up(MouseButton::Left) => {
+                app.watch.drag_tile = None;
+                if let Some(v) = app.views.get_mut(&sid) {
+                    v.chat.mouse_up(x, y);
+                    if v.chat.has_selection() {
+                        app.sel_owner = Some(sid);
+                    }
+                }
+                return;
             }
-            _ => false,
-        };
+            _ => {}
+        }
+    }
+    let tile = app.watch.tiles.iter().find(|(_, r)| inside(r)).cloned();
+    match me.kind {
+        // The wheel scrolls the tile under the pointer, focused or not.
+        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+            let d = if me.kind == MouseEventKind::ScrollUp {
+                -WHEEL_SCROLL_ROWS
+            } else {
+                WHEEL_SCROLL_ROWS
+            };
+            match tile.and_then(|(sid, _)| app.views.get_mut(&sid)) {
+                Some(v) => v.chat.scroll_by(d, false),
+                None => app.dirty = false,
+            }
+        }
+        MouseEventKind::Down(MouseButton::Right) => {
+            if !app.copy_selection() {
+                app.dirty = false;
+            }
+        }
+        MouseEventKind::Down(MouseButton::Left) => watch_mouse_down(app, tile, x, y),
+        _ => app.dirty = false,
+    }
+}
+
+fn click_watch_input(app: &mut App, sid: &str, tr: Rect, x: u16, y: u16) {
+    app.clear_selection();
+    let Some(ir) = split::input_rect(tr) else {
+        return;
+    };
+    let n = click_count(app, x, y);
+    let cursor_moved = {
+        let ed = app.watch.inputs.entry(sid.to_string()).or_default();
+        let before = ed.cursor;
+        let off = ed.offset_at_single_line(ir, x);
+        ed.mouse_down(off, n);
+        ed.cursor != before
+    };
+    if cursor_moved && app.ac.is_some() {
+        app.update_autocomplete();
+    }
+}
+
+fn watch_mouse_down(app: &mut App, tile: Option<(String, Rect)>, x: u16, y: u16) {
+    if app
+        .watch
+        .filter_pill_rect
+        .is_some_and(|r| r.contains(Position::new(x, y)))
+    {
+        app.cycle_watch_filter();
+        return;
+    }
+    let Some((sid, tr)) = tile else {
+        // Empty space / footer: clear selection and unfocus.
+        app.clear_selection();
+        app.set_watch_focus(None);
+        return;
+    };
+    let already_focused = app.watch.focus.as_deref() == Some(sid.as_str());
+    let in_focused_input = already_focused
+        && tr.height >= 5
+        && y == tr.y + tr.height - 2
+        && x > tr.x
+        && x + 1 < tr.x + tr.width;
+    if in_focused_input {
+        click_watch_input(app, &sid, tr, x, y);
+        return;
+    }
+    if let Some(v) = app.views.get_mut(&sid)
+        && chat::pill_hit(&v.chat, x, y)
+    {
+        v.chat.scroll_to_bottom(true);
+        return;
+    }
+    // Click targets: expand a tool call, show all output, withdraw a queued prompt.
+    let hit = app.views.get(&sid).and_then(|v| v.chat.hit_at(x, y));
+    let is_tool = |app: &App, msg: &str, part: usize| {
+        app.views
+            .get(&sid)
+            .and_then(|v| {
+                v.find(msg)
+                    .and_then(|i| v.message_at(i).and_then(|m| m.parts.get(part)))
+            })
+            .is_some_and(|p| matches!(p, ref_proto::Part::Tool { .. }))
+    };
+    let handled = match hit {
+        Some(Hit::Toggle { msg, part }) if is_tool(app, &msg, part) => {
+            if let Some(v) = app.views.get_mut(&sid) {
+                v.chat.toggle(&msg, part);
+            }
+            true
+        }
+        Some(Hit::ShowAll { msg, part }) => {
+            if let Some(v) = app.views.get_mut(&sid) {
+                v.chat.show_all(&msg, part);
+            }
+            true
+        }
+        Some(Hit::Unqueue { key }) => {
+            app.unqueue(&sid, key);
+            true
+        }
+        Some(Hit::RetryNow) => {
+            app.retry_now(&sid);
+            true
+        }
+        _ => false,
+    };
+    if handled {
         app.clear_selection();
         app.set_watch_focus(Some(sid));
         return;

@@ -951,16 +951,19 @@ pub fn draw(buf: &mut Buffer, area: Rect, view: &mut SessionView, env: &Env<'_>)
     layout(view, env, cw, false);
     view.chat.last_w = cw;
     let loaded = view.loaded;
-    let chat = &mut view.chat;
-    if let Some(a) = &anchor {
-        restore_anchor(chat, a);
-    }
-    chat.content_x = area.x + 1;
-    settle(chat, area, reflow);
-    chat.visible_seq_range = compute_visible_seq_range(chat);
-    if !chat.follow
+    let (follow, visible_seq_range) = {
+        let chat = &mut view.chat;
+        if let Some(a) = &anchor {
+            restore_anchor(chat, a);
+        }
+        chat.content_x = area.x + 1;
+        settle(chat, area, reflow);
+        chat.visible_seq_range = compute_visible_seq_range(chat);
+        (chat.follow, chat.visible_seq_range)
+    };
+    if !follow
         && view.resident_count() > MAX_RESIDENT_MESSAGES
-        && let Some((vs, ve)) = chat.visible_seq_range
+        && let Some((vs, ve)) = visible_seq_range
     {
         view.evict_outside(vs, ve);
     }

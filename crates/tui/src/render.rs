@@ -103,6 +103,7 @@ pub fn draw(f: &mut Frame<'_>, app: &mut App) {
     if area.width == 0 || area.height == 0 {
         return;
     }
+    let now = ref_proto::now_ms();
     let tick = app.tick();
     let buf = f.buffer_mut();
     let banner_h = draw_top_notice(buf, area, app);
@@ -497,6 +498,7 @@ fn draw_prompt(buf: &mut Buffer, lay: &Layout, app: &mut App, focused: bool) -> 
     let agent = view
         .map(|v| v.info.agent.clone())
         .unwrap_or_else(|| app.effective_draft_agent());
+    let queued = view.map(|v| v.queued.len()).unwrap_or(0);
     let busy = view.is_some_and(|v| v.is_busy());
     let view_model = view
         .map(|v| v.info.model.clone())

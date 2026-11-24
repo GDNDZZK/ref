@@ -14,7 +14,7 @@ use serde_json::Value;
 
 use crate::net::{Client, NetEvent};
 use crate::prefs::{BackendSource, TuiPrefs};
-use crate::state::{PAGE_SIZE, Queued, RANGE_DEBOUNCE, SessionView, TAIL_KEEP_MESSAGES};
+use crate::state::{PAGE_SIZE, Queued, RANGE_DEBOUNCE, SessionView};
 use crate::text;
 pub use crate::ui::autocomplete::{AcKind, Autocomplete};
 use crate::ui::autocomplete::{
@@ -507,6 +507,7 @@ pub struct App {
     init: Option<InitPlan>,
     pub shell_mode: bool,
     pub run_editor: bool,
+    pub dirty: bool,
     pub last_click: Option<(Instant, u16, u16, u8)>,
     pub last_mouse_pos: Option<(u16, u16)>,
     /// Session id whose transcript holds the active selection.

@@ -165,6 +165,7 @@ async fn pump(
                 let txt = match serde_json::to_string(&f) {
                     Ok(t) => t,
                     Err(e) => {
+                        let msg = format!("cannot encode request: {e}");
                         if let Some(id) = f.id {
                             let frame = ServerFrame::Response {
                                 id,
