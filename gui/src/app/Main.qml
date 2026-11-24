@@ -67,8 +67,10 @@ Window {
 	function overTopButtons(scenePos) {
 		return pointInItem(expand, scenePos)
 			|| pointInItem(newSessionButton, scenePos)
+			|| pointInItem(splitFilterCapsule, scenePos)
 			|| pointInItem(leaveZoomButton, scenePos)
 			|| pointInItem(splitButton, scenePos)
+			|| pointInItem(floatButton, scenePos)
 			|| pointInItem(themeToggle, scenePos)
 			|| pointInItem(windowControls, scenePos)
 	}
@@ -79,7 +81,7 @@ Window {
 		: (Qt.Window | Qt.FramelessWindowHint | Qt.WindowMinMaxButtonsHint | Qt.WindowSystemMenuHint)
 	minimumWidth: Theme.windowMinWidth
 	minimumHeight: Theme.windowMinHeight
-	visible: true
+	visible: !Workspace.floatingMode
 	color: Theme.background
 	Component.onCompleted: {
 		width = Workspace.settings.windowWidth
@@ -101,9 +103,8 @@ Window {
 	Binding {
 		target: Workspace
 		property: "windowActive"
-		value: window.active
+		value: window.active || (floatingBallLoader.item ? floatingBallLoader.item.panelActive : false)
 	}
-
 	Binding {
 		target: Theme
 		property: "dark"
@@ -132,8 +133,15 @@ Window {
 		function onNewSessionFolderRequested() {
 			folders.open()
 		}
+		function onFloatingModeChanged() {
+			if (!Workspace.floatingMode) {
+				window.show()
+				window.raise()
+				window.requestActivate()
+				Qt.callLater(() => window.focusComposer())
+			}
+		}
 	}
-
 	FolderDialog {
 		id: folders
 		title: qsTr("New session in…")
@@ -343,6 +351,8 @@ Window {
 					// Connection trouble, or why no session could be opened, until it is gone.
 					StatusPill {
 						text: window.noticeText()
+						actionText: Workspace.connectionText !== "" ? qsTr("Switch Backend…") : ""
+						onActionClicked: Commands.run(CommandId.backend)
 					}
 				}
 			}
@@ -369,8 +379,165 @@ Window {
 							window.toggleMaximized()
 					}
 				}
-			}
 
+				Rectangle {
+					id: splitFilterCapsule
+					objectName: "splitFilterCapsule"
+
+					readonly property real leftClear: sidebar.width === 0
+						? ((window.isMac ? window.macTrafficLightInset : Theme.windowButtonMargin) + 2 * Theme.buttonHeight + Theme.windowButtonGap + 8)
+						: 12
+					readonly property real rightClear: (window.showWindowControls ? windowControls.width + Theme.windowButtonGap : 0)
+						+ themeToggle.width + floatButton.width + splitButton.width
+						+ 3 * Theme.windowButtonGap + Theme.windowButtonMargin + 8
+					readonly property real maxWidth: Math.max(0, area.width - leftClear - rightClear)
+					readonly property bool shown: Workspace.splitView && !window.zoomed && maxWidth >= 96
+
+					anchors.horizontalCenter: parent.horizontalCenter
+					y: window.topButtonY
+					z: 5
+					width: Math.min(splitFilterRow.implicitWidth + 6, maxWidth)
+					height: Theme.buttonHeight
+					radius: height / 2
+					color: Theme.surface
+					border.color: Theme.border
+					opacity: shown ? 1 : 0
+					visible: opacity > 0
+					enabled: !dialogs.open && shown
+					clip: true
+
+					Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+
+					Row {
+						id: splitFilterRow
+						anchors.centerIn: parent
+						spacing: 2
+
+						Rectangle {
+							id: filterAllPill
+							objectName: "splitFilterAll"
+							readonly property bool active: Workspace.splitFilter === "all"
+							width: filterAllText.implicitWidth + 20
+							height: 28
+							radius: 14
+							color: active ? Theme.userBubble : (filterAllHover.hovered ? Theme.surfaceHover : "transparent")
+							border.color: active ? Theme.userBubbleBorder : "transparent"
+
+							Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+
+							Text {
+								id: filterAllText
+								textFormat: Text.PlainText
+								anchors.centerIn: parent
+								text: qsTr("All")
+								color: filterAllPill.active || filterAllHover.hovered ? Theme.text : Theme.textMuted
+								font.pixelSize: Theme.smallFontSize
+							}
+							HoverHandler { id: filterAllHover; cursorShape: Qt.PointingHandCursor }
+							TapHandler { onTapped: Workspace.setSplitFilter("all") }
+						}
+
+						Rectangle {
+							id: filterUserPill
+							objectName: "splitFilterUser"
+							readonly property bool active: Workspace.splitFilter === "user"
+							width: filterUserText.implicitWidth + 20
+							height: 28
+							radius: 14
+							color: active ? Theme.userBubble : (filterUserHover.hovered ? Theme.surfaceHover : "transparent")
+							border.color: active ? Theme.userBubbleBorder : "transparent"
+
+							Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+
+							Text {
+								id: filterUserText
+								textFormat: Text.PlainText
+								anchors.centerIn: parent
+								text: qsTr("User-created")
+								color: filterUserPill.active || filterUserHover.hovered ? Theme.text : Theme.textMuted
+								font.pixelSize: Theme.smallFontSize
+							}
+							HoverHandler { id: filterUserHover; cursorShape: Qt.PointingHandCursor }
+							TapHandler { onTapped: Workspace.setSplitFilter("user") }
+						}
+
+						Rectangle {
+							id: filterCreatorPill
+							objectName: "splitFilterCreator"
+							readonly property bool active: Workspace.splitFilter !== "all" && Workspace.splitFilter !== "user"
+							visible: active
+							width: Math.min(150, filterCreatorText.implicitWidth + 20)
+							height: 28
+							radius: 14
+							color: Theme.userBubble
+							border.color: Theme.userBubbleBorder
+
+							Text {
+								id: filterCreatorText
+								textFormat: Text.PlainText
+								anchors { left: parent.left; right: parent.right; leftMargin: 10; rightMargin: 10; verticalCenter: parent.verticalCenter }
+								text: qsTr("By %1 ×").arg(Workspace.splitFilterLabel)
+								color: Theme.text
+								font.pixelSize: Theme.smallFontSize
+								elide: Text.ElideRight
+							}
+							HoverHandler { id: filterCreatorHover; cursorShape: Qt.PointingHandCursor }
+							TapHandler { onTapped: Workspace.setSplitFilter("all") }
+							PlainToolTip {
+								visible: filterCreatorHover.hovered
+								text: qsTr("Clear creator filter")
+							}
+						}
+
+						Item {
+							id: filterMoreButton
+							objectName: "splitFilterMenuButton"
+							visible: Workspace.splitCreators.length > 0
+							width: 28
+							height: 28
+
+							Rectangle {
+								anchors.fill: parent
+								radius: 14
+								color: filterMoreHover.hovered ? Theme.surfaceHover : "transparent"
+								Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+							}
+							Icon {
+								anchors.centerIn: parent
+								name: "filter"
+								size: 16
+								color: filterMoreHover.hovered ? Theme.text : Theme.textMuted
+							}
+							HoverHandler { id: filterMoreHover; cursorShape: Qt.PointingHandCursor }
+							TapHandler {
+								onTapped: {
+									const creators = Workspace.splitCreators
+									const items = [
+										{text: qsTr("All"), action: "all"},
+										{text: qsTr("User-created"), action: "user"}
+									]
+									for (let i = 0; i < creators.length; ++i)
+										items.push({text: qsTr("By %1").arg(creators[i].name), action: creators[i].id})
+									splitFilterMenu.entries = items
+									splitFilterMenu.openAt(Qt.point(0, filterMoreButton.height + 6))
+								}
+							}
+							PlainToolTip {
+								visible: filterMoreHover.hovered
+								text: qsTr("Filter by creator")
+							}
+							ContextMenu {
+								id: splitFilterMenu
+								onTriggered: index => {
+									const entry = splitFilterMenu.entries[index]
+									if (entry)
+										Workspace.setSplitFilter(entry.action)
+								}
+							}
+						}
+					}
+				}
+			}
 			ToastHost {
 				anchors.fill: parent
 			}
@@ -444,10 +611,27 @@ Window {
 	}
 
 	IconButton {
-		id: splitButton
+		id: floatButton
+		objectName: "floatingBallButton"
 		anchors {
 			top: parent.top
 			right: themeToggle.left
+			topMargin: window.topButtonY
+			rightMargin: Theme.windowButtonGap
+		}
+		iconName: "float"
+		iconColor: Workspace.floatingMode ? Theme.accentText : Theme.textMuted
+		enabled: !dialogs.open
+		tooltipText: qsTr("Floating ball (Ctrl+Shift+F)")
+		Accessible.name: qsTr("Floating ball")
+		onClicked: Commands.run(CommandId.floating)
+	}
+
+	IconButton {
+		id: splitButton
+		anchors {
+			top: parent.top
+			right: floatButton.left
 			topMargin: window.topButtonY
 			rightMargin: Theme.windowButtonGap
 		}
@@ -475,7 +659,6 @@ Window {
 
 		Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 	}
-
 	DialogHost {
 		id: dialogs
 		anchors.fill: parent
@@ -498,5 +681,11 @@ Window {
 		border.width: 1
 		border.color: Theme.border
 		visible: window.windowBorderShown
+	}
+
+	Loader {
+		id: floatingBallLoader
+		active: Workspace.floatingMode
+		sourceComponent: FloatingBallWindow {}
 	}
 }

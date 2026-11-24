@@ -131,6 +131,16 @@ QList<proto::SessionInfo> SessionDirectory::allSessions() const
 	return all;
 }
 
+
+const proto::SessionInfo* SessionDirectory::findAny(const QString\u0026 sessionId) const
+{
+\tif(const proto::SessionInfo* liveInfo = m_live.find(sessionId))
+\t{
+\t\treturn liveInfo;
+\t}
+\tconst auto it = m_knownSessions.constFind(sessionId);
+\treturn it == m_knownSessions.constEnd() ? nullptr : \u0026*it;
+}
 void SessionDirectory::update(const proto::SessionInfo& info)
 {
 	QList<proto::SessionInfo> sessions = m_liveSessions;
@@ -162,6 +172,32 @@ void SessionDirectory::forgetPersisted(const QString& sessionId)
 		m_knownSessions.remove(sessionId);
 	}
 	applyHistory();
+}
+
+void SessionDirectory::reset()
+{
+\tm_historyTimer.stop();
+\tm_historySearchTimer.stop();
+\t++m_historyRequest;
+\t++m_unfilteredHistoryRequest;
+\tm_liveSessions.clear();
+\tm_persisted.clear();
+\tm_sidebarPersisted.clear();
+\tm_knownSessions.clear();
+\tm_watchAll = false;
+\tm_live.setSessions({});
+\tm_history.setSessions({});
+\tm_choices.setSessions({});
+\tm_live.setKnownSessions({});
+\tm_history.setKnownSessions({});
+\tm_choices.setKnownSessions({});
+\tif(m_historyLoaded)
+\t{
+\t\tm_historyLoaded = false;
+\t\temit historyLoadedChanged();
+\t}
+\temit liveChanged();
+\temit historyUpdated();
 }
 
 QCoro::Task<SessionDirectory::Result<void>> SessionDirectory::adopt(QCoro::Task<Result<proto::SessionInfo>> request)

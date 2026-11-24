@@ -6,6 +6,7 @@
 #include <QPointer>
 #include <QQuickTextureFactory>
 #include <QCoroTask>
+#include <QSet>
 
 #include <utility>
 
@@ -49,6 +50,24 @@ public:
 	{
 		fetchTo(sessionId, imageId);
 	}
+	void evictMessages(const QString& sessionId, const QStringList& messageIds)
+	{
+		for(const QString& messageId : messageIds)
+		{
+			const QString prefix = sessionId + u'/' + messageId + u':';
+			const QSet<QString> keys = m_keysByMsg.take(prefix);
+			for(const QString& key : keys)
+			{
+				m_cache.remove(key);
+			}
+		}
+	}
+
+	void clearAll()
+	{
+		m_cache.clear();
+		m_keysByMsg.clear();
+	}
 
 signals:
 	void fetched(const QString& key, const QByteArray& bytes, const QString& error);
@@ -80,11 +99,14 @@ private:
 			co_return;
 		}
 		m_cache.insert(key, new QByteArray(*result), static_cast<int>(result->size()));
+		const QString prefix = sessionId + u'/' + imageId.section(u':', 0, 0) + u':';
+		m_keysByMsg[prefix].insert(key);
 		emit fetched(key, *result, {});
 	}
 
 	SessionLookup m_lookup;
 	QCache<QString, QByteArray> m_cache;
+	QHash<QString, QSet<QString>> m_keysByMsg;
 };
 
 namespace
@@ -156,6 +178,20 @@ ChatImageProvider::ChatImageProvider(SessionLookup lookup)
 ChatImageProvider::~ChatImageProvider()
 {
 	m_host->deleteLater();
+}
+QObject* ChatImageProvider::cacheHost() const
+{
+	return m_host;
+}
+
+void ChatImageProvider::evictMessages(const QString& sessionId, const QStringList& messageIds)
+{
+	m_host->evictMessages(sessionId, messageIds);
+}
+
+void ChatImageProvider::clearAll()
+{
+	m_host->clearAll();
 }
 
 QQuickImageResponse* ChatImageProvider::requestImageResponse(const QString& id, const QSize& requestedSize)

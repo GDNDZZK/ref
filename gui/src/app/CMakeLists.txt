@@ -19,6 +19,8 @@ qt_add_qml_module(ref-gui
 		chat_session.h
 		clipboard.h
 		composer_model_type.h
+		floating_ball_helper.cpp
+		floating_ball_helper.h
 		link_colorizer.cpp
 		link_colorizer.h
 		notification_center_type.h

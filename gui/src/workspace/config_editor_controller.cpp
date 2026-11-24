@@ -1265,4 +1265,35 @@ QCoro::Task<> ConfigEditorController::reloadTask()
 	}
 }
 
+void ConfigEditorController::reset()
+{
+\t++m_fetchSerial;
+\tsetLoading(false);
+\tsetSaving(false);
+\tsetErrorText({});
+\tsetParseError({});
+\tm_cwd.clear();
+\tm_configDir.clear();
+\tm_files.clear();
+\tm_selectedFile = u\"ref.json\"_s;
+\tm_selectedFileActive = true;
+\tm_selectedFileExists = false;
+\tm_hasJsoncOverride = false;
+\tm_envConfigOverride.clear();
+\tm_projectOverrides.clear();
+\tm_warnings.clear();
+\tm_envStatus.clear();
+\tm_patcher = ConfigJsonPatcher();
+\tm_baselineRoot = OrderedJsonObject();
+\tm_baselineRawText = u\"{}\\n\"_s;
+\tm_hasValidBaseline = true;
+\tm_rawText = m_baselineRawText;
+\t++m_revision;
+\tupdateDirty(false);
+\temit filesChanged();
+\temit envStatusChanged();
+\temit rawTextChanged();
+\temit parsedChanged();
+}
+
 } // namespace refgui::workspace

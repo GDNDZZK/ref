@@ -107,6 +107,9 @@ set(REFGUI_APP_QML_NAMES
 	CloseDialog.qml
 	RenameDialog.qml
 	DeleteHistoryDialog.qml
+	StashDialog.qml
+	BackendDialog.qml
+	FloatingBallWindow.qml
 	Icon.qml
 	Theme.qml
 	Motion.qml
@@ -164,6 +167,7 @@ set(REFGUI_APP_QML_NAMES
 	Flourish.qml
 	AlertBadge.qml
 	ErrorBlock.qml
+	SkeletonBlock.qml
 	ImageBlock.qml
 	StatusLine.qml
 	OlderPill.qml

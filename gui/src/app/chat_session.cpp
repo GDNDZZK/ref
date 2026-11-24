@@ -41,6 +41,9 @@ ChatSession::ChatSession(Backend& backend, const refgui::workspace::BackendConfi
 	connect(&m_composer, &refgui::composer::ComposerModel::sent, this, [this] { setFailure({}); });
 	connect(&m_composer, &refgui::composer::ComposerModel::interruptRequested, this, &ChatSession::stop);
 	connect(this, &ChatSession::draftRestored, &m_composer, &refgui::composer::ComposerModel::restoreDraft);
+	connect(&m_controller, &refgui::session::SessionController::aboutToMaterialize, this, &ChatSession::aboutToMaterialize);
+	connect(&m_controller, &refgui::session::SessionController::materialized, this, &ChatSession::materialized);
+	connect(&m_controller, &refgui::session::SessionController::messagesEvicted, this, &ChatSession::messagesEvicted);
 
 	m_permissionGuard.setSingleShot(true);
 	m_permissionGuard.setInterval(PermissionGuard);
@@ -297,6 +300,15 @@ void ChatSession::stop()
 	m_controller.showPendingNow(); // the server is done, only the display lags
 }
 
+void ChatSession::retryNow()
+{
+	if(!isReady())
+	{
+		return;
+	}
+	sendRetryNow();
+}
+
 bool ChatSession::lastToolDelayed() const
 {
 	return m_controller.model().toolSummary().lastToolDelayed;
@@ -521,6 +533,11 @@ QCoro::Task<> ChatSession::sendAbort()
 	co_await awaitAndReport(m_controller.abort());
 }
 
+QCoro::Task<> ChatSession::sendRetryNow()
+{
+	co_await awaitAndReport(m_controller.retryNow());
+}
+
 QCoro::Task<> ChatSession::sendPermission(QString callId, bool allow, bool always)
 {
 	const QPointer<ChatSession> self(this); // the session can be gone when the answer arrives
@@ -569,6 +586,39 @@ void ChatSession::setFailure(const QString& text)
 {
 	m_failure = text;
 	emit statusTextChanged();
+}
+
+void ChatSession::setColumnWidth(double width)
+{
+	m_controller.model().setColumnWidth(width);
+}
+
+void ChatSession::setVisibleSeqRange(int startSeq, int endSeq)
+{
+	if(startSeq < 0 || endSeq < startSeq)
+	{
+		return;
+	}
+	m_controller.setVisibleSeqRange(static_cast<quint64>(startSeq), static_cast<quint64>(endSeq));
+}
+
+void ChatSession::setFollowing(bool following)
+{
+	m_controller.setFollowing(following);
+}
+
+int ChatSession::firstRowForSeq(int seq) const
+{
+	if(seq < 0)
+	{
+		return -1;
+	}
+	return m_controller.model().firstRowForSeq(static_cast<quint64>(seq));
+}
+
+int ChatSession::seqForRow(int row) const
+{
+	return m_controller.model().seqForRow(row);
 }
 
 QVariantList ChatSession::allImages() const

@@ -95,6 +95,8 @@ CommandRegistry::CommandRegistry(QObject* parent)
 		{.id = u"detach"_s, .title = QT_TRANSLATE_NOOP("Commands", "Move session to background"), .slash = {u"detach"_s, u"background"_s, u"leave"_s}, .category = Session, .icon = u"restore-20"_s, .needs = Connected | Need::Detachable},
 		{.id = u"close"_s, .title = QT_TRANSLATE_NOOP("Commands", "Close this session"), .slash = {u"close"_s}, .shortcut = u"Ctrl+Shift+K"_s, .category = Session, .icon = u"close-16"_s, .needs = OnSession},
 		{.id = u"close-session"_s, .title = QT_TRANSLATE_NOOP("Commands", "Close live sessions (picker, or by name / id)"), .slash = {u"close-session"_s, u"kill"_s}, .hint = "[name or id]", .category = Session, .icon = u"chat-x-16"_s, .needs = Connected | Need::LiveSession},
+\t\t{.id = u\"stash\"_s, .title = QT_TRANSLATE_NOOP(\"Commands\", \"Stash all running sessions\"), .slash = {u\"stash\"_s}, .hint = \"[name]\", .category = Session, .icon = u\"stash-16\"_s, .needs = Connected | Need::LiveSession},
+\t\t{.id = u\"stashed\"_s, .title = QT_TRANSLATE_NOOP(\"Commands\", \"Manage stashed groups…\"), .slash = {u\"stashed\"_s, u\"stash-groups\"_s}, .category = Session, .icon = u\"stash-16\"_s, .needs = Connected},
 		{.id = u"peers"_s, .title = QT_TRANSLATE_NOOP("Commands", "List other live sessions you can message"), .slash = {u"peers"_s, u"list-agents"_s}, .category = Session, .icon = u"chat-list-16"_s, .needs = OnSession},
 		{.id = u"peers-name"_s, .title = QT_TRANSLATE_NOOP("Commands", "Show or set this session's peer name"), .slash = {u"peers-name"_s}, .hint = "[name]", .category = Session, .icon = u"chat-16"_s, .needs = OnSession},
 		{.id = u"peers-inbox"_s, .title = QT_TRANSLATE_NOOP("Commands", "Messages received from other sessions"), .slash = {u"peers-inbox"_s}, .category = Session, .icon = u"chat-16"_s, .needs = OnSession},
@@ -109,11 +111,13 @@ CommandRegistry::CommandRegistry(QObject* parent)
 		{.id = u"ui-zoom-in"_s, .title = QT_TRANSLATE_NOOP("Commands", "Zoom in interface"), .shortcut = u"Ctrl+="_s, .category = View, .icon = u"maximize-20"_s, .needs = Need::Nothing},
 		{.id = u"ui-zoom-out"_s, .title = QT_TRANSLATE_NOOP("Commands", "Zoom out interface"), .shortcut = u"Ctrl+-"_s, .category = View, .icon = u"restore-20"_s, .needs = Need::Nothing},
 		{.id = u"ui-zoom-reset"_s, .title = QT_TRANSLATE_NOOP("Commands", "Reset interface zoom"), .shortcut = u"Ctrl+0"_s, .category = View, .icon = u"retry-16"_s, .needs = Need::Nothing},
+\t\t{.id = u\"floating\"_s, .title = QT_TRANSLATE_NOOP(\"Commands\", \"Toggle floating ball\"), .slash = {u\"float\"_s, u\"floating\"_s}, .shortcut = u\"Ctrl+Shift+F\"_s, .category = View, .icon = u\"float-20\"_s, .needs = Need::Nothing},
 		{.id = u"mcp"_s, .title = QT_TRANSLATE_NOOP("Commands", "MCP servers: status, errors and tools"), .slash = {u"mcp"_s, u"mcps"_s}, .category = Help, .icon = u"mcp-16"_s, .needs = Connected},
 		{.id = u"reload"_s, .title = QT_TRANSLATE_NOOP("Commands", "Reload configuration"), .slash = {u"reload"_s, u"reload-config"_s}, .category = Help, .icon = u"retry-16"_s, .needs = Connected},
 		{.id = u"config"_s, .title = QT_TRANSLATE_NOOP("Commands", "Configuration (ref.json)…"), .slash = {u"config"_s, u"configuration"_s}, .category = Help, .icon = u"sliders-20"_s, .needs = Connected},
 		{.id = u"help"_s, .title = QT_TRANSLATE_NOOP("Commands", "Keybindings and commands"), .slash = {u"help"_s}, .shortcut = u"Ctrl+Shift+H"_s, .category = Help, .icon = u"info-16"_s, .needs = Need::Nothing},
 		{.id = u"settings"_s, .title = QT_TRANSLATE_NOOP("Commands", "Settings"), .shortcut = u"Ctrl+Shift+S"_s, .category = Help, .icon = u"sliders-20"_s, .needs = Need::Nothing},
+\t\t{.id = u\"backend\"_s, .title = QT_TRANSLATE_NOOP(\"Commands\", \"Switch backend…\"), .slash = {u\"backend\"_s, u\"server\"_s}, .category = Help, .icon = u\"globe-16\"_s, .needs = Need::Nothing},
 		{.id = u"palette"_s, .title = QT_TRANSLATE_NOOP("Commands", "Command palette"), .shortcut = u"Ctrl+P"_s, .category = Help, .icon = u"command-20"_s, .needs = Need::Nothing},
 	};
 	for(Entry entry : builtins)

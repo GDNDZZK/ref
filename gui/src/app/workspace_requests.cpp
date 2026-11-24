@@ -5,7 +5,7 @@
 
 #include <QJSEngine>
 #include <QPointer>
-
+#include <QUrl>
 #include <type_traits>
 
 using refgui::client::Result;
@@ -236,4 +236,119 @@ void Workspace::restartBackend()
 		}
 	};
 	perform(m_connection.stopServer(), reportRefusal, noPayload);
+}
+
+bool Workspace::isValidBackendUrl(const QString& url) const
+{
+	const QUrl parsed(url.trimmed());
+	return parsed.isValid() && (parsed.scheme() == u"ws"_s || parsed.scheme() == u"wss"_s) && !parsed.host().isEmpty();
+}
+
+bool Workspace::switchBackend(const QString& url, const QString& token, bool saveAsDefault, bool keepExistingToken)
+{
+	const QString trimmedUrl = url.trimmed();
+	const QUrl parsed(trimmedUrl);
+	if(!parsed.isValid() || (parsed.scheme() != u"ws"_s && parsed.scheme() != u"wss"_s) || parsed.host().isEmpty())
+	{
+		return false;
+	}
+	QString effectiveToken = token.trimmed();
+	if(effectiveToken.isEmpty() && keepExistingToken)
+	{
+		effectiveToken = currentEditableToken();
+	}
+	if(saveAsDefault)
+	{
+		m_temporaryBackend.reset();
+		m_cliRemoteSource = false;
+		m_cliMockSource = false;
+		m_settings.setBackend(parsed.toString(), effectiveToken);
+	}
+	else
+	{
+		m_temporaryBackend = refgui::client::Endpoint{parsed, effectiveToken};
+	}
+	applyBackendSwitch(refgui::client::Backend::Mode::Remote{{parsed, effectiveToken}});
+	return true;
+}
+
+void Workspace::restoreDefaultBackend()
+{
+	m_temporaryBackend.reset();
+	m_cliRemoteSource = false;
+	m_cliMockSource = false;
+	m_settings.setBackend({}, {});
+	applyBackendSwitch(refgui::client::Backend::Mode::Shared{});
+}
+
+void Workspace::applyBackendSwitch(refgui::client::Backend::Source source)
+{
+	++m_showSerial;
+	m_options.start = {};
+	m_options.watch = false;
+	m_connection.switchSource(std::move(source));
+
+	const bool wasSplit = m_split;
+	const bool wasZoomed = !m_zoomed.isEmpty();
+	m_split = false;
+	m_zoomed.clear();
+	if(!m_focusedTile.isEmpty())
+	{
+		setFocusedTile({});
+	}
+	m_tiles.setTiles({});
+	m_directory.live().setTileIds({});
+	if(wasZoomed)
+	{
+		emit zoomedChanged();
+	}
+	if(wasSplit)
+	{
+		emit splitViewChanged();
+	}
+	if(m_splitFilter != u"all"_s)
+	{
+		m_splitFilter = u"all"_s;
+		emit splitFilterChanged();
+	}
+	if(m_current != nullptr)
+	{
+		setCurrent(nullptr);
+	}
+	else
+	{
+		updateHighlight();
+	}
+
+	const QStringList chatIds = m_chats.keys();
+	for(const QString& chatId : chatIds)
+	{
+		if(ChatSession* gone = m_chats.take(chatId))
+		{
+			emit sessionDropped(gone);
+			m_stage.deleteWhenLeft(gone);
+		}
+	}
+	m_seenLive.clear();
+	m_leaving.clear();
+	m_tileAttaching.clear();
+	m_unzooming.clear();
+	m_localMutationsInFlight = 0;
+	if(!m_failure.isEmpty())
+	{
+		m_failure.clear();
+		emit failureTextChanged();
+	}
+
+	m_directory.reset();
+	m_config.reset();
+	m_configEditor.reset();
+	m_stash.reset();
+	m_started = false;
+	syncConfigCwd();
+	emit clearImageCacheRequested();
+	emit visibleSessionIdsChanged();
+	emit splitCreatorsChanged();
+	updateCommandContext();
+	emit backendChanged();
 }

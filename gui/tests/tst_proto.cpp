@@ -126,8 +126,33 @@ void checkResponseResult(const QString& name, const QJsonObject& result)
 	{
 		QVERIFY(parsePathResult(result));
 	}
+	else if(name == u"response_retry_now")
+	{
+		QVERIFY(parseRetryNowResult(result));
+	}
+	else if(name == u"response_stash_all")
+	{
+		QVERIFY(parseStashAllResult(result));
+	}
+	else if(name == u"response_create_group")
+	{
+		QVERIFY(parseCreateGroupResult(result));
+	}
+	else if(name == u"response_list_groups" || name == u"response_rename_group" || name == u"response_set_group_locked"
+	        || name == u"response_delete_group" || name == u"response_add_to_group" || name == u"response_move_group_member"
+	        || name == u"response_remove_from_group" || name == u"response_merge_groups")
+	{
+		QVERIFY(parseGroupsResult(result));
+	}
+	else if(name == u"response_restore_group")
+	{
+		QVERIFY(parseRestoreGroupResult(result));
+	}
+	else if(name == u"response_restore_group_member")
+	{
+		QVERIFY(parseRestoreGroupMemberResult(result));
+	}
 }
-
 } // namespace
 
 class TestProto : public QObject
@@ -268,8 +293,27 @@ private slots:
 		hello.insert(u"client"_s, u"ref-gui"_s);
 		hello.insert(u"notify"_s, QJsonArray());
 		QCOMPARE(request::hello(u"ref-gui"_s, u"/home/user/project"_s, u"3f9c1d2e"_s), hello);
-	}
 
+		QCOMPARE(request::messages(u"ses_a1b2c3d4"_s, u"msg_user_01"_s, 100), withoutId(u"messages"_s));
+		QCOMPARE(request::messagesRange(u"ses_a1b2c3d4"_s, 0, 50, 50), withoutId(u"messages_range"_s));
+		QCOMPARE(request::retryNow(u"ses_a1b2c3d4"_s), withoutId(u"retry_now"_s));
+		QCOMPARE(request::listGroups(), withoutId(u"list_groups"_s));
+		QCOMPARE(request::stashAll(u"Parser investigation"_s), withoutId(u"stash_all"_s));
+		QVERIFY(!request::stashAll().contains(u"name"_s));
+		QCOMPARE(request::createGroup(u"Parser investigation"_s, {u"ses_a1b2c3d4"_s}, true), withoutId(u"create_group"_s));
+		QCOMPARE(request::renameGroup(u"grp_a1b2c3d4"_s, u"Parser fix"_s), withoutId(u"rename_group"_s));
+		QCOMPARE(request::setGroupLocked(u"grp_a1b2c3d4"_s, true), withoutId(u"set_group_locked"_s));
+		QCOMPARE(request::deleteGroup(u"grp_a1b2c3d4"_s), withoutId(u"delete_group"_s));
+		QCOMPARE(request::addToGroup(u"grp_a1b2c3d4"_s, u"ses_a1b2c3d4"_s, 0U, true), withoutId(u"add_to_group"_s));
+		QVERIFY(!request::addToGroup(u"grp_a1b2c3d4"_s, u"ses_a1b2c3d4"_s).contains(u"position"_s));
+		QCOMPARE(request::moveGroupMember(u"grp_a1b2c3d4"_s, u"grp_e5f6a7b8"_s, u"ses_a1b2c3d4"_s, 0U, true),
+		         withoutId(u"move_group_member"_s));
+		QVERIFY(!request::moveGroupMember(std::nullopt, u"grp_e5f6a7b8"_s, u"ses_a1b2c3d4"_s, 0U, false).contains(u"from_group_id"_s));
+		QCOMPARE(request::removeFromGroup(u"grp_a1b2c3d4"_s, u"ses_a1b2c3d4"_s), withoutId(u"remove_from_group"_s));
+		QCOMPARE(request::mergeGroups(u"grp_e5f6a7b8"_s, u"grp_a1b2c3d4"_s), withoutId(u"merge_groups"_s));
+		QCOMPARE(request::restoreGroup(u"grp_a1b2c3d4"_s), withoutId(u"restore_group"_s));
+		QCOMPARE(request::restoreGroupMember(u"grp_a1b2c3d4"_s, u"ses_a1b2c3d4"_s), withoutId(u"restore_group_member"_s));
+	}
 	void configResult()
 	{
 		const QJsonObject frame = fixtureObject(u"server_frame"_s, u"response_get_config"_s);
@@ -541,7 +585,43 @@ private slots:
 		const auto fallback = parsedOrFail(parseSessionEvent(withoutPreview));
 		QVERIFY(!std::get<PermissionEvent>(fallback).request.preview.has_value());
 	}
-};
 
+	void v6LayoutMetasRangeRetryAndStashFixtures()
+	{
+		const auto snapshot = parsedOrFail(parseAttachResult(fixtureObject(u"server_frame"_s, u"response_attach"_s).value(u"result"_s).toObject()));
+		QCOMPARE(snapshot.totalMessages, quint64(3));
+		QCOMPARE(snapshot.startSeq, quint64(1));
+		QCOMPARE(snapshot.layoutMetas.size(), 1);
+		QCOMPARE(snapshot.layoutMetas.at(0).seq, quint64(0));
+		QCOMPARE(snapshot.layoutMetas.at(0).id, u"msg_older_00"_s);
+		QCOMPARE(snapshot.layoutMetas.at(0).role, Role::User);
+		QCOMPARE(snapshot.layoutMetas.at(0).sourceKind, u"human"_s);
+		QCOMPARE(snapshot.layoutMetas.at(0).parts.size(), 1);
+		QCOMPARE(snapshot.layoutMetas.at(0).parts.at(0).kind, u"text"_s);
+		QCOMPARE(snapshot.layoutMetas.at(0).parts.at(0).chars, quint32(42));
+		QCOMPARE(snapshot.layoutMetas.at(0).parts.at(0).lines, quint32(2));
+
+		const auto resetEvent = parsedOrFail(parseSessionEvent(fixtureObject(u"session_event"_s, u"reset"_s)));
+		const auto& reset = std::get<ResetEvent>(resetEvent);
+		QCOMPARE(reset.totalMessages, quint64(3));
+		QCOMPARE(reset.startSeq, quint64(1));
+		QCOMPARE(reset.layoutMetas.size(), 1);
+
+		const auto page = parsedOrFail(parseMessagesResult(fixtureObject(u"server_frame"_s, u"response_messages"_s).value(u"result"_s).toObject()));
+		QCOMPARE(page.startSeq, quint64(0));
+		QCOMPARE(page.endSeq, quint64(1));
+		QVERIFY(!page.moreBefore);
+
+		const auto retry = parsedOrFail(parseRetryNowResult(fixtureObject(u"server_frame"_s, u"response_retry_now"_s).value(u"result"_s).toObject()));
+		QVERIFY(retry.retried);
+
+		const auto groupsFrame = parsedOrFail(parseServerFrame(fixtureObject(u"server_frame"_s, u"groups_changed"_s)));
+		const auto& groupsChanged = std::get<GroupsChangedFrame>(groupsFrame);
+		QCOMPARE(groupsChanged.groups.size(), 1);
+		QCOMPARE(groupsChanged.groups.at(0).id, u"grp_a1b2c3d4"_s);
+		QCOMPARE(groupsChanged.groups.at(0).members.size(), 1);
+		QCOMPARE(groupsChanged.groups.at(0).members.at(0).sessionId, u"ses_a1b2c3d4"_s);
+	}
+};
 QTEST_GUILESS_MAIN(TestProto)
 #include "tst_proto.moc"

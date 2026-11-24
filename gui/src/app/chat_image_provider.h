@@ -4,6 +4,7 @@
 #include <QCache>
 #include <QQuickAsyncImageProvider>
 #include <QString>
+#include <QStringList>
 
 #include <functional>
 
@@ -21,6 +22,9 @@ public:
 	~ChatImageProvider() override;
 
 	QQuickImageResponse* requestImageResponse(const QString& id, const QSize& requestedSize) override;
+	QObject* cacheHost() const;
+	void evictMessages(const QString& sessionId, const QStringList& messageIds);
+	void clearAll();
 
 private:
 	class Host;

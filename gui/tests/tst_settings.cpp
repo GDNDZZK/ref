@@ -48,6 +48,8 @@ private slots:
 	void readUiScaleOnlyIsReadOnlyAndNormalizes();
 	void sidebarSectionHeightsPersistAndValidate();
 	void sidebarHistoryFiltersPersistAndValidate();
+	void backendSettingsPersistValidateAndUseOwnerOnlyPermissions();
+	void floatingBallPositionPersistsAndValidates();
 };
 
 void TestSettings::defaultsWithoutAFile()
@@ -394,6 +396,80 @@ void TestSettings::sidebarHistoryFiltersPersistAndValidate()
 	QVERIFY(!bad.sidebarHistoryCurrentDir());
 	QVERIFY(bad.loadProblem().contains(u"sidebar.historyCreatorFilter"_s));
 	QVERIFY(bad.loadProblem().contains(u"sidebar.historyCurrentDir"_s));
+}
+
+void TestSettings::backendSettingsPersistValidateAndUseOwnerOnlyPermissions()
+{
+	QTemporaryDir dir;
+	const QString path = dir.filePath(u"gui.json"_s);
+	{
+		Settings settings(path);
+		QVERIFY(settings.backendUrl().isEmpty());
+		QVERIFY(settings.backendToken().isEmpty());
+
+		QSignalSpy spy(&settings, &Settings::backendChanged);
+		settings.setBackend(u"wss://example.com:8443/ws"_s, u"secret_tok"_s);
+		QCOMPARE(spy.count(), 1);
+		QCOMPARE(settings.backendUrl(), u"wss://example.com:8443/ws"_s);
+		QCOMPARE(settings.backendToken(), u"secret_tok"_s);
+		QVERIFY(QFile::exists(path)); // setBackend writes immediately
+	}
+#ifndef Q_OS_WIN
+	const QFileDevice::Permissions perms = QFileInfo(path).permissions();
+	QVERIFY(perms.testFlag(QFileDevice::ReadOwner));
+	QVERIFY(perms.testFlag(QFileDevice::WriteOwner));
+	QVERIFY(!perms.testFlag(QFileDevice::ReadGroup));
+	QVERIFY(!perms.testFlag(QFileDevice::WriteGroup));
+	QVERIFY(!perms.testFlag(QFileDevice::ReadOther));
+	QVERIFY(!perms.testFlag(QFileDevice::WriteOther));
+#endif
+	{
+		Settings reloaded(path);
+		QVERIFY(reloaded.loadProblem().isEmpty());
+		QCOMPARE(reloaded.backendUrl(), u"wss://example.com:8443/ws"_s);
+		QCOMPARE(reloaded.backendToken(), u"secret_tok"_s);
+		reloaded.setBackend({}, {});
+	}
+	const QJsonObject cleared = readJson(path);
+	QVERIFY(!cleared.contains(u"backendUrl"_s));
+	QVERIFY(!cleared.contains(u"backendToken"_s));
+
+	const QString badPath = dir.filePath(u"bad_backend.json"_s);
+	writeFile(badPath, R"({"backendUrl":"http://not-ws.example","backendToken":"orphan"})");
+	const Settings bad(badPath);
+	QVERIFY(bad.backendUrl().isEmpty());
+	QVERIFY(bad.backendToken().isEmpty());
+	QVERIFY(bad.loadProblem().contains(u"backendUrl"_s));
+}
+
+void TestSettings::floatingBallPositionPersistsAndValidates()
+{
+	QTemporaryDir dir;
+	const QString path = dir.filePath(u"gui.json"_s);
+	{
+		Settings settings(path);
+		QVERIFY(!settings.hasFloatingBallPosition());
+		QSignalSpy spy(&settings, &Settings::floatingBallChanged);
+		settings.setFloatingBallPosition(u"DP-1"_s, 140, 260);
+		QCOMPARE(spy.count(), 1);
+		QVERIFY(settings.hasFloatingBallPosition());
+		QCOMPARE(settings.floatingBallScreen(), u"DP-1"_s);
+		QCOMPARE(settings.floatingBallX(), 140);
+		QCOMPARE(settings.floatingBallY(), 260);
+		settings.save();
+	}
+	const Settings reloaded(path);
+	QVERIFY(reloaded.loadProblem().isEmpty());
+	QVERIFY(reloaded.hasFloatingBallPosition());
+	QCOMPARE(reloaded.floatingBallScreen(), u"DP-1"_s);
+	QCOMPARE(reloaded.floatingBallX(), 140);
+	QCOMPARE(reloaded.floatingBallY(), 260);
+
+	const QString badPath = dir.filePath(u"bad_ball.json"_s);
+	writeFile(badPath, R"({"floatingBall":{"x":"bad","y":10}})");
+	const Settings bad(badPath);
+	QVERIFY(!bad.hasFloatingBallPosition());
+	QVERIFY(bad.loadProblem().contains(u"floatingBall"_s));
 }
 
 QTEST_GUILESS_MAIN(TestSettings)

@@ -35,6 +35,10 @@ ListView {
 	property bool following: true
 	property real previousHeight: 0
 	property string sessionId // the session whose pictures the rows show
+	property var session: null
+	property bool materializing: false
+	property int anchorSeq: -1
+	property real anchorOffset: 0
 	property bool moreBefore: false // the backend has earlier messages
 	property bool loadingOlder: false
 	property string olderError
@@ -246,6 +250,49 @@ ListView {
 		pendingTouchDelta = 0
 		lastTouchTime = 0
 	}
+	function prepareMaterialize() {
+		if (!session || count === 0) {
+			anchorSeq = -1
+			materializing = true
+			return
+		}
+		const row = indexAt(width / 2, Math.max(originY, contentY + 2))
+		if (row >= 0) {
+			const seq = session.seqForRow(row)
+			const item = itemAtIndex(row)
+			anchorSeq = seq
+			anchorOffset = item ? (contentY - item.y) : 0
+		} else {
+			anchorSeq = -1
+		}
+		materializing = true
+	}
+
+	function finishMaterialize() {
+		if (!following && anchorSeq >= 0 && session) {
+			const row = session.firstRowForSeq(anchorSeq)
+			if (row >= 0) {
+				positionViewAtIndex(row, ListView.Beginning)
+				contentY = Math.max(minContentY, Math.min(maxContentY, contentY + anchorOffset))
+			}
+		}
+		anchorSeq = -1
+		Qt.callLater(() => { materializing = false })
+	}
+
+	function reportVisibleRange() {
+		if (!session || count === 0)
+			return
+		const topIdx = Math.max(0, indexAt(width / 2, Math.max(originY, contentY)))
+		const botIdx = indexAt(width / 2, Math.min(originY + contentHeight - 1, contentY + height))
+		const endIdx = botIdx >= 0 ? botIdx : count - 1
+		if (topIdx < 0 || endIdx < topIdx)
+			return
+		const s = session.seqForRow(topIdx)
+		const e = session.seqForRow(endIdx)
+		if (s >= 0 && e >= s)
+			session.setVisibleSeqRange(s, e)
+	}
 	clip: true
 	spacing: Theme.blockSpacing
 	topMargin: Theme.pagePadding
@@ -266,6 +313,13 @@ ListView {
 	// The end stays on the bottom edge when the view changes height (a tile's input box comes or goes);
 	// a non-following view clamps to the new end when growing so no blank gap appears below the messages.
 	onSessionIdChanged: stopScrollMotion()
+	onColumnWidthChanged: if (session) session.setColumnWidth(columnWidth)
+	onSessionChanged: {
+		if (session) {
+			session.setColumnWidth(columnWidth)
+			session.setFollowing(following)
+		}
+	}
 	Connections {
 		target: view.model ? view.model : null
 		function onModelReset() {
@@ -282,7 +336,11 @@ ListView {
 		}
 		previousHeight = height
 	}
-	onContentYChanged: loadOlderIfNear()
+	onContentYChanged: {
+		loadOlderIfNear()
+		reportVisibleRange()
+	}
+	onCountChanged: reportVisibleRange()
 	onMoreBeforeChanged: loadOlderIfNear()
 	onLoadingOlderChanged: loadOlderIfNear()
 
@@ -443,6 +501,8 @@ ListView {
 	onMovementEnded: following = atYEnd
 
 	onFollowingChanged: {
+		if (session)
+			session.setFollowing(following)
 		if (!following)
 			return
 		wheeling = false
@@ -466,5 +526,6 @@ ListView {
 		DelegateChoice { roleValue: "tool"; ToolBlock {} }
 		DelegateChoice { roleValue: "error"; ErrorBlock {} }
 		DelegateChoice { roleValue: "meta"; MetaBlock {} }
+		DelegateChoice { roleValue: "skeleton"; SkeletonBlock {} }
 	}
 }

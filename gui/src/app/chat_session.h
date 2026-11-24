@@ -135,6 +135,8 @@ public:
 	Q_INVOKABLE void send(const QString& text);
 	// Precondition: busy.
 	Q_INVOKABLE void stop();
+	// Immediately triggers the next retry attempt while retrying.
+	Q_INVOKABLE void retryNow();
 	// Answers a tool call that waits for permission.
 	Q_INVOKABLE void permissionReply(const QString& callId, bool allow, bool always);
 	// Starts the guard time again for what the user is asked now, if anything: the view calls it when this session
@@ -160,6 +162,11 @@ public:
 	Q_INVOKABLE void copyLastReply();
 	Q_INVOKABLE void toggleReasoning();
 	Q_INVOKABLE void toggleDetails();
+	Q_INVOKABLE void setColumnWidth(double width);
+	Q_INVOKABLE void setVisibleSeqRange(int startSeq, int endSeq);
+	Q_INVOKABLE void setFollowing(bool following);
+	Q_INVOKABLE int firstRowForSeq(int seq) const;
+	Q_INVOKABLE int seqForRow(int row) const;
 	Q_INVOKABLE QVariantList allImages() const;
 signals:
 	void busyChanged();
@@ -179,6 +186,9 @@ signals:
 	void errorReported(const QString& text);
 	// Undo took a prompt back: its text and pictures, for the input box.
 	void draftRestored(const QString& text, const QList<refgui::proto::NamedImage>& images);
+	void aboutToMaterialize();
+	void materialized();
+	void messagesEvicted(const QStringList& messageIds);
 
 private:
 	// How long a request or question is shown before the keys answer it: the user may still be typing.
@@ -190,6 +200,7 @@ private:
 	QCoro::Task<bool> awaitAndReport(QCoro::Task<refgui::client::Result<T>> request, std::function<void()> onFailure = {});
 	QCoro::Task<> sendPrompt(QString text);
 	QCoro::Task<> sendAbort();
+	QCoro::Task<> sendRetryNow();
 	QCoro::Task<> fetchOlder();
 	QCoro::Task<> sendUndo(std::optional<QString> messageId);
 	QCoro::Task<> sendPermission(QString callId, bool allow, bool always);

@@ -2,6 +2,7 @@
 #include "session/conversation_model.h"
 
 #include "session/markdown_text.h"
+#include "session/layout_estimator.h"
 
 #include <QDateTime>
 
@@ -73,6 +74,11 @@ QList<int> changedRoles(const Block& before, const Block& after)
 		{Role::HumanRole, before.human != after.human},
 		{Role::ExpandedRole, before.kind != after.kind || before.sourceKind != after.sourceKind
 			|| (before.kind == Block::Kind::Reasoning && before.streaming != after.streaming)},
+		{Role::SeqRole, before.seq != after.seq},
+		{Role::EstimatedHeightRole, before.kind == Block::Kind::Skeleton || after.kind == Block::Kind::Skeleton},
+		{Role::SkeletonPartsRole, before.skeletonMeta != after.skeletonMeta},
+		{Role::MessageRoleRole, before.skeletonMeta != after.skeletonMeta},
+		{Role::HasErrorRole, before.skeletonMeta != after.skeletonMeta},
 	};
 	QList<int> roles;
 	for(const auto& [role, differs] : differences)
@@ -184,6 +190,7 @@ bool ConversationModel::isExpandedByDefault(const Block& block) const
 	case Block::Kind::Error:
 	case Block::Kind::Image:
 	case Block::Kind::Meta:
+	case Block::Kind::Skeleton:
 		return false;
 	}
 	Q_UNREACHABLE_RETURN(false);
@@ -250,9 +257,13 @@ QVariant ConversationModel::data(const QModelIndex& index, int role) const
 	case SenderRole:
 		return block.sender;
 	case OpensTurnRole:
+		if(block.kind == Block::Kind::Skeleton && block.skeletonMeta)
+		{
+			const QString& sk = block.skeletonMeta->sourceKind;
+			const bool isTurnSource = sk.isEmpty() || sk == "human"_L1 || sk == "peer"_L1 || sk == "spawn"_L1;
+			return index.row() > 0 && block.skeletonMeta->role == proto::Role::User && isTurnSource;
+		}
 		return index.row() > 0 && opensTurn(block);
-	case TimeRole:
-		return block.time;
 	case ToolNameRole:
 		return block.toolName;
 	case PurposeRole:
@@ -307,6 +318,20 @@ QVariant ConversationModel::data(const QModelIndex& index, int role) const
 		return isExpanded(block);
 	case ShowAllRole:
 		return m_shownAll.contains({block.messageId, block.partIndex});
+	case SeqRole:
+		return static_cast<qulonglong>(block.seq);
+	case EstimatedHeightRole:
+		return estimatedHeightFor(block);
+	case SkeletonPartsRole:
+		return block.skeletonMeta ? LayoutEstimator::skeletonParts(*block.skeletonMeta) : QVariantList{};
+	case MessageRoleRole:
+		if(block.skeletonMeta)
+		{
+			return block.skeletonMeta->role == proto::Role::User ? u"user"_s : u"assistant"_s;
+		}
+		return QString();
+	case HasErrorRole:
+		return block.skeletonMeta ? block.skeletonMeta->hasError : false;
 	default:
 		return {};
 	}
@@ -400,24 +425,98 @@ QHash<int, QByteArray> ConversationModel::roleNames() const
 		{ContextStartRole, "contextStart"},
 		{ExpandedRole, "expanded"},
 		{ShowAllRole, "showAll"},
+		{SeqRole, "seq"},
+		{EstimatedHeightRole, "estimatedHeight"},
+		{SkeletonPartsRole, "skeletonParts"},
+		{MessageRoleRole, "messageRole"},
+		{HasErrorRole, "hasError"},
 	};
 }
-
-ConversationModel::Built ConversationModel::buildNodes(const QList<proto::Message>& messages)
+ConversationModel::Built ConversationModel::buildNodes(const QList<proto::Message>& messages,
+                                                             quint64 totalMessages,
+                                                             quint64 startSeq,
+                                                             const QList<proto::MessageLayoutMeta>& layoutMetas)
 {
 	Built built;
-	for(const proto::Message& message : messages)
+	if(totalMessages == 0 && layoutMetas.isEmpty())
 	{
-		MessageNode node = makeNode(message);
-		built.rows += buildRows(node);
-		built.nodes.append(std::move(node));
+		for(qsizetype i = 0; i < messages.size(); ++i)
+		{
+			MessageNode node = makeNode(messages.at(i));
+			QList<Block> rows = buildRows(node);
+			for(Block& b : rows)
+			{
+				b.seq = static_cast<quint64>(i);
+			}
+			built.rows += rows;
+			built.nodes.append(std::move(node));
+		}
+		return built;
+	}
+
+	const quint64 total = std::max<quint64>(totalMessages, startSeq + static_cast<quint64>(messages.size()));
+	QHash<quint64, proto::MessageLayoutMeta> metaBySeq;
+	metaBySeq.reserve(layoutMetas.size());
+	for(const proto::MessageLayoutMeta& meta : layoutMetas)
+	{
+		metaBySeq.insert(meta.seq, meta);
+	}
+
+	built.nodes.reserve(static_cast<qsizetype>(total));
+	for(quint64 seq = 0; seq < total; ++seq)
+	{
+		if(seq >= startSeq && seq < startSeq + static_cast<quint64>(messages.size()))
+		{
+			const proto::Message& msg = messages.at(static_cast<qsizetype>(seq - startSeq));
+			MessageNode node = makeNode(msg);
+			if(auto it = metaBySeq.constFind(seq); it != metaBySeq.constEnd())
+			{
+				node.layoutMeta = *it;
+			}
+			else
+			{
+				node.layoutMeta = LayoutEstimator::computeMeta(seq, msg);
+			}
+			QList<Block> rows = buildRows(node);
+			for(Block& b : rows)
+			{
+				b.seq = seq;
+			}
+			built.rows += rows;
+			built.nodes.append(std::move(node));
+		}
+		else
+		{
+			proto::MessageLayoutMeta meta = metaBySeq.value(seq, proto::MessageLayoutMeta{
+				.seq = seq,
+				.id = u"placeholder-%1"_s.arg(seq),
+				.role = proto::Role::Assistant,
+				.sourceKind = {},
+				.hasError = false,
+				.parts = {},
+			});
+			MessageNode node = makePlaceholderNode(std::move(meta));
+			Block skel;
+			skel.kind = Block::Kind::Skeleton;
+			skel.messageId = node.header.id;
+			skel.partIndex = -1;
+			skel.seq = seq;
+			skel.sourceKind = node.layoutMeta ? sourceKindFromName(node.layoutMeta->sourceKind) : std::nullopt;
+			skel.skeletonMeta = node.layoutMeta;
+			node.ownRows = 1;
+			built.rows.append(std::move(skel));
+			built.nodes.append(std::move(node));
+		}
 	}
 	return built;
 }
 
-void ConversationModel::reset(const QList<proto::Message>& messages)
+void ConversationModel::reset(const QList<proto::Message>& messages,
+                              quint64 totalMessages,
+                              quint64 startSeq,
+                              const QList<proto::MessageLayoutMeta>& layoutMetas)
 {
-	auto [nodes, rows] = buildNodes(messages);
+	auto [nodes, rows] = buildNodes(messages, totalMessages, startSeq, layoutMetas);
 
 	beginResetModel();
 	m_messages = std::move(nodes);
@@ -427,9 +526,12 @@ void ConversationModel::reset(const QList<proto::Message>& messages)
 	refreshDerivedState();
 }
 
-void ConversationModel::replaceHistory(const QList<proto::Message>& messages)
+void ConversationModel::replaceHistory(const QList<proto::Message>& messages,
+                                       quint64 totalMessages,
+                                       quint64 startSeq,
+                                       const QList<proto::MessageLayoutMeta>& layoutMetas)
 {
-	auto [nodes, rows] = buildNodes(messages);
+	auto [nodes, rows] = buildNodes(messages, totalMessages, startSeq, layoutMetas);
 
 	const qsizetype comparable = std::min(m_rows.size(), rows.size());
 	qsizetype kept = 0;
@@ -458,7 +560,6 @@ void ConversationModel::replaceHistory(const QList<proto::Message>& messages)
 	}
 	refreshDerivedState();
 }
-
 void ConversationModel::prependMessages(const QList<proto::Message>& older)
 {
 	auto [nodes, rows] = buildNodes(older);
@@ -501,20 +602,25 @@ void ConversationModel::setMessage(const proto::Message& message)
 		return;
 	}
 	beginInsertRows({}, static_cast<int>(first), static_cast<int>(first + rows.size()) - 1);
+	const quint64 seq = static_cast<quint64>(m_messages.size());
 	m_messages.append(std::move(node));
-	m_rows += rows;
+	QList<Block> tagged = rows;
+	for(Block& b : tagged)
+	{
+		b.seq = seq;
+	}
+	m_rows += tagged;
 	endInsertRows();
 	refreshDerivedState();
 }
-
 bool ConversationModel::setPart(const QString& messageId, qsizetype index, const proto::Part& part)
 {
 	const qsizetype messageIndex = indexOf(messageId);
-	if(messageIndex < 0)
+	if(messageIndex < 0 || !m_messages.at(messageIndex).materialized)
 	{
 		return false;
 	}
-
+	m_messages[messageIndex].layoutMeta.reset();
 	// A gap in the indexes should not happen; appending keeps the order.
 	QList<PartNode>& parts = m_messages[messageIndex].parts;
 	const qsizetype partIndex = std::min(index, parts.size());
@@ -533,11 +639,11 @@ bool ConversationModel::setPart(const QString& messageId, qsizetype index, const
 bool ConversationModel::appendDelta(const QString& messageId, qsizetype index, const proto::Delta& delta)
 {
 	const qsizetype messageIndex = indexOf(messageId);
-	if(messageIndex < 0)
+	if(messageIndex < 0 || !m_messages.at(messageIndex).materialized)
 	{
 		return false;
 	}
-
+	m_messages[messageIndex].layoutMeta.reset();
 	QList<PartNode>& parts = m_messages[messageIndex].parts;
 	while(parts.size() < index)
 	{
@@ -666,7 +772,7 @@ void ConversationModel::resolvePermission(const QString& callId)
 std::optional<QString> ConversationModel::partText(const QString& messageId, qsizetype index) const
 {
 	const qsizetype messageIndex = indexOf(messageId);
-	if(messageIndex < 0 || index >= m_messages.at(messageIndex).parts.size())
+	if(messageIndex < 0 || !m_messages.at(messageIndex).materialized || index >= m_messages.at(messageIndex).parts.size())
 	{
 		return std::nullopt;
 	}
@@ -685,9 +791,12 @@ std::optional<QString> ConversationModel::partText(const QString& messageId, qsi
 qsizetype ConversationModel::partCount(const QString& messageId) const
 {
 	const qsizetype messageIndex = indexOf(messageId);
-	return messageIndex < 0 ? -1 : m_messages.at(messageIndex).parts.size();
+	if(messageIndex < 0 || !m_messages.at(messageIndex).materialized)
+	{
+		return -1;
+	}
+	return m_messages.at(messageIndex).parts.size();
 }
-
 std::optional<QString> ConversationModel::messageText(const QString& messageId) const
 {
 	const qsizetype messageIndex = indexOf(messageId);
@@ -776,9 +885,12 @@ void ConversationModel::setDefaultExpansion(bool reasoning, bool tools)
 		{
 			emitRoleChanged(row, ExpandedRole);
 		}
+		else if(block.kind == Block::Kind::Skeleton)
+		{
+			emitRoleChanged(row, EstimatedHeightRole);
+		}
 	}
 }
-
 void ConversationModel::toggleExpanded(int row)
 {
 	if(row < 0 || row >= m_rows.size())
@@ -817,13 +929,15 @@ void ConversationModel::refreshContext()
 	qsizetype lastCompaction = -1;
 	for(qsizetype i = 0; i < m_messages.size(); ++i)
 	{
-		const proto::Message& header = m_messages.at(i).header;
-		if(header.role == proto::Role::User && header.source.kind == proto::MessageSource::Kind::Compaction)
+		const MessageNode& node = m_messages.at(i);
+		const bool isCompaction = node.materialized
+			? (node.header.role == proto::Role::User && node.header.source.kind == proto::MessageSource::Kind::Compaction)
+			: (node.layoutMeta && node.layoutMeta->role == proto::Role::User && node.layoutMeta->sourceKind == "compaction"_L1);
+		if(isCompaction)
 		{
 			lastCompaction = i;
 		}
 	}
-
 	qsizetype row = 0;
 	for(qsizetype i = 0; i < m_messages.size(); ++i)
 	{
@@ -856,6 +970,7 @@ void ConversationModel::refreshContext()
 ConversationModel::MessageNode ConversationModel::makeNode(proto::Message message)
 {
 	MessageNode node;
+	node.materialized = true;
 	for(proto::Part& part : message.parts)
 	{
 		node.parts.append({.part = std::move(part)});
@@ -865,6 +980,326 @@ ConversationModel::MessageNode ConversationModel::makeNode(proto::Message messag
 	return node;
 }
 
+ConversationModel::MessageNode ConversationModel::makePlaceholderNode(proto::MessageLayoutMeta meta)
+{
+	MessageNode node;
+	node.materialized = false;
+	node.header.id = meta.id;
+	node.header.role = meta.role;
+	if(const auto sk = sourceKindFromName(meta.sourceKind))
+	{
+		node.header.source.kind = *sk;
+	}
+	node.header.timeEnd = 0;
+	node.layoutMeta = std::move(meta);
+	node.ownRows = 1;
+	return node;
+}
+
+Block ConversationModel::makeSkeletonBlock(const proto::MessageLayoutMeta& meta) const
+{
+	Block block;
+	block.kind = Block::Kind::Skeleton;
+	block.messageId = meta.id;
+	block.partIndex = -1;
+	block.seq = meta.seq;
+	block.sourceKind = sourceKindFromName(meta.sourceKind);
+	block.skeletonMeta = meta;
+	return block;
+}
+
+proto::Message ConversationModel::materializeHeaderAndParts(const MessageNode& node)
+{
+	proto::Message msg = node.header;
+	msg.parts.reserve(node.parts.size());
+	for(const PartNode& p : node.parts)
+	{
+		msg.parts.append(p.part);
+	}
+	return msg;
+}
+
+double ConversationModel::estimatedHeightFor(const Block& block) const
+{
+	if(block.kind != Block::Kind::Skeleton || !block.skeletonMeta)
+	{
+		return 0.0;
+	}
+	return LayoutEstimator::estimateMessageHeight(*block.skeletonMeta, m_columnWidth, m_reasoningExpanded, m_toolsExpanded);
+}
+
+void ConversationModel::setColumnWidth(double width)
+{
+	if(width <= 0.0 || qAbs(width - m_columnWidth) < 0.5)
+	{
+		return;
+	}
+	m_columnWidth = width;
+	emitSkeletonHeightsChanged();
+}
+
+void ConversationModel::emitSkeletonHeightsChanged()
+{
+	for(qsizetype row = 0; row < m_rows.size(); ++row)
+	{
+		if(m_rows.at(row).kind == Block::Kind::Skeleton)
+		{
+			emitRoleChanged(row, EstimatedHeightRole);
+		}
+	}
+}
+
+bool ConversationModel::hasPlaceholders() const
+{
+	return std::ranges::any_of(m_messages, [](const MessageNode& n) { return !n.materialized; });
+}
+
+qsizetype ConversationModel::residentCount() const
+{
+	return std::ranges::count_if(m_messages, [](const MessageNode& n) { return n.materialized; });
+}
+
+int ConversationModel::firstRowForSeq(quint64 seq) const
+{
+	if(seq >= static_cast<quint64>(m_messages.size()))
+	{
+		return -1;
+	}
+	return static_cast<int>(firstRowOf(static_cast<qsizetype>(seq)));
+}
+
+int ConversationModel::seqForRow(int row) const
+{
+	if(row < 0 || row >= m_rows.size())
+	{
+		return -1;
+	}
+	qsizetype cursor = 0;
+	for(qsizetype i = 0; i < m_messages.size(); ++i)
+	{
+		cursor += m_messages.at(i).rows();
+		if(row < cursor)
+		{
+			return static_cast<int>(i);
+		}
+	}
+	return -1;
+}
+
+std::optional<std::pair<quint64, quint64>> ConversationModel::missingRangeAround(quint64 visibleStart,
+                                                                                 quint64 visibleEnd,
+                                                                                 qsizetype pageSize) const
+{
+	if(m_messages.isEmpty() || pageSize <= 0)
+	{
+		return std::nullopt;
+	}
+	const qsizetype total = m_messages.size();
+	const qsizetype vStart = std::clamp<qsizetype>(static_cast<qsizetype>(visibleStart), 0, total - 1);
+	const qsizetype vEnd = std::clamp<qsizetype>(static_cast<qsizetype>(visibleEnd), vStart, total - 1);
+	constexpr qsizetype Lookahead = 20;
+	const qsizetype scanStart = std::max<qsizetype>(0, vStart - Lookahead);
+	const qsizetype scanEnd = std::min<qsizetype>(total - 1, vEnd + Lookahead);
+
+	qsizetype firstMissing = -1;
+	qsizetype lastMissing = -1;
+	for(qsizetype i = scanStart; i <= scanEnd; ++i)
+	{
+		if(!m_messages.at(i).materialized)
+		{
+			if(firstMissing < 0)
+			{
+				firstMissing = i;
+			}
+			lastMissing = i;
+		}
+	}
+	if(firstMissing < 0)
+	{
+		return std::nullopt;
+	}
+
+	const qsizetype center = (firstMissing + lastMissing) / 2;
+	qsizetype fetchStart = std::max<qsizetype>(0, center - pageSize / 2);
+	qsizetype fetchEnd = std::min<qsizetype>(total, fetchStart + pageSize);
+	if(fetchEnd - fetchStart < pageSize && fetchStart > 0)
+	{
+		fetchStart = std::max<qsizetype>(0, fetchEnd - pageSize);
+	}
+	if(firstMissing < fetchStart)
+	{
+		fetchStart = firstMissing;
+		fetchEnd = std::min<qsizetype>(total, fetchStart + pageSize);
+	}
+	else if(lastMissing >= fetchEnd)
+	{
+		fetchEnd = std::min<qsizetype>(total, lastMissing + 1);
+		fetchStart = std::max<qsizetype>(0, fetchEnd - pageSize);
+	}
+	while(fetchStart < fetchEnd && m_messages.at(fetchStart).materialized)
+	{
+		++fetchStart;
+	}
+	while(fetchEnd > fetchStart && m_messages.at(fetchEnd - 1).materialized)
+	{
+		--fetchEnd;
+	}
+	if(fetchStart >= fetchEnd)
+	{
+		return std::nullopt;
+	}
+	return std::pair<quint64, quint64>{static_cast<quint64>(fetchStart), static_cast<quint64>(fetchEnd)};
+}
+
+void ConversationModel::materializeRange(quint64 startSeq, const QList<proto::Message>& messages)
+{
+	if(messages.isEmpty())
+	{
+		return;
+	}
+	bool anyChanged = false;
+	for(qsizetype i = 0; i < messages.size(); ++i)
+	{
+		const qsizetype slot = static_cast<qsizetype>(startSeq) + i;
+		if(slot < 0 || slot >= m_messages.size())
+		{
+			break;
+		}
+		const proto::Message& incoming = messages.at(i);
+		if(m_messages.at(slot).materialized && m_messages.at(slot).header.id == incoming.id)
+		{
+			continue;
+		}
+		std::optional<proto::MessageLayoutMeta> cachedMeta = m_messages.at(slot).layoutMeta;
+		MessageNode node = makeNode(incoming);
+		node.layoutMeta = cachedMeta ? std::move(cachedMeta) : std::optional(LayoutEstimator::computeMeta(static_cast<quint64>(slot), incoming));
+		QList<Block> rows = buildRows(node);
+		for(Block& b : rows)
+		{
+			b.seq = static_cast<quint64>(slot);
+		}
+		const qsizetype first = firstRowOf(slot);
+		const qsizetype oldRows = m_messages.at(slot).rows();
+		m_messages[slot] = std::move(node);
+		replaceRows(first, oldRows, rows);
+		if(slot + 1 < m_messages.size())
+		{
+			notifyOpensTurn(first + rows.size());
+		}
+		anyChanged = true;
+	}
+	if(anyChanged)
+	{
+		refreshDerivedState();
+	}
+}
+
+QStringList ConversationModel::evictSlots(const QList<qsizetype>& indices)
+{
+	if(indices.isEmpty())
+	{
+		return {};
+	}
+	QList<qsizetype> sorted = indices;
+	std::ranges::sort(sorted, std::greater<>{});
+	QStringList evictedIds;
+	for(const qsizetype slot : sorted)
+	{
+		if(slot < 0 || slot >= m_messages.size())
+		{
+			continue;
+		}
+		MessageNode& node = m_messages[slot];
+		if(!node.materialized || !isEnded(node.header))
+		{
+			continue;
+		}
+		if(!node.layoutMeta)
+		{
+			node.layoutMeta = LayoutEstimator::computeMeta(static_cast<quint64>(slot), materializeHeaderAndParts(node));
+		}
+		evictedIds.append(node.header.id);
+		const qsizetype first = firstRowOf(slot);
+		const qsizetype oldRows = node.rows();
+		const Block skeleton = makeSkeletonBlock(*node.layoutMeta);
+		node = makePlaceholderNode(*node.layoutMeta);
+		replaceRows(first, oldRows, {skeleton});
+		if(slot + 1 < m_messages.size())
+		{
+			notifyOpensTurn(first + 1);
+		}
+	}
+	if(!evictedIds.isEmpty())
+	{
+		refreshDerivedState();
+		emit messagesEvicted(evictedIds);
+	}
+	return evictedIds;
+}
+
+QStringList ConversationModel::evictOutside(quint64 visibleStart, quint64 visibleEnd)
+{
+	if(m_messages.isEmpty())
+	{
+		return {};
+	}
+	const qsizetype total = m_messages.size();
+	const qsizetype vStart = std::clamp<qsizetype>(static_cast<qsizetype>(visibleStart), 0, total - 1);
+	const qsizetype vEnd = std::clamp<qsizetype>(static_cast<qsizetype>(visibleEnd), vStart, total - 1);
+	const qsizetype keepStart = std::max<qsizetype>(0, vStart - EvictMargin);
+	const qsizetype keepEnd = std::min<qsizetype>(total - 1, vEnd + EvictMargin);
+
+	QList<qsizetype> toEvict;
+	QList<qsizetype> remaining;
+	for(qsizetype i = 0; i < total; ++i)
+	{
+		const MessageNode& node = m_messages.at(i);
+		if(!node.materialized || !isEnded(node.header))
+		{
+			continue;
+		}
+		if(i < keepStart || i > keepEnd)
+		{
+			toEvict.append(i);
+		}
+		else if(i < vStart || i > vEnd)
+		{
+			remaining.append(i);
+		}
+	}
+
+	const qsizetype residentAfterFirstPass = residentCount() - toEvict.size();
+	if(residentAfterFirstPass > MaxResidentMessages && !remaining.isEmpty())
+	{
+		const qsizetype midpoint = (vStart + vEnd) / 2;
+		std::ranges::sort(remaining, [midpoint](qsizetype a, qsizetype b) { return std::abs(a - midpoint) > std::abs(b - midpoint); });
+		const qsizetype excess = std::min(residentAfterFirstPass - MaxResidentMessages, remaining.size());
+		for(qsizetype i = 0; i < excess; ++i)
+		{
+			toEvict.append(remaining.at(i));
+		}
+	}
+	return evictSlots(toEvict);
+}
+
+QStringList ConversationModel::evictOldTail(qsizetype keepCount)
+{
+	if(m_messages.size() <= keepCount)
+	{
+		return {};
+	}
+	const qsizetype cutoff = std::max<qsizetype>(0, m_messages.size() - keepCount);
+	QList<qsizetype> toEvict;
+	for(qsizetype i = 0; i < cutoff; ++i)
+	{
+		const MessageNode& node = m_messages.at(i);
+		if(node.materialized && isEnded(node.header))
+		{
+			toEvict.append(i);
+		}
+	}
+	return evictSlots(toEvict);
+}
 // Most updates are at the end of the conversation, so search from there.
 qsizetype ConversationModel::indexOf(const QString& messageId) const
 {
@@ -967,20 +1402,32 @@ void ConversationModel::refresh(qsizetype messageIndex)
 void ConversationModel::replaceMessage(qsizetype messageIndex, proto::Message message)
 {
 	const qsizetype first = firstRowOf(messageIndex);
+	const qsizetype oldRows = m_messages.at(messageIndex).rows();
+	const bool wasPlaceholder = !m_messages.at(messageIndex).materialized;
 	const qsizetype oldPartRows = m_messages.at(messageIndex).partRows;
 	const qsizetype oldOwnRows = m_messages.at(messageIndex).ownRows;
 
 	MessageNode node = makeNode(std::move(message));
-	const QList<Block> rows = buildRows(node);
+	QList<Block> rows = buildRows(node);
+	for(Block& b : rows)
+	{
+		b.seq = static_cast<quint64>(messageIndex);
+	}
 	// Parts and the rows after them are diffed apart, so a new part is inserted between them
 	// instead of turning the last row into something else.
 	const qsizetype partRows = node.partRows;
 	m_messages[messageIndex] = std::move(node);
-	replaceRows(first, oldPartRows, rows.first(partRows));
-	replaceRows(first + partRows, oldOwnRows, rows.mid(partRows));
+	if(wasPlaceholder)
+	{
+		replaceRows(first, oldRows, rows);
+	}
+	else
+	{
+		replaceRows(first, oldPartRows, rows.first(partRows));
+		replaceRows(first + partRows, oldOwnRows, rows.mid(partRows));
+	}
 	refreshDerivedState();
 }
-
 void ConversationModel::feedPart(qsizetype messageIndex, qsizetype partIndex, const QString& text)
 {
 	MessageNode& node = m_messages[messageIndex];

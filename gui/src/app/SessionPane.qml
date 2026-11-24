@@ -71,6 +71,7 @@ Item {
 		layoutWidth: pane.layoutWidth
 		sidePadding: pane.columnPadding
 		sessionId: pane.session.sessionId
+		session: pane.session
 		permissionCount: pane.session.permissionCount
 		moreBefore: pane.session.moreBefore
 		loadingOlder: pane.session.loadingOlder
@@ -90,6 +91,17 @@ Item {
 		onUndoRequested: messageId => pane.session.undo(messageId)
 		onCopyRequested: messageId => pane.session.copyMessage(messageId)
 		onPermissionAnswered: (callId, allow, always) => pane.session.permissionReply(callId, allow, always)
+	}
+
+	Connections {
+		target: pane.session
+
+		function onAboutToMaterialize() {
+			chat.prepareMaterialize()
+		}
+		function onMaterialized() {
+			chat.finishMaterialize()
+		}
 	}
 
 	// Takes the keyboard from the input box once the keys may answer a permission request

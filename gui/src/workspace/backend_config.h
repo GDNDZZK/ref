@@ -47,6 +47,8 @@ public:
 	Q_INVOKABLE void refreshMcp();
 	// Replaces the cached config directly (e.g. from ReloadConfig's response) and refreshes MCP.
 	void apply(proto::ServerConfig config);
+\t// Clears cached config and MCP status (e.g. on backend switch).
+\tvoid reset();
 	// True while a ReloadConfig request started here is awaiting its response.
 	bool isReloading() const { return m_reloadsInFlight > 0; }
 	// Runs ReloadConfig on the backend and updates this cache + MCP status.

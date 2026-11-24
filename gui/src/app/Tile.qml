@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Effects
 import RefGui
 // One session in split view: a header with its state and the session pane below. The pane is
 // the same item while the tile is zoomed, so scroll position and streaming survive.
@@ -59,9 +58,6 @@ Item {
 	property bool resizingLayout: false
 	property real settledLayoutWidth: 0
 	readonly property int resizeSettleMs: 130
-	readonly property real resizeFadeOpacity: 0.15
-	readonly property int resizeBlurMax: 16
-	readonly property real resizeBlurStrength: 0.6
 	readonly property real pixelScale: Math.max(1, (Screen.devicePixelRatio || 1) * UiScale.factor)
 	x: expanded ? zoomRect.x : placedSlot.x
 	y: expanded ? zoomRect.y : placedSlot.y
@@ -336,17 +332,40 @@ Item {
 						Workspace.zoomTile(tile.sessionId)
 				}
 			}
+			TapHandler {
+				acceptedButtons: Qt.RightButton
+				onTapped: point => {
+					const items = []
+					const parentId = tile.facts.parentId ?? ""
+					if (parentId !== "") {
+						const creatorName = tile.facts.creatorName || parentId
+						items.push({text: qsTr("Filter tiles by %1").arg(creatorName), action: "filterCreator", targetId: parentId})
+					}
+					items.push({text: qsTr("Filter tiles spawned by %1").arg(tile.facts.displayTitle || tile.sessionId), action: "filterSpawned", targetId: tile.sessionId})
+					items.push({text: qsTr("Filter spawned history"), action: "filterHistory", targetId: tile.sessionId})
+					if (Workspace.splitFilter !== "all")
+						items.push({text: qsTr("Show all tiles"), action: "showAll", targetId: ""})
+					headerMenu.entries = items
+					headerMenu.openAt(point.position)
+				}
+			}
+			ContextMenu {
+				id: headerMenu
+				onTriggered: index => {
+					const entry = headerMenu.entries[index]
+					if (!entry)
+						return
+					if (entry.action === "filterCreator" || entry.action === "filterSpawned")
+						Workspace.setSplitFilter(entry.targetId)
+					else if (entry.action === "filterHistory")
+						Workspace.filterHistoryByCreator(entry.targetId)
+					else if (entry.action === "showAll")
+						Workspace.setSplitFilter("all")
+				}
+			}
 		}
 		SessionPane {
 			id: pane
-			readonly property bool supportsBlur: GraphicsInfo.api !== GraphicsInfo.Software
-			property real resizeBlurAmount: tile.resizingLayout ? tile.resizeBlurStrength : 0
-			Behavior on resizeBlurAmount {
-				NumberAnimation {
-					duration: tile.resizingLayout ? Motion.quick : Motion.standard
-					easing.type: tile.resizingLayout ? Easing.OutCubic : Easing.OutExpo
-				}
-			}
 			anchors {
 				top: header.bottom
 				left: parent.left
@@ -371,23 +390,7 @@ Item {
 			}
 			keysEnabled: tile.focused || tile.expanded
 			composerShown: tile.focused || tile.expanded
-			opacity: tile.resizingLayout ? tile.resizeFadeOpacity : 1
-			Behavior on opacity {
-				NumberAnimation {
-					duration: tile.resizingLayout ? Motion.quick : Motion.standard
-					easing.type: tile.resizingLayout ? Easing.OutCubic : Easing.OutExpo
-				}
-			}
-			layer.enabled: pane.supportsBlur && (tile.resizingLayout || pane.resizeBlurAmount > 0.01)
-			layer.smooth: true
-			layer.textureSize: Qt.size(Math.max(1, Math.ceil(pane.width * tile.pixelScale)), Math.max(1, Math.ceil(pane.height * tile.pixelScale)))
-			layer.effect: MultiEffect {
-				blurEnabled: true
-				blurMax: tile.resizeBlurMax
-				blur: pane.resizeBlurAmount
-			}
 		}
-
 		// A click anywhere in an unfocused pane focuses the tile, and its input box. The overlay
 		// sits in front so that it sees the press first while letting selectable text and buttons
 		// handle the click as well.

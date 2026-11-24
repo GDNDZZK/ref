@@ -68,6 +68,7 @@ private slots:
 	void exposesEditWarningsFromFixture();
 	void attachesAndClearsPermissionPreview();
 	void splitsMarkdownTablesAndStreamsRows();
+	void virtualizedPlaceholdersMaterializeAndEvict();
 };
 
 void TestConversationModel::splitsAssistantTextIntoBlocks()
@@ -716,6 +717,75 @@ void TestConversationModel::splitsMarkdownTablesAndStreamsRows()
 	model.appendDelta(u"a2"_s, 0, {Delta::Kind::Text, u"```cpp\nint x = 0;\n```"_s});
 	QVERIFY(!roleOf(model, baseRow, ConversationModel::StreamingRole).toBool());
 	QCOMPARE(roleOf(model, baseRow + 1, ConversationModel::KindRole).toString(), u"code"_s);
+}
+
+void TestConversationModel::virtualizedPlaceholdersMaterializeAndEvict()
+{
+	ConversationModel model;
+	QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
+
+	constexpr int Total = 420;
+	constexpr int StartSeq = 320;
+	QList<refgui::proto::MessageLayoutMeta> metas;
+	for(int i = 0; i < StartSeq; ++i)
+	{
+		metas.append(refgui::proto::MessageLayoutMeta{
+			.seq = static_cast<quint64>(i),
+			.id = u"m_%1"_s.arg(i),
+			.role = (i % 2 == 0) ? refgui::proto::Role::User : refgui::proto::Role::Assistant,
+			.sourceKind = u"human"_s,
+			.parts = {refgui::proto::PartLayoutMeta{.kind = u"text"_s, .chars = 240, .lines = 3}},
+		});
+	}
+	QList<refgui::proto::Message> tail;
+	for(int i = StartSeq; i < Total; ++i)
+	{
+		const QString id = u"m_%1"_s.arg(i);
+		tail.append(i % 2 == 0 ? user(id, u"hello"_s) : assistant(id, {text(u"reply"_s)}));
+	}
+
+	model.reset(tail, Total, StartSeq, metas);
+	QCOMPARE(model.slotCount(), Total);
+	QCOMPARE(model.residentCount(), 100);
+	QVERIFY(model.hasPlaceholders());
+	QCOMPARE(model.index(0).data(ConversationModel::KindRole).toString(), u"skeleton"_s);
+
+	const double hWide = model.index(0).data(ConversationModel::EstimatedHeightRole).toDouble();
+	QSignalSpy heightChanged(&model, &QAbstractItemModel::dataChanged);
+	model.setColumnWidth(260.0);
+	QVERIFY(!heightChanged.isEmpty());
+	const double hNarrow = model.index(0).data(ConversationModel::EstimatedHeightRole).toDouble();
+	QVERIFY(hNarrow >= hWide);
+
+	// Missing range around seq 10..20 returns a bounded page.
+	const auto missing = model.missingRangeAround(10, 20, ConversationModel::PageSize);
+	QVERIFY(missing.has_value());
+	QVERIFY(missing->first <= 10 && missing->second > 20);
+
+	// Materialize 300 messages at 0..300 so resident count is 400 -> evictOutside caps at 300 and drops outside [v-150, v+150].
+	QList<refgui::proto::Message> block0;
+	for(int i = 0; i < 300; ++i)
+	{
+		const QString id = u"m_%1"_s.arg(i);
+		block0.append(i % 2 == 0 ? user(id, u"hello"_s) : assistant(id, {text(u"reply"_s)}));
+	}
+	model.materializeRange(0, block0);
+	QCOMPARE(model.residentCount(), 400);
+
+	QSignalSpy evictedSpy(&model, &ConversationModel::messagesEvicted);
+	const QStringList evicted = model.evictOutside(10, 20);
+	QVERIFY(!evicted.isEmpty());
+	QVERIFY(model.residentCount() <= ConversationModel::MaxResidentMessages);
+	QCOMPARE(evictedSpy.count(), 1);
+	// Tail at 400 should have been evicted back to skeleton.
+	const int row400 = model.firstRowForSeq(400);
+	QCOMPARE(model.index(row400).data(ConversationModel::KindRole).toString(), u"skeleton"_s);
+
+	// Materialize tail again and test evictOldTail(100)
+	model.materializeRange(StartSeq, tail);
+	model.evictOldTail(ConversationModel::TailKeepMessages);
+	QCOMPARE(model.residentCount(), ConversationModel::TailKeepMessages);
+	QCOMPARE(model.index(0).data(ConversationModel::KindRole).toString(), u"skeleton"_s);
 }
 
 QTEST_GUILESS_MAIN(TestConversationModel)

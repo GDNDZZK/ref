@@ -429,10 +429,139 @@ QJsonObject messages(const QString& sessionId, const QString& before, int limit)
 	return json;
 }
 
+QJsonObject messagesRange(const QString& sessionId, quint64 startSeq, quint64 endSeq, std::optional<int> limit)
+{
+	QJsonObject json = sessionOp(u"messages"_s, sessionId);
+	json.insert(u"start_seq"_s, static_cast<qint64>(startSeq));
+	json.insert(u"end_seq"_s, static_cast<qint64>(endSeq));
+	if(limit)
+	{
+		json.insert(u"limit"_s, *limit);
+	}
+	return json;
+}
+
 QJsonObject getImage(const QString& sessionId, const QString& imageId)
 {
 	QJsonObject json = sessionOp(u"get_image"_s, sessionId);
 	json.insert(u"image_id"_s, imageId);
+	return json;
+}
+
+QJsonObject retryNow(const QString& sessionId)
+{
+	return sessionOp(u"retry_now"_s, sessionId);
+}
+
+QJsonObject listGroups()
+{
+	return op(u"list_groups"_s);
+}
+
+QJsonObject stashAll(const std::optional<QString>& name)
+{
+	QJsonObject json = op(u"stash_all"_s);
+	if(name)
+	{
+		json.insert(u"name"_s, *name);
+	}
+	return json;
+}
+
+QJsonObject createGroup(const std::optional<QString>& name, const QStringList& sessionIds, bool stashLive)
+{
+	QJsonObject json = op(u"create_group"_s);
+	if(name)
+	{
+		json.insert(u"name"_s, *name);
+	}
+	json.insert(u"session_ids"_s, QJsonArray::fromStringList(sessionIds));
+	json.insert(u"stash_live"_s, stashLive);
+	return json;
+}
+
+QJsonObject renameGroup(const QString& groupId, const QString& name)
+{
+	QJsonObject json = op(u"rename_group"_s);
+	json.insert(u"group_id"_s, groupId);
+	json.insert(u"name"_s, name);
+	return json;
+}
+
+QJsonObject setGroupLocked(const QString& groupId, bool locked)
+{
+	QJsonObject json = op(u"set_group_locked"_s);
+	json.insert(u"group_id"_s, groupId);
+	json.insert(u"locked"_s, locked);
+	return json;
+}
+
+QJsonObject deleteGroup(const QString& groupId)
+{
+	QJsonObject json = op(u"delete_group"_s);
+	json.insert(u"group_id"_s, groupId);
+	return json;
+}
+
+QJsonObject addToGroup(const QString& groupId, const QString& sessionId, const std::optional<quint32>& position, bool stashLive)
+{
+	QJsonObject json = op(u"add_to_group"_s);
+	json.insert(u"group_id"_s, groupId);
+	json.insert(u"session_id"_s, sessionId);
+	if(position)
+	{
+		json.insert(u"position"_s, static_cast<qint64>(*position));
+	}
+	json.insert(u"stash_live"_s, stashLive);
+	return json;
+}
+
+QJsonObject moveGroupMember(const std::optional<QString>& fromGroupId,
+                            const QString& toGroupId,
+                            const QString& sessionId,
+                            quint32 position,
+                            bool stashLive)
+{
+	QJsonObject json = op(u"move_group_member"_s);
+	if(fromGroupId)
+	{
+		json.insert(u"from_group_id"_s, *fromGroupId);
+	}
+	json.insert(u"to_group_id"_s, toGroupId);
+	json.insert(u"session_id"_s, sessionId);
+	json.insert(u"position"_s, static_cast<qint64>(position));
+	json.insert(u"stash_live"_s, stashLive);
+	return json;
+}
+
+QJsonObject removeFromGroup(const QString& groupId, const QString& sessionId)
+{
+	QJsonObject json = op(u"remove_from_group"_s);
+	json.insert(u"group_id"_s, groupId);
+	json.insert(u"session_id"_s, sessionId);
+	return json;
+}
+
+QJsonObject mergeGroups(const QString& sourceGroupId, const QString& targetGroupId)
+{
+	QJsonObject json = op(u"merge_groups"_s);
+	json.insert(u"source_group_id"_s, sourceGroupId);
+	json.insert(u"target_group_id"_s, targetGroupId);
+	return json;
+}
+
+QJsonObject restoreGroup(const QString& groupId)
+{
+	QJsonObject json = op(u"restore_group"_s);
+	json.insert(u"group_id"_s, groupId);
+	return json;
+}
+
+QJsonObject restoreGroupMember(const QString& groupId, const QString& sessionId)
+{
+	QJsonObject json = op(u"restore_group_member"_s);
+	json.insert(u"group_id"_s, groupId);
+	json.insert(u"session_id"_s, sessionId);
 	return json;
 }
 

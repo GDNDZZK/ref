@@ -53,5 +53,11 @@ Parsed<RemovedPrompt> parseRemovedPromptResult(const QJsonObject& result);     /
 Parsed<RemovedPrompt> parseUndoResult(const QJsonObject& result);              // undo; `removed` is always true
 Parsed<QStringList> parseFilesResult(const QJsonObject& result);               // list_files
 Parsed<QList<NamedImage>> parseNamedImages(const QJsonValue& images);          // `images` of remove_queued and undo
+Parsed<RetryNowResult> parseRetryNowResult(const QJsonObject& result);         // retry_now
+Parsed<QList<StashGroup>> parseGroupsResult(const QJsonObject& result);        // list_groups, rename/lock/delete/add/move/remove/merge
+Parsed<StashGroupResult> parseStashAllResult(const QJsonObject& result);       // stash_all
+Parsed<StashGroupResult> parseCreateGroupResult(const QJsonObject& result);    // create_group
+Parsed<RestoreGroupResult> parseRestoreGroupResult(const QJsonObject& result); // restore_group
+Parsed<RestoreGroupMemberResult> parseRestoreGroupMemberResult(const QJsonObject& result); // restore_group_member
 
 } // namespace refgui::proto

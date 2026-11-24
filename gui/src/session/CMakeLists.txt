@@ -12,6 +12,8 @@ qt_add_library(refgui_session STATIC
 	markdown_text.cpp
 	markdown_text.h
 	question_prompt.cpp
+	layout_estimator.cpp
+	layout_estimator.h
 	question_prompt.h
 	session_controller.cpp
 	session_controller.h

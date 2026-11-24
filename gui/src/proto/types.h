@@ -17,7 +17,7 @@ namespace refgui::proto
 {
 
 // Sent in Hello; the backend answers with its own version.
-constexpr int ProtocolVersion = 5;
+constexpr int ProtocolVersion = 6;
 
 // Written by ref-server to `<state dir>/instances/<pid>.json`.
 struct InstanceInfo
@@ -272,11 +272,59 @@ struct QuestionRequest
 	qint64 time = 0;
 };
 
+struct PartLayoutMeta
+{
+	QString kind; // "text" | "reasoning" | "image" | "tool"
+	quint32 chars = 0;
+	quint32 lines = 0;
+	quint16 codeBlocks = 0;
+	quint32 codeLines = 0;
+	quint16 tables = 0;
+	std::optional<QString> tool{};
+	quint16 toolLines = 0;
+	std::optional<quint32> width{};
+	std::optional<quint32> height{};
+
+	bool operator==(const PartLayoutMeta&) const = default;
+};
+
+struct MessageLayoutMeta
+{
+	quint64 seq = 0;
+	QString id;
+	Role role = Role::User;
+	QString sourceKind; // "human" | "peer" | "spawn" | "reminder" | "compaction" | "shell"
+	bool hasError = false;
+	QList<PartLayoutMeta> parts{};
+
+	bool operator==(const MessageLayoutMeta&) const = default;
+};
+
+struct StashMember
+{
+	QString sessionId;
+	quint32 position = 0;
+	SessionInfo info;
+};
+
+struct StashGroup
+{
+	QString id;
+	QString name;
+	bool locked = false;
+	qint64 createdAt = 0;
+	qint64 updatedAt = 0;
+	QList<StashMember> members{};
+};
+
 struct SessionSnapshot
 {
 	SessionInfo info;
 	QList<Message> messages; // the newest page
 	bool moreBefore = false;
+	quint64 totalMessages = 0;
+	quint64 startSeq = 0;
+	QList<MessageLayoutMeta> layoutMetas{};
 	QList<PermissionRequest> pendingPermissions{};
 	QList<QuestionRequest> pendingQuestions{};
 	QList<Message> queued{};
@@ -425,6 +473,9 @@ struct ResetEvent // the whole history replaced; only the newest page
 {
 	QList<Message> messages;
 	bool moreBefore = false;
+	quint64 totalMessages = 0;
+	quint64 startSeq = 0;
+	QList<MessageLayoutMeta> layoutMetas{};
 };
 struct PermissionEvent
 {
@@ -520,7 +571,12 @@ struct ConfigChangedFrame
 	QStringList warnings{};
 };
 
-using ServerFrame = std::variant<ResponseFrame, EventFrame, SessionsFrame, ToastFrame, NotifyFrame, ConfigChangedFrame>;
+struct GroupsChangedFrame
+{
+	QList<StashGroup> groups{};
+};
+
+using ServerFrame = std::variant<ResponseFrame, EventFrame, SessionsFrame, ToastFrame, NotifyFrame, ConfigChangedFrame, GroupsChangedFrame>;
 
 // ---- Results of requests --------------------------------------------------------------
 
@@ -548,6 +604,31 @@ struct MessagesPage
 {
 	QList<Message> messages;
 	bool moreBefore = false;
+	quint64 startSeq = 0;
+	quint64 endSeq = 0;
+};
+
+struct RetryNowResult
+{
+	bool retried = false;
+};
+
+struct StashGroupResult
+{
+	std::optional<StashGroup> group{};
+	QList<StashGroup> groups{};
+};
+
+struct RestoreGroupResult
+{
+	QStringList restoredIds{};
+	QList<StashGroup> groups{};
+};
+
+struct RestoreGroupMemberResult
+{
+	bool restored = false;
+	QList<StashGroup> groups{};
 };
 
 } // namespace refgui::proto

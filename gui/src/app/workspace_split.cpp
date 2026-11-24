@@ -120,6 +120,20 @@ QStringList Workspace::wantedTileIds() const
 		{
 			continue;
 		}
+		if(m_splitFilter == u"user"_s)
+		{
+			if(info.parent && !info.parent->isEmpty())
+			{
+				continue;
+			}
+		}
+		else if(m_splitFilter != u"all"_s && !m_splitFilter.isEmpty())
+		{
+			if(!info.parent || *info.parent != m_splitFilter)
+			{
+				continue;
+			}
+		}
 		// While unzooming, the backend still counts the session as foreground until detach is answered.
 		const bool free = info.attached == 0 || info.id == m_zoomed || m_unzooming.contains(info.id);
 		if(info.live && free)
@@ -134,6 +148,60 @@ QStringList Workspace::wantedTileIds() const
 		ids.append(info->id);
 	}
 	return ids;
+}
+
+QString Workspace::splitFilterLabel() const
+{
+	if(m_splitFilter.isEmpty() || m_splitFilter == u"all"_s || m_splitFilter == u"user"_s)
+	{
+		return {};
+	}
+	return m_directory.sessionLabel(m_splitFilter);
+}
+
+QVariantList Workspace::splitCreators() const
+{
+	QVariantList result;
+	QSet<QString> seen;
+	for(const refgui::proto::SessionInfo& info : m_directory.liveSessions())
+	{
+		if(info.id == currentId())
+		{
+			continue;
+		}
+		const bool free = info.attached == 0 || info.id == m_zoomed || m_unzooming.contains(info.id);
+		if(!info.live || !free || !info.parent || info.parent->isEmpty())
+		{
+			continue;
+		}
+		const QString& parentId = *info.parent;
+		if(seen.contains(parentId))
+		{
+			continue;
+		}
+		seen.insert(parentId);
+		result.append(QVariantMap{{u"id"_s, parentId}, {u"name"_s, m_directory.sessionLabel(parentId)}});
+	}
+	return result;
+}
+
+void Workspace::setSplitFilter(const QString& filter)
+{
+	QString next = filter.trimmed();
+	if(next.isEmpty())
+	{
+		next = u"all"_s;
+	}
+	if(next == m_splitFilter)
+	{
+		return;
+	}
+	m_splitFilter = next;
+	emit splitFilterChanged();
+	if(m_split)
+	{
+		syncTiles();
+	}
 }
 
 // Makes the tiles what they should be: new ones are attached as watchers, ones that left are let go.

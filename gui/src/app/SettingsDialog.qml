@@ -287,9 +287,52 @@ ModalDialog {
 				}
 			}
 		}
+
+		Rectangle { x: Theme.dialogPadding; width: parent.width - 2 * Theme.dialogPadding; height: 1; color: Theme.border }
+
+		SectionLabel { text: qsTr("Backend") }
+
+		Item {
+			width: parent.width
+			height: 54
+
+			Column {
+				anchors { left: parent.left; leftMargin: Theme.dialogPadding; right: backendSwitchButton.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+				spacing: 2
+
+				Text {
+					textFormat: Text.PlainText
+					width: parent.width
+					text: qsTr("Server connection")
+					color: Theme.text
+					font.pixelSize: Theme.fontSize
+					elide: Text.ElideRight
+				}
+
+				Text {
+					objectName: "settingsBackendSummary"
+					textFormat: Text.PlainText
+					width: parent.width
+					text: (Workspace.backendUrl !== "" ? Workspace.backendUrl : qsTr("Local (auto)"))
+						+ (Workspace.maskedBackendToken !== "" ? " · " + Workspace.maskedBackendToken : "")
+					color: Theme.textMuted
+					font { family: Theme.monoFamily; pixelSize: Theme.smallFontSize }
+					elide: Text.ElideMiddle
+				}
+			}
+
+			DialogButton {
+				id: backendSwitchButton
+				objectName: "settingsSwitchBackendButton"
+				anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
+				small: true
+				text: qsTr("Switch backend…")
+				onClicked: Commands.run(CommandId.backend)
+			}
+		}
+
 		TextEdit {
 			textFormat: TextEdit.PlainText
-			x: Theme.dialogPadding
 			width: parent.width - 2 * Theme.dialogPadding
 			topPadding: 14
 			readOnly: true

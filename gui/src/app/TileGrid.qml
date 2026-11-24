@@ -181,14 +181,23 @@ Item {
 		Text {
 			textFormat: Text.PlainText
 			anchors.horizontalCenter: parent.horizontalCenter
-			text: qsTr("No background sessions")
+			text: Workspace.splitFilter !== "all" ? qsTr("No matching background sessions") : qsTr("No background sessions")
 			color: Theme.textMuted
 			font.pixelSize: Theme.fontSize
 		}
-		TextButton {
+		Row {
 			anchors.horizontalCenter: parent.horizontalCenter
-			text: qsTr("New session")
-			onClicked: Commands.run(CommandId.newSession)
+			spacing: 8
+
+			TextButton {
+				visible: Workspace.splitFilter !== "all"
+				text: qsTr("Show all")
+				onClicked: Workspace.setSplitFilter("all")
+			}
+			TextButton {
+				text: qsTr("New session")
+				onClicked: Commands.run(CommandId.newSession)
+			}
 		}
 	}
 }

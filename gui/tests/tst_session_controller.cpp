@@ -171,6 +171,8 @@ private slots:
 	void attachAnsweredAfterTheControllerIsGone();
 	void loadOlderAnsweredAfterTheControllerIsGone();
 	void tracksActivelyWorkingAcrossStates();
+	void debouncedRangeFetchDiscardsStaleAndEvictsOnDetach();
+	void retryNowRequestsBackend();
 };
 
 void TestSessionController::createShowsTheSnapshot()
@@ -570,6 +572,105 @@ void TestSessionController::tracksActivelyWorkingAcrossStates()
 	QVERIFY(f.controller.isActivelyWorking());
 	QTRY_VERIFY(!f.controller.isActivelyWorking());
 	QVERIFY(f.controller.isBusy());
+}
+
+void TestSessionController::debouncedRangeFetchDiscardsStaleAndEvictsOnDetach()
+{
+	Fixture f;
+	constexpr int Total = 250;
+	constexpr int StartSeq = 150;
+	QJsonArray metas;
+	for(int i = 0; i < StartSeq; ++i)
+	{
+		metas.append(QJsonObject{{u"seq"_s, i},
+		                         {u"id"_s, u"u_%1"_s.arg(i)},
+		                         {u"role"_s, u"user"_s},
+		                         {u"source_kind"_s, u"human"_s},
+		                         {u"has_error"_s, false},
+		                         {u"parts"_s, QJsonArray{QJsonObject{{u"kind"_s, u"text"_s}, {u"chars"_s, 20}, {u"lines"_s, 1}}}}});
+	}
+	QJsonArray msgs;
+	for(int i = StartSeq; i < Total; ++i)
+	{
+		msgs.append(messageJson(u"u_%1"_s.arg(i), u"user"_s, u"msg"_s, true));
+	}
+	f.snapshot = {{u"snapshot"_s,
+	               QJsonObject{{u"info"_s, infoJson(u"ses_1"_s, u"idle"_s)},
+	                           {u"messages"_s, msgs},
+	                           {u"more_before"_s, true},
+	                           {u"total_messages"_s, Total},
+	                           {u"start_seq"_s, StartSeq},
+	                           {u"layout_metas"_s, metas}}}};
+
+	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
+	QCOMPARE(f.controller.model().slotCount(), Total);
+	QCOMPARE(f.controller.model().residentCount(), 100);
+	QVERIFY(!f.controller.hasMoreBefore());
+
+	QList<QJsonObject> heldMessages;
+	f.fake.onRequest = [&](const QJsonObject& request) {
+		if(request.value(u"op"_s).toString() == u"messages"_s)
+		{
+			heldMessages.append(request);
+			return;
+		}
+		f.answer(request);
+	};
+
+	f.controller.setFollowing(false);
+	// Rapidly scrub twice inside 80ms debounce window: only one request fires.
+	f.controller.setVisibleSeqRange(10, 20);
+	QTest::qWait(20);
+	f.controller.setVisibleSeqRange(30, 40);
+	QTRY_COMPARE(heldMessages.size(), 1);
+	const QJsonObject firstReq = heldMessages.takeFirst();
+
+	// Scrub again after first request is in-flight so generation increments and discards firstReq response.
+	f.controller.setVisibleSeqRange(0, 5);
+	QTRY_COMPARE(heldMessages.size(), 1);
+	const QJsonObject secondReq = heldMessages.takeFirst();
+
+	const quint64 firstStart = static_cast<quint64>(firstReq.value(u"start_seq"_s).toInteger());
+	QJsonArray stalePayload{messageJson(u"u_stale"_s, u"user"_s, u"stale"_s, true)};
+	f.fake.respond(firstReq, {{u"messages"_s, stalePayload}, {u"more_before"_s, false}, {u"start_seq"_s, static_cast<qint64>(firstStart)}, {u"end_seq"_s, static_cast<qint64>(firstStart + 1)}});
+	QTest::qWait(SettleMs);
+	// Stale response must be ignored: slot at firstStart stays placeholder (unless 0..100 overlapped, u_stale must not appear).
+	QVERIFY(!render(f.controller.model()).contains(u"user:stale"_s));
+
+	// Respond to the current (second) request -> materializes!
+	const quint64 secondStart = static_cast<quint64>(secondReq.value(u"start_seq"_s).toInteger());
+	const quint64 secondEnd = static_cast<quint64>(secondReq.value(u"end_seq"_s).toInteger());
+	QJsonArray validPayload;
+	for(quint64 s = secondStart; s < secondEnd; ++s)
+	{
+		validPayload.append(messageJson(u"u_%1"_s.arg(s), u"user"_s, u"loaded_%1"_s.arg(s), true));
+	}
+	f.fake.respond(secondReq, {{u"messages"_s, validPayload}, {u"more_before"_s, false}, {u"start_seq"_s, static_cast<qint64>(secondStart)}, {u"end_seq"_s, static_cast<qint64>(secondEnd)}});
+	QTRY_VERIFY(render(f.controller.model()).contains(u"user:loaded_0"_s));
+
+	// Detach evicts back to newest 100.
+	QVERIFY(await(f.controller.detach()));
+	QCOMPARE(f.controller.model().residentCount(), ConversationModel::TailKeepMessages);
+}
+
+void TestSessionController::retryNowRequestsBackend()
+{
+	Fixture f;
+	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
+	bool sawRetryNow = false;
+	f.fake.onRequest = [&](const QJsonObject& request) {
+		if(request.value(u"op"_s).toString() == u"retry_now"_s)
+		{
+			sawRetryNow = true;
+			f.fake.respond(request, {{u"retried"_s, true}});
+			return;
+		}
+		f.answer(request);
+	};
+	const auto res = await(f.controller.retryNow());
+	QVERIFY(res && res->has_value());
+	QVERIFY((*res)->retried);
+	QVERIFY(sawRetryNow);
 }
 
 QTEST_GUILESS_MAIN(TestSessionController)

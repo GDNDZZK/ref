@@ -7,6 +7,8 @@
 #include <QLoggingCategory>
 #include <QScopedValueRollback>
 
+#include <QUrl>
+
 #include <algorithm>
 #include <utility>
 using refgui::client::Result;
@@ -19,6 +21,32 @@ Q_LOGGING_CATEGORY(lcWorkspace, "refgui.app.workspace")
 
 Workspace* theInstance = nullptr;
 
+refgui::client::Backend::Source resolveInitialSource(const refgui::cli::LaunchOptions& options, const refgui::workspace::Settings& settings)
+{
+	if(std::holds_alternative<refgui::client::Backend::Mode::Shared>(options.source) && !settings.backendUrl().isEmpty())
+	{
+		const QUrl url(settings.backendUrl());
+		if(url.isValid() && (url.scheme() == u"ws"_s || url.scheme() == u"wss"_s) && !url.host().isEmpty())
+		{
+			return refgui::client::Backend::Mode::Remote{{url, settings.backendToken()}};
+		}
+	}
+	return options.source;
+}
+
+QString maskSecretToken(const QString& token)
+{
+	if(token.isEmpty())
+	{
+		return {};
+	}
+	if(token.size() <= 4)
+	{
+		return u"••••"_s;
+	}
+	return u"••••"_s + token.right(4);
+}
+
 } // namespace
 
 Workspace::Workspace(refgui::cli::LaunchOptions options, QString settingsPath, QObject* parent)
@@ -27,7 +55,10 @@ Workspace::Workspace(refgui::cli::LaunchOptions options, QString settingsPath, Q
 	, m_cwd(m_options.directory)
 	, m_settings(std::move(settingsPath))
 	, m_startupUiScale(m_settings.uiScale())
-	, m_connection(m_options.source, m_cwd)
+	, m_connection(resolveInitialSource(m_options, m_settings), m_cwd)
+	, m_splitFilter(u"all"_s)
+	, m_cliRemoteSource(std::holds_alternative<refgui::client::Backend::Mode::Remote>(m_options.source))
+	, m_cliMockSource(std::holds_alternative<refgui::client::Backend::Mode::Mock>(m_options.source))
 {
 	connect(&m_connection, &refgui::workspace::Connection::stateChanged, this, [this] {
 		emit connectionChanged();
@@ -39,7 +70,14 @@ Workspace::Workspace(refgui::cli::LaunchOptions options, QString settingsPath, Q
 	connect(&m_connection, &refgui::workspace::Connection::configChangedReceived, this, &Workspace::onConfigChanged);
 	connect(&m_directory, &refgui::workspace::SessionDirectory::liveChanged, this, &Workspace::onLiveChanged);
 	connect(&m_directory, &refgui::workspace::SessionDirectory::historyLoadedChanged, this, &Workspace::historyLoadedChanged);
-	connect(&m_directory, &refgui::workspace::SessionDirectory::historyUpdated, this, &Workspace::updateHistoryCreatorLabel);
+	connect(&m_directory, &refgui::workspace::SessionDirectory::historyUpdated, this, [this] {
+		updateHistoryCreatorLabel();
+		emit splitCreatorsChanged();
+		if(m_splitFilter != u"all"_s && m_splitFilter != u"user"_s)
+		{
+			emit splitFilterChanged();
+		}
+	});
 	connect(&m_directory, &refgui::workspace::SessionDirectory::failed, this, [this](const QString& reason) { toast(refgui::workspace::ToastLevel::Error, reason); });
 	connect(&m_config, &refgui::workspace::BackendConfig::changed, this, [this] {
 		m_commands.setCustomCommands(m_config.config().commands);
@@ -49,6 +87,7 @@ Workspace::Workspace(refgui::cli::LaunchOptions options, QString settingsPath, Q
 	connect(&m_configEditor, &refgui::workspace::ConfigEditorController::mutationStarted, this, &Workspace::beginLocalConfigMutation);
 	connect(&m_configEditor, &refgui::workspace::ConfigEditorController::mutationFinished, this, &Workspace::endLocalConfigMutation);
 	connect(&m_configEditor, &refgui::workspace::ConfigEditorController::toastRequested, this, &Workspace::toast);
+	connect(&m_stash, &refgui::workspace::StashController::toastRequested, this, &Workspace::toast);
 	connect(&m_settings, &refgui::workspace::Settings::saveFailed, this, [this](const QString& reason) {
 		toast(refgui::workspace::ToastLevel::Warn, tr("Could not save the settings: %1").arg(reason));
 	});
@@ -184,6 +223,116 @@ bool Workspace::canRestartBackend() const
 	}
 	const auto& live = m_directory.liveSessions();
 	return std::ranges::none_of(live, [](const refgui::proto::SessionInfo& info) { return info.status.state != refgui::proto::SessionStatus::State::Idle; });
+}
+
+QString Workspace::backendUrl() const
+{
+	return m_connection.backendUrl();
+}
+
+QString Workspace::maskedBackendToken() const
+{
+	return maskSecretToken(m_connection.backendToken());
+}
+
+QString Workspace::backendSource() const
+{
+	if(m_temporaryBackend)
+	{
+		return u"temporary"_s;
+	}
+	if(m_cliRemoteSource)
+	{
+		return u"direct"_s;
+	}
+	if(m_cliMockSource)
+	{
+		return u"mock"_s;
+	}
+	if(!m_settings.backendUrl().isEmpty())
+	{
+		return u"saved"_s;
+	}
+	return u"auto"_s;
+}
+
+QString Workspace::editableBackendUrl() const
+{
+	if(m_temporaryBackend)
+	{
+		return m_temporaryBackend->url.toString();
+	}
+	if(!m_settings.backendUrl().isEmpty())
+	{
+		return m_settings.backendUrl();
+	}
+	if(m_cliRemoteSource)
+	{
+		return m_connection.backendUrl();
+	}
+	return {};
+}
+
+QString Workspace::currentEditableToken() const
+{
+	if(m_temporaryBackend)
+	{
+		return m_temporaryBackend->token;
+	}
+	if(!m_settings.backendUrl().isEmpty())
+	{
+		return m_settings.backendToken();
+	}
+	if(m_cliRemoteSource)
+	{
+		return m_connection.backendToken();
+	}
+	return {};
+}
+
+bool Workspace::hasEditableBackendToken() const
+{
+	return !currentEditableToken().isEmpty();
+}
+
+QString Workspace::maskedEditableBackendToken() const
+{
+	return maskSecretToken(currentEditableToken());
+}
+
+void Workspace::setFloatingMode(bool floating)
+{
+	if(floating == m_floatingMode)
+	{
+		return;
+	}
+	m_floatingMode = floating;
+	emit floatingModeChanged();
+}
+
+void Workspace::activateFromNotification(const QString& sessionId)
+{
+	setFloatingMode(false);
+	openSession(sessionId);
+}
+
+bool Workspace::anySessionWorking() const
+{
+	for(const refgui::proto::SessionInfo& info : m_directory.liveSessions())
+	{
+		if(info.status.state != refgui::proto::SessionStatus::State::Idle)
+		{
+			return true;
+		}
+	}
+	for(const ChatSession* chatSession : m_chats)
+	{
+		if(chatSession != nullptr && chatSession->isBusy())
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 QString Workspace::connectionState() const
@@ -393,6 +542,9 @@ ChatSession& Workspace::chat(const QString& sessionId)
 		slot = new ChatSession(m_connection.backend(), m_config, sessionId, this, &m_directory);
 		connect(slot, &ChatSession::infoChanged, this, &Workspace::syncConfigCwd);
 		connect(slot->composer(), &refgui::composer::ComposerModel::toastRequested, this, &Workspace::toast);
+		connect(slot, &ChatSession::messagesEvicted, this, [this, sessionId](const QStringList& ids) {
+			emit sessionMessagesEvicted(sessionId, ids);
+		});
 		connect(slot, &ChatSession::errorReported, this, [this, sessionId](const QString& text) {
 			// The current session draws its errors in the conversation; the others need a toast.
 			if(sessionId == currentId() && !m_split)
@@ -580,6 +732,7 @@ void Workspace::setCurrent(ChatSession* session)
 	}
 	emit currentChanged();
 	emit visibleSessionIdsChanged();
+	emit splitCreatorsChanged();
 	updateCommandContext();
 }
 
@@ -893,5 +1046,6 @@ void Workspace::onLiveChanged()
 	}
 	updateCommandContext();
 	syncConfigCwd();
+	emit splitCreatorsChanged();
 	emit backendChanged(); // canRestartBackend depends on the sessions' states
 }
