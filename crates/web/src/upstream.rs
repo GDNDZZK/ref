@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use ref_client::{ConnectError, MockBackend, Target, Ws};
+use ref_client::{BackendTarget, ConnectError, MockBackend, Target, Ws};
 use tokio::sync::Mutex;
 
 const MOCK_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
@@ -14,6 +14,12 @@ pub enum Upstream {
     Mock(Box<Mutex<Option<MockBackend>>>),
 }
 
+pub enum UpstreamRequest {
+    CliDefault,
+    Auto,
+    Explicit { url: String, token: Option<String> },
+}
+
 impl Upstream {
     pub fn mock() -> Self {
         Upstream::Mock(Box::new(Mutex::new(None)))
@@ -21,6 +27,10 @@ impl Upstream {
 
     pub fn is_mock(&self) -> bool {
         matches!(self, Upstream::Mock(_))
+    }
+
+    pub fn is_cli_server(&self) -> bool {
+        matches!(self, Upstream::Remote(Target::Explicit { .. }))
     }
 
     /// Stops the mock backend, if there is one, so that it cleans up after itself.
@@ -41,6 +51,23 @@ impl Upstream {
                 Ok(ws)
             }
             Upstream::Mock(slot) => connect_mock(slot).await,
+        }
+    }
+
+    /// Connects according to the browser's `connect_upstream` control frame.
+    pub async fn connect_for(&self, request: UpstreamRequest) -> Result<Ws, ConnectError> {
+        match request {
+            UpstreamRequest::CliDefault => self.connect().await,
+            UpstreamRequest::Auto => {
+                let connected =
+                    ref_client::discover_or_connect(&BackendTarget::Auto, || {}).await?;
+                Ok(connected.ws)
+            }
+            UpstreamRequest::Explicit { url, token } => {
+                let target = BackendTarget::Explicit { url, token };
+                let connected = ref_client::discover_or_connect(&target, || {}).await?;
+                Ok(connected.ws)
+            }
         }
     }
 }

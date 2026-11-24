@@ -53,13 +53,14 @@ async fn mock_mode_serves_tabs_from_a_private_backend() {
     let web = env.start(&["--mock"]).await;
     let mut ws = web.channel().await;
     assert_eq!(ws.info["mock"], true, "frame 0 says so");
+    assert_eq!(ws.info["cli_server"], false);
+    assert_eq!(ws.info["channel_control"], true);
     let (response, _) = hello(&mut ws).await;
     assert_eq!(response["ok"], true, "{response}");
     assert_eq!(response["result"]["protocol"], ref_proto::PROTOCOL_VERSION);
     // Nothing is registered for other frontends to find.
     assert!(!env.state_dir().join("instances").exists());
 }
-
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn a_mock_that_exited_is_started_again_for_the_next_tab() {
@@ -118,7 +119,18 @@ async fn without_an_explicit_server_ref_web_starts_the_backend_beside_it() {
     require_ref_server();
     let env = Env::new("auto");
     let web = env.start(&[]).await;
-    let mut tab = web.channel().await;
+    assert!(
+        !env.state_dir().join("instances").exists(),
+        "startup must not spawn ref-server before connect_upstream"
+    );
+    let mut tab = Channel::sign_in_only(web.ws().await, &web.key)
+        .await
+        .unwrap();
+    assert!(
+        !env.state_dir().join("instances").exists(),
+        "frame 0 must not spawn ref-server before connect_upstream"
+    );
+    tab.connect_upstream("auto", None, None).await.unwrap();
     let (response, _) = hello(&mut tab).await;
     assert_eq!(response["ok"], true, "{response}");
     // The shared backend announces itself in the state directory (ours is private).
@@ -127,7 +139,6 @@ async fn without_an_explicit_server_ref_web_starts_the_backend_beside_it() {
     drop(tab);
     wait_until("the backend to exit", || process_gone(backend)).await;
 }
-
 /// The pid in the one instance file of the private state directory.
 #[cfg(target_os = "linux")]
 fn backend_pid(env: &Env) -> u32 {

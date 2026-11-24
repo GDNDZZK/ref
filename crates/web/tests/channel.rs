@@ -71,11 +71,67 @@ async fn nothing_reaches_the_backend_before_the_handshake_ends() {
     );
     let auth = channel::auth_json(&cn, &root.auth_mac(&sn, &cn));
     ws.send(Message::text(auth)).await.unwrap();
-    // Frame 0 comes once the backend is connected.
+    // Frame 0 arrives before any backend connection is made.
     assert!(matches!(next_message(&mut ws).await, Message::Binary(_)));
+    tokio::time::sleep(SETTLE).await;
+    assert!(
+        !backend_was_contacted(&upstream),
+        "connected before connect_upstream"
+    );
+
+    let (mut sealer, mut opener) = root.client_channel(&sn, &cn);
+    let connect_cmd = sealer.seal(
+        Kind::Binary,
+        br#"{"op":"connect_upstream","mode":"cli_default"}"#,
+    );
+    ws.send(Message::Binary(connect_cmd.into())).await.unwrap();
+    match next_message(&mut ws).await {
+        Message::Binary(wire) => {
+            let (kind, plain) = opener.open(&wire).unwrap();
+            assert_eq!(kind, Kind::Binary);
+            let reply: serde_json::Value = serde_json::from_slice(&plain).unwrap();
+            assert_eq!(reply["op"], "upstream_ready");
+        }
+        other => panic!("expected upstream_ready, got {other:?}"),
+    }
     assert!(backend_was_contacted(&upstream));
 }
 
+#[tokio::test]
+async fn malformed_control_frames_close_with_4400_before_upstream() {
+    let env = Env::new("bad-ctrl");
+    let (web, upstream) = web_with_fake_upstream(&env).await;
+
+    let mut text_before_ctrl = Channel::sign_in_only(web.ws().await, &web.key)
+        .await
+        .unwrap();
+    text_before_ctrl.send_text(r#"{"id":1,"op":"hello"}"#).await;
+    assert_eq!(
+        text_before_ctrl.next_close().await,
+        (BAD_MESSAGE, BAD_FRAME_REASON.to_string())
+    );
+
+    let mut invalid_json = Channel::sign_in_only(web.ws().await, &web.key)
+        .await
+        .unwrap();
+    invalid_json.send_binary(b"not-json").await;
+    assert_eq!(
+        invalid_json.next_close().await,
+        (BAD_MESSAGE, BAD_FRAME_REASON.to_string())
+    );
+
+    let mut unknown_op = Channel::sign_in_only(web.ws().await, &web.key)
+        .await
+        .unwrap();
+    unknown_op.send_binary(br#"{"op":"unknown"}"#).await;
+    assert_eq!(
+        unknown_op.next_close().await,
+        (BAD_MESSAGE, BAD_FRAME_REASON.to_string())
+    );
+
+    tokio::time::sleep(SETTLE).await;
+    assert!(!backend_was_contacted(&upstream));
+}
 #[tokio::test]
 async fn a_recorded_auth_does_not_work_on_a_new_connection() {
     let env = Env::new("replay");

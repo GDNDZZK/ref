@@ -153,6 +153,9 @@ fn upstream_for(cli: &Cli) -> Upstream {
 }
 
 async fn run(cli: Cli) -> anyhow::Result<()> {
+    if let Some(url) = &cli.server {
+        ref_client::validate_explicit_url(url)?;
+    }
     let cwd = start_dir(cli.dir.as_deref())?;
     let key = key::load(cli.key.as_deref()).await?;
     if open_running(&cli, &key, &cwd).await? {
