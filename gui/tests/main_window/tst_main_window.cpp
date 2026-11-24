@@ -32,6 +32,7 @@
 #include <QQuickStyle>
 #include <QQuickTextDocument>
 #include <QQuickWindow>
+#include <QScopeGuard>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTextBlock>
@@ -4269,6 +4270,13 @@ void TestMainWindow::floatingBallModeTransitionsBetweenBallHoverCardAndMiniPanel
 	QVERIFY2(created, qPrintable(component.errorString()));
 	auto* window = qobject_cast<QQuickWindow*>(created.get());
 	QVERIFY(window);
+	const auto flushBeforeEngineTeardown = qScopeGuard([&] {
+		created.reset();
+		QCoreApplication::processEvents();
+		QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+		QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+		engine.collectGarbage();
+	});
 	QVERIFY(QTest::qWaitForWindowExposed(window));
 	window->requestActivate();
 	QTRY_VERIFY(window->isActive());
@@ -4321,6 +4329,8 @@ void TestMainWindow::floatingBallModeTransitionsBetweenBallHoverCardAndMiniPanel
 	QTest::mouseMove(panelWin, returnCenter);
 	QTest::mouseClick(panelWin, Qt::LeftButton, Qt::NoModifier, returnCenter, 20);
 	QTRY_VERIFY(window->isVisible());
+	QCoreApplication::processEvents();
+	QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 
 	QVERIFY2(warningSpy.isEmpty(), "FloatingBallWindow emitted QML warnings");
 }
