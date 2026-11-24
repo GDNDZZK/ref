@@ -6,7 +6,9 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ref_proto::{AgentInfo, MessageLayoutMeta, ModelInfo, Role, SessionStatus};
+use ref_proto::{
+    AgentInfo, MessageLayoutMeta, ModelInfo, Role, SOURCE_KIND_COMPACTION, SessionStatus,
+};
 
 use super::message::{self, Ctx};
 use super::selection::{self, Selection};
@@ -461,7 +463,7 @@ fn render_placeholder(
         theme::fg(theme::DIM)
     };
     match meta.role {
-        Role::User if meta.source_kind == "compaction" => {
+        Role::User if meta.source_kind == SOURCE_KIND_COMPACTION => {
             rows.push(
                 Row::new(Line::from(Span::styled(
                     "──── ◇ Context compacted ···",
@@ -499,8 +501,9 @@ fn layout(view: &mut SessionView, env: &Env<'_>, w: usize, compact: bool) {
         info,
         ..
     } = view;
-    let mut offsets = Vec::with_capacity(slots.len() + 1);
-    let mut ids = Vec::with_capacity(slots.len());
+    let mut offsets = std::mem::take(&mut chat.offsets);
+    offsets.clear();
+    offsets.reserve(slots.len() + 1);
     let mut total = 0usize;
     let mut animating = false;
     let last_comp = last_compaction(slots);
@@ -508,7 +511,7 @@ fn layout(view: &mut SessionView, env: &Env<'_>, w: usize, compact: bool) {
     for (i, slot_entry) in slots.iter().enumerate() {
         let stale = last_comp.is_some_and(|c| i < c);
         let ver = versions.get(i).copied().unwrap_or(0);
-        let id = slot_entry.id().to_string();
+        let id = slot_entry.id();
         match slot_entry {
             MessageSlot::Materialized(m) => {
                 // Only the tail of a busy session animates (stale unfinished messages render statically).
@@ -521,13 +524,13 @@ fn layout(view: &mut SessionView, env: &Env<'_>, w: usize, compact: bool) {
                     stale,
                     context_start: i > 0 && last_comp == Some(i),
                 };
-                let key = cache_key(chat, env, &m.id, &slot, w, compact);
-                if !chat.cache(compact).get(&m.id).is_some_and(|c| c.key == key) {
+                let key = cache_key(chat, env, id, &slot, w, compact);
+                if !chat.cache(compact).get(id).is_some_and(|c| c.key == key) {
                     let cx = Ctx {
                         agents: env.agents,
                         models: env.models,
-                        toggled: chat.toggled.get(&m.id),
-                        show_all: chat.show_all.get(&m.id),
+                        toggled: chat.toggled.get(id),
+                        show_all: chat.show_all.get(id),
                         details: env.details && !compact,
                         thinking: env.thinking && !compact,
                         now: env.now,
@@ -554,7 +557,7 @@ fn layout(view: &mut SessionView, env: &Env<'_>, w: usize, compact: bool) {
             }
             MessageSlot::Placeholder(meta) => {
                 let key = placeholder_cache_key(meta, ver, w, env, stale, compact, i == 0);
-                if !chat.cache(compact).get(&id).is_some_and(|c| c.key == key) {
+                if !chat.cache(compact).get(id).is_some_and(|c| c.key == key) {
                     let mut rows = if compact && i == 0 {
                         Vec::new()
                     } else {
@@ -562,20 +565,26 @@ fn layout(view: &mut SessionView, env: &Env<'_>, w: usize, compact: bool) {
                     };
                     rows.extend(render_placeholder(meta, w, env, stale, compact));
                     chat.cache_mut(compact)
-                        .insert(id.clone(), Cached { key, rows });
+                        .insert(id.to_string(), Cached { key, rows });
                 }
             }
         }
         offsets.push(total);
         // The entry exists: it either matched the key or was inserted above.
-        total += chat.cache(compact)[&id].rows.len();
-        ids.push(id);
+        total += chat.cache(compact)[id].rows.len();
     }
-    evict_stale(chat.cache_mut(compact), &ids);
+    evict_stale(chat.cache_mut(compact), slots);
     offsets.push(total);
-    shift_for_prepended(chat, &ids, &offsets, compact);
+    let ids_match = chat.ids.len() == slots.len()
+        && chat.ids.iter().zip(slots.iter()).all(|(a, s)| a == s.id());
+    if !ids_match {
+        shift_for_prepended(chat, slots, &offsets, compact);
+        chat.ids.clear();
+        chat.ids
+            .reserve(slots.len().saturating_sub(chat.ids.capacity()));
+        chat.ids.extend(slots.iter().map(|s| s.id().to_string()));
+    }
     chat.offsets = offsets;
-    chat.ids = ids;
     chat.animating = animating;
     total += chat.tail.len();
     chat.total = total;
@@ -597,21 +606,26 @@ fn compute_visible_seq_range(chat: &ChatState) -> Option<(usize, usize)> {
 }
 
 /// Evicts cache entries for removed messages once enough have piled up.
-fn evict_stale(cache: &mut HashMap<String, Cached>, ids: &[String]) {
-    if cache.len() <= ids.len() + CACHE_SLACK {
+fn evict_stale(cache: &mut HashMap<String, Cached>, slots: &[MessageSlot]) {
+    if cache.len() <= slots.len() + CACHE_SLACK {
         return;
     }
-    let keep: std::collections::HashSet<&String> = ids.iter().collect();
-    cache.retain(|k, _| keep.contains(k));
+    let keep: std::collections::HashSet<&str> = slots.iter().map(MessageSlot::id).collect();
+    cache.retain(|k, _| keep.contains(k.as_str()));
 }
 
 /// Older messages loaded above: keep the same content on screen (tiles have no separator
 /// above the first message, so the old first one gained a row).
-fn shift_for_prepended(chat: &mut ChatState, ids: &[String], offsets: &[usize], compact: bool) {
+fn shift_for_prepended(
+    chat: &mut ChatState,
+    slots: &[MessageSlot],
+    offsets: &[usize],
+    compact: bool,
+) {
     let shift = chat
         .ids
         .first()
-        .and_then(|old| ids.iter().position(|id| id == old))
+        .and_then(|old| slots.iter().position(|s| s.id() == old))
         .filter(|&k| k > 0)
         .map_or(0, |k| offsets[k] + usize::from(compact));
     if shift == 0 {
@@ -770,7 +784,7 @@ fn tail_rows(view: &SessionView, env: &Env<'_>, w: usize) -> Vec<Row> {
             Span::styled("┃ ", theme::fg(theme::WARNING)),
         ];
         let mut header_row = Row::new(line).decor();
-        if rw > 0 && rx + rw as usize <= inner {
+        if rx + rw as usize <= inner {
             header_row = header_row.zone(x0, x0 + rw, Hit::RetryNow);
         }
         rows.push(header_row.indent(lead));

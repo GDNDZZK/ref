@@ -238,6 +238,62 @@ pub async fn run(
     run_with_control(target.into(), cwd, out, switch_rx, events).await;
 }
 
+async fn shutdown_mock(
+    mock: Option<ref_client::MockBackend>,
+    events: &mpsc::UnboundedSender<NetEvent>,
+) {
+    if let Some(m) = mock
+        && let Err(e) = m.shutdown().await
+    {
+        let _ = events.send(NetEvent::Warn(format!(
+            "failed to shut down mock backend: {e}"
+        )));
+    }
+}
+
+enum SwitchOrWait {
+    Switched(BackendTarget),
+    Proceed,
+    Stop,
+}
+
+async fn await_switch_or_delay(
+    switch_rx: &mut mpsc::UnboundedReceiver<BackendTarget>,
+    out: &mut mpsc::UnboundedReceiver<ClientFrame>,
+    delay: Duration,
+) -> SwitchOrWait {
+    tokio::select! {
+        biased;
+        sw = switch_rx.recv() => match sw {
+            Some(next_target) => {
+                while out.try_recv().is_ok() {}
+                SwitchOrWait::Switched(next_target)
+            }
+            None => SwitchOrWait::Stop,
+        },
+        _ = tokio::time::sleep(delay) => SwitchOrWait::Proceed,
+    }
+}
+
+async fn await_switch_while_refused(
+    switch_rx: &mut mpsc::UnboundedReceiver<BackendTarget>,
+    out: &mut mpsc::UnboundedReceiver<ClientFrame>,
+) -> Option<BackendTarget> {
+    loop {
+        tokio::select! {
+            biased;
+            sw = switch_rx.recv() => {
+                let next_target = sw?;
+                while out.try_recv().is_ok() {}
+                return Some(next_target);
+            }
+            f = out.recv() => {
+                f?;
+            }
+        }
+    }
+}
+
 /// Runs the transport with runtime backend hot-switching support.
 pub async fn run_with_control(
     mut target: BackendTarget,
@@ -266,17 +322,10 @@ pub async fn run_with_control(
                     return;
                 }
                 while out.try_recv().is_ok() {}
-                tokio::select! {
-                    biased;
-                    sw = switch_rx.recv() => {
-                        let Some(next_target) = sw else {
-                            return;
-                        };
-                        target = next_target;
-                        while out.try_recv().is_ok() {}
-                        continue;
-                    }
-                    _ = tokio::time::sleep(RECONNECT_DELAY) => {}
+                match await_switch_or_delay(&mut switch_rx, &mut out, RECONNECT_DELAY).await {
+                    SwitchOrWait::Switched(next) => target = next,
+                    SwitchOrWait::Proceed => {}
+                    SwitchOrWait::Stop => return,
                 }
                 if events.is_closed() {
                     return;
@@ -297,38 +346,25 @@ pub async fn run_with_control(
         let txt = match serde_json::to_string(&hello) {
             Ok(t) => t,
             Err(e) => {
-                if let Some(mock) = backend.mock.take() {
-                    let _ = mock.shutdown().await;
-                }
+                shutdown_mock(backend.mock.take(), &events).await;
                 let _ = events.send(NetEvent::Disconnected(format!("cannot encode hello: {e}")));
                 return;
             }
         };
         if let Err(e) = backend.ws.send(WsMsg::text(txt)).await {
-            if let Some(mock) = backend.mock.take() {
-                let _ = mock.shutdown().await;
-            }
+            shutdown_mock(backend.mock.take(), &events).await;
             if events.send(NetEvent::Disconnected(e.to_string())).is_err() {
                 return;
             }
-            tokio::select! {
-                biased;
-                sw = switch_rx.recv() => {
-                    let Some(next_target) = sw else {
-                        return;
-                    };
-                    target = next_target;
-                    while out.try_recv().is_ok() {}
-                    continue;
-                }
-                _ = tokio::time::sleep(RECONNECT_DELAY) => {}
+            match await_switch_or_delay(&mut switch_rx, &mut out, RECONNECT_DELAY).await {
+                SwitchOrWait::Switched(next) => target = next,
+                SwitchOrWait::Proceed => {}
+                SwitchOrWait::Stop => return,
             }
             continue;
         }
         let exit = pump(&mut backend.ws, &mut out, &mut switch_rx, &events).await;
-        if let Some(mock) = backend.mock.take() {
-            let _ = mock.shutdown().await;
-        }
+        shutdown_mock(backend.mock.take(), &events).await;
         let reason = match exit {
             PumpExit::Stop => return,
             PumpExit::Switch(next_target) => {
@@ -339,25 +375,11 @@ pub async fn run_with_control(
             PumpExit::Fatal(reason) => {
                 let _ = events.send(NetEvent::Refused(reason));
                 while out.try_recv().is_ok() {}
-                // Stay alive without reconnecting until the app exits or switches backend.
-                loop {
-                    tokio::select! {
-                        biased;
-                        sw = switch_rx.recv() => {
-                            let Some(next_target) = sw else {
-                                return;
-                            };
-                            target = next_target;
-                            while out.try_recv().is_ok() {}
-                            break;
-                        }
-                        f = out.recv() => {
-                            if f.is_none() {
-                                return;
-                            }
-                        }
-                    }
-                }
+                let Some(next_target) = await_switch_while_refused(&mut switch_rx, &mut out).await
+                else {
+                    return;
+                };
+                target = next_target;
                 continue;
             }
             PumpExit::Lost(reason) => reason,
@@ -366,16 +388,10 @@ pub async fn run_with_control(
             return;
         }
         while out.try_recv().is_ok() {}
-        tokio::select! {
-            biased;
-            sw = switch_rx.recv() => {
-                let Some(next_target) = sw else {
-                    return;
-                };
-                target = next_target;
-                while out.try_recv().is_ok() {}
-            }
-            _ = tokio::time::sleep(RECONNECT_DELAY) => {}
+        match await_switch_or_delay(&mut switch_rx, &mut out, RECONNECT_DELAY).await {
+            SwitchOrWait::Switched(next) => target = next,
+            SwitchOrWait::Proceed => {}
+            SwitchOrWait::Stop => return,
         }
     }
 }

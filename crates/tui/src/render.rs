@@ -284,20 +284,18 @@ fn draw_disconnected_banner(buf: &mut Buffer, area: Rect, app: &mut App, tick: u
     );
     if gap > 0 {
         let bx = x + msg_w + gap;
-        if bx + btn_w <= area.x + area.width {
-            buf.set_stringn(
-                bx,
-                area.y,
-                btn,
-                btn_w as usize,
-                Style::new()
-                    .fg(theme::TEXT)
-                    .bg(theme::ELEMENT)
-                    .add_modifier(Modifier::BOLD),
-            );
-            app.switch_backend_rects
-                .push(Rect::new(bx, area.y, btn_w, 1));
-        }
+        buf.set_stringn(
+            bx,
+            area.y,
+            btn,
+            btn_w as usize,
+            Style::new()
+                .fg(theme::TEXT)
+                .bg(theme::ELEMENT)
+                .add_modifier(Modifier::BOLD),
+        );
+        app.switch_backend_rects
+            .push(Rect::new(bx, area.y, btn_w, 1));
     }
 }
 fn env<'a>(app: &'a App, now: i64, tick: u64) -> Env<'a> {
@@ -381,7 +379,11 @@ fn draw_empty_chat(buf: &mut Buffer, area: Rect, app: &mut App) {
     let mut lines = if app.connected && app.refused.is_none() {
         let mut l = Vec::new();
         for row in crate::app::LOGO {
-            let split = row.char_indices().nth(10).map(|x| x.0).unwrap_or(row.len());
+            let split = row
+                .char_indices()
+                .nth(crate::app::LOGO_PRIMARY_CHARS)
+                .map(|x| x.0)
+                .unwrap_or(row.len());
             let (a, b) = row.split_at(split);
             l.push(Line::from(vec![
                 Span::styled(a.to_string(), theme::bold(theme::PRIMARY)),

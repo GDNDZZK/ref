@@ -13,7 +13,9 @@ use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
-use crate::{BackendTarget, ConnectError, Endpoint, MockBackend, Ws, discover_or_connect};
+use crate::{
+    BackendTarget, ConnectError, ConnectedBackend, Endpoint, MockBackend, Ws, discover_or_connect,
+};
 
 const RECONNECT_DELAY: Duration = Duration::from_secs(1);
 const HELLO_ID: u64 = u64::MAX;
@@ -52,7 +54,6 @@ pub enum ClientError {
 }
 
 #[derive(Debug)]
-#[allow(clippy::large_enum_variant)]
 pub enum ClientEvent {
     Connected { protocol: u32, endpoint: Endpoint },
     BackendTooOld { protocol: u32 },
@@ -60,7 +61,7 @@ pub enum ClientEvent {
     Refused(String),
     Status(String),
     Warn(String),
-    Frame(ServerFrame),
+    Frame(Box<ServerFrame>),
 }
 
 enum Cmd {
@@ -79,6 +80,12 @@ enum PumpExit {
     Fatal(String),
     Switch(BackendTarget),
     Reconnect,
+}
+
+enum ConnectOutcome {
+    Connected(Result<ConnectedBackend, ConnectError>),
+    Switch(BackendTarget),
+    Stop,
 }
 
 /// Async Protocol v6 client supporting typed RPCs and runtime backend hot-switching.
@@ -438,34 +445,33 @@ async fn run_driver(
     events: mpsc::UnboundedSender<ClientEvent>,
 ) {
     loop {
-        let mut switched_during_connect = None;
-        let conn_fut = discover_or_connect(&target, || {
-            let _ = events.send(ClientEvent::Status("starting backend…".into()));
-        });
-        tokio::pin!(conn_fut);
-        let conn = loop {
-            tokio::select! {
-                res = &mut conn_fut => break Some(res),
-                cmd = rx.recv() => match cmd {
-                    Some(Cmd::Request { reply, .. }) => {
-                        let _ = reply.send(Err(ClientError::Disconnected));
+        let outcome = {
+            let conn_fut = discover_or_connect(&target, || {
+                let _ = events.send(ClientEvent::Status("starting backend…".into()));
+            });
+            tokio::pin!(conn_fut);
+            loop {
+                tokio::select! {
+                    res = &mut conn_fut => break ConnectOutcome::Connected(res),
+                    cmd = rx.recv() => match cmd {
+                        Some(Cmd::Request { reply, .. }) => {
+                            let _ = reply.send(Err(ClientError::Disconnected));
+                        }
+                        Some(Cmd::Notify(_)) | Some(Cmd::Reconnect) => {}
+                        Some(Cmd::SwitchTarget(next)) => break ConnectOutcome::Switch(next),
+                        None => break ConnectOutcome::Stop,
                     }
-                    Some(Cmd::Notify(_)) | Some(Cmd::Reconnect) => {}
-                    Some(Cmd::SwitchTarget(next)) => {
-                        switched_during_connect = Some(next);
-                        break None;
-                    }
-                    None => return,
                 }
             }
         };
-        if let Some(next) = switched_during_connect {
-            target = next;
-            continue;
-        }
-        let connected = match conn.expect("loop exits with conn or switch") {
-            Ok(c) => c,
-            Err(e) => {
+        let connected = match outcome {
+            ConnectOutcome::Stop => return,
+            ConnectOutcome::Switch(next) => {
+                target = next;
+                continue;
+            }
+            ConnectOutcome::Connected(Ok(c)) => c,
+            ConnectOutcome::Connected(Err(e)) => {
                 if events
                     .send(ClientEvent::Disconnected(e.to_string()))
                     .is_err()
@@ -745,7 +751,7 @@ fn handle_text_frame(
         return None;
     }
 
-    if events.send(ClientEvent::Frame(frame)).is_err() {
+    if events.send(ClientEvent::Frame(Box::new(frame))).is_err() {
         return Some(PumpExit::Stop);
     }
     None

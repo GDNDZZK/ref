@@ -13,7 +13,7 @@
 //! Legacy JSON files (`<data_dir>/sessions/<id>.json`) are imported once on startup; the
 //! directory is then renamed to `sessions.imported`.
 
-use ref_proto::{Message, MessageLayoutMeta, MessageSource, Part, PartLayoutMeta, SessionInfo};
+use ref_proto::{Message, MessageLayoutMeta, SessionInfo, compute_layout_meta};
 use rusqlite::{Connection, OptionalExtension, params, params_from_iter, types::Value as SqlValue};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -690,184 +690,6 @@ fn hash_json<T: Serialize>(v: &T) -> u64 {
     w.0.finish()
 }
 
-fn source_kind(src: &MessageSource) -> &'static str {
-    match src {
-        MessageSource::Human => "human",
-        MessageSource::Peer { .. } => "peer",
-        MessageSource::Spawn { .. } => "spawn",
-        MessageSource::Reminder => "reminder",
-        MessageSource::Compaction => "compaction",
-        MessageSource::Shell => "shell",
-    }
-}
-
-fn count_lines(s: &str) -> u32 {
-    if s.is_empty() {
-        0
-    } else {
-        s.split('\n').count() as u32
-    }
-}
-
-fn fence_marker(line: &str) -> Option<(char, usize)> {
-    let trimmed = line.trim_start();
-    let ch = trimmed.chars().next()?;
-    if ch != '`' && ch != '~' {
-        return None;
-    }
-    let count = trimmed.chars().take_while(|&c| c == ch).count();
-    (count >= 3).then_some((ch, count))
-}
-
-fn is_table_separator(line: &str) -> bool {
-    let trimmed = line.trim();
-    if !trimmed.contains('|') || !trimmed.contains('-') {
-        return false;
-    }
-    trimmed
-        .chars()
-        .all(|c| matches!(c, '|' | '-' | ':' | ' ' | '\t'))
-}
-
-fn analyze_markdown(text: &str) -> (u16, u32, u16) {
-    let mut code_blocks: u16 = 0;
-    let mut code_lines: u32 = 0;
-    let mut tables: u16 = 0;
-    let mut fence: Option<(char, usize)> = None;
-    let mut prev_has_pipe = false;
-    let mut in_table = false;
-
-    for line in text.split('\n') {
-        if let Some((fch, flen)) = fence {
-            let trimmed = line.trim_start();
-            let count = trimmed.chars().take_while(|&c| c == fch).count();
-            let closes = count >= flen && trimmed[count * fch.len_utf8()..].trim().is_empty();
-            if closes {
-                fence = None;
-            } else {
-                code_lines = code_lines.saturating_add(1);
-            }
-            prev_has_pipe = false;
-            in_table = false;
-            continue;
-        }
-        if let Some(marker) = fence_marker(line) {
-            fence = Some(marker);
-            code_blocks = code_blocks.saturating_add(1);
-            prev_has_pipe = false;
-            in_table = false;
-            continue;
-        }
-        let has_pipe = line.contains('|');
-        if prev_has_pipe && is_table_separator(line) {
-            if !in_table {
-                tables = tables.saturating_add(1);
-                in_table = true;
-            }
-        } else if !(in_table && has_pipe) {
-            in_table = false;
-        }
-        prev_has_pipe = has_pipe;
-    }
-    (code_blocks, code_lines, tables)
-}
-
-pub(crate) fn compute_layout_meta(seq: u64, msg: &Message) -> MessageLayoutMeta {
-    let parts = msg
-        .parts
-        .iter()
-        .map(|p| match p {
-            Part::Text { text, .. } => {
-                let (code_blocks, code_lines, tables) = analyze_markdown(text);
-                PartLayoutMeta {
-                    kind: "text".into(),
-                    chars: text.chars().count().min(u32::MAX as usize) as u32,
-                    lines: count_lines(text),
-                    code_blocks,
-                    code_lines,
-                    tables,
-                    tool: None,
-                    tool_lines: 0,
-                    width: None,
-                    height: None,
-                }
-            }
-            Part::Reasoning { text, .. } => PartLayoutMeta {
-                kind: "reasoning".into(),
-                chars: text.chars().count().min(u32::MAX as usize) as u32,
-                lines: count_lines(text),
-                code_blocks: 0,
-                code_lines: 0,
-                tables: 0,
-                tool: None,
-                tool_lines: 0,
-                width: None,
-                height: None,
-            },
-            Part::Image { .. } => PartLayoutMeta {
-                kind: "image".into(),
-                chars: 0,
-                lines: 0,
-                code_blocks: 0,
-                code_lines: 0,
-                tables: 0,
-                tool: None,
-                tool_lines: 0,
-                width: None,
-                height: None,
-            },
-            Part::Tool {
-                name,
-                purpose,
-                input,
-                output,
-                meta,
-                ..
-            } => {
-                let lines = if name == crate::toolset::TODO {
-                    input
-                        .get("todos")
-                        .and_then(|v| v.as_array())
-                        .map_or(0, Vec::len)
-                } else if let Some(diff) = meta
-                    .as_ref()
-                    .and_then(|m| m.get("diff"))
-                    .and_then(|v| v.as_str())
-                {
-                    diff.lines().count()
-                } else {
-                    output.as_deref().map_or(0, |o| o.lines().count())
-                };
-                let tool_lines = lines.min(u16::MAX as usize) as u16;
-                let chars = (purpose.chars().count()
-                    + output.as_deref().map_or(0, |o| o.chars().count()))
-                .min(u32::MAX as usize) as u32;
-                PartLayoutMeta {
-                    kind: "tool".into(),
-                    chars,
-                    lines: tool_lines as u32,
-                    code_blocks: 0,
-                    code_lines: 0,
-                    tables: 0,
-                    tool: Some(name.clone()),
-                    tool_lines,
-                    width: None,
-                    height: None,
-                }
-            }
-        })
-        .collect();
-
-    MessageLayoutMeta {
-        seq,
-        id: msg.id.clone(),
-        role: msg.role,
-        source_kind: source_kind(&msg.source).into(),
-        has_error: msg.error.is_some(),
-        parts,
-    }
-}
-
 fn open(data_dir: &Path, path: &Path) -> DbResult<Connection> {
     std::fs::create_dir_all(data_dir)
         .map_err(|e| format!("cannot create {}: {e}", data_dir.display()))?;
@@ -1497,8 +1319,9 @@ fn latest_compaction_seq(db: &Connection, id: &str) -> DbResult<u64> {
         .query_row(
             "SELECT seq FROM messages
              WHERE session_id = ?1
-               AND (json_extract(layout_meta, '$.source_kind') = 'compaction'
-                    OR (layout_meta IS NULL AND json_extract(data, '$.source.kind') = 'compaction'))
+               AND CASE WHEN json_valid(layout_meta)
+                        THEN json_extract(layout_meta, '$.source_kind')
+                   END = 'compaction'
              ORDER BY seq DESC LIMIT 1",
             [id],
             |r| r.get(0),
@@ -1654,10 +1477,13 @@ fn last_human_seq_before(
         .query_row(
             "SELECT seq FROM messages
              WHERE session_id = ?1 AND seq < ?2
-               AND json_extract(data, '$.role') = 'user'
-               AND json_extract(data, '$.source.kind') = 'human'
+               AND CASE WHEN json_valid(layout_meta)
+                        THEN json_extract(layout_meta, '$.role')
+                   END = 'user'
+               AND CASE WHEN json_valid(layout_meta)
+                        THEN json_extract(layout_meta, '$.source_kind')
+                   END = 'human'
              ORDER BY seq DESC LIMIT 1",
-            params![session_id, before_seq as i64],
             |r| r.get(0),
         )
         .optional()?;
@@ -1669,10 +1495,10 @@ fn compaction_seq_before(db: &Connection, session_id: &str, before_seq: u64) -> 
         .query_row(
             "SELECT seq FROM messages
              WHERE session_id = ?1 AND seq < ?2
-               AND (json_extract(layout_meta, '$.source_kind') = 'compaction'
-                    OR (layout_meta IS NULL AND json_extract(data, '$.source.kind') = 'compaction'))
+               AND CASE WHEN json_valid(layout_meta)
+                        THEN json_extract(layout_meta, '$.source_kind')
+                   END = 'compaction'
              ORDER BY seq DESC LIMIT 1",
-            params![session_id, before_seq as i64],
             |r| r.get(0),
         )
         .optional()?;
@@ -3091,6 +2917,68 @@ mod tests {
             .finish_restore_group_member("grp_1".into(), "ses_3".into())
             .unwrap();
         assert!(gs.is_empty());
+
+        let _ = store.close();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    #[test]
+    fn corrupt_message_data_and_layout_meta_do_not_break_queries() {
+        let dir = tmp();
+        let store = Store::new(dir.clone());
+        let mut comp = msg("m2", "summary");
+        comp.source = MessageSource::Compaction;
+        store.save(persisted(
+            "ses_corrupt",
+            "/a",
+            10,
+            vec![
+                msg("m0", "first human"),
+                msg("m1", "second human"),
+                comp,
+                msg("m3", "latest human"),
+            ],
+        ));
+        store.flush().unwrap();
+        store.close().unwrap();
+
+        {
+            let conn = Connection::open(&store.path).unwrap();
+            // Corrupt `data` on seq 0 and 1, and corrupt `layout_meta` on seq 1, while
+            // leaving seq 2 (compaction) and seq 3 (human) intact and setting NULL layout_meta
+            // on seq 0.
+            conn.execute(
+                "UPDATE messages SET data = '{not-json', layout_meta = NULL WHERE session_id = 'ses_corrupt' AND seq = 0",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE messages SET data = '{not-json', layout_meta = '{bad-meta' WHERE session_id = 'ses_corrupt' AND seq = 1",
+                [],
+            )
+            .unwrap();
+        }
+
+        let store = Store::new(dir.clone());
+        let active = store.load_active_window("ses_corrupt").unwrap();
+        assert_eq!(active.window_start_seq, 2);
+        assert_eq!(active.messages.len(), 2);
+        assert_eq!(active.messages[0].id, "m2");
+        assert_eq!(active.messages[1].id, "m3");
+
+        // Queries over corrupt rows must succeed without SQL errors and skip invalid rows.
+        assert_eq!(store.compaction_seq_before("ses_corrupt", 3).unwrap(), 2);
+        assert_eq!(store.compaction_seq_before("ses_corrupt", 2).unwrap(), 0);
+        assert_eq!(
+            store.last_human_seq_before("ses_corrupt", 4).unwrap(),
+            Some(3)
+        );
+        assert_eq!(store.last_human_seq_before("ses_corrupt", 2).unwrap(), None);
+
+        // `load_layout_metas` skips corrupt rows whose fallback `data` is also corrupt.
+        let metas = store.load_layout_metas("ses_corrupt", 0, 4).unwrap();
+        assert_eq!(metas.len(), 2);
+        assert_eq!(metas[0].id, "m2");
+        assert_eq!(metas[1].id, "m3");
 
         let _ = store.close();
         let _ = std::fs::remove_dir_all(dir);

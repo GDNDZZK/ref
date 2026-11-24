@@ -11,10 +11,16 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 /// Text of the compaction summary message.
-fn summary_text(summary: &str) -> String {
+fn summary_text(summary: &str, todos: &[ref_proto::Todo]) -> String {
+    let summary = summary.trim();
+    if todos.is_empty() {
+        return format!(
+            "[Context compacted. Summary of the conversation so far:]\n\n{summary}\n\n[Continue from here.]"
+        );
+    }
+    let items = crate::toolset::format_todo_items(todos);
     format!(
-        "[Context compacted. Summary of the conversation so far:]\n\n{}\n\n[Continue from here.]",
-        summary.trim()
+        "[Context compacted. Summary of the conversation so far:]\n\n{summary}\n\n[Todo list at compaction time (may be stale or inaccurate; prefer the summary above):]\n{items}\n\n[Continue from here.]"
     )
 }
 
@@ -85,15 +91,19 @@ pub(crate) fn insert_summary(
     summary: &str,
     at: Option<usize>,
 ) {
-    let msg = user_message(MessageSource::Compaction, summary_text(summary), vec![]);
     let mut st = s.lock();
+    let msg = user_message(
+        MessageSource::Compaction,
+        summary_text(summary, &st.info.todos),
+        vec![],
+    );
     let len = st.messages.len();
     let at = at.unwrap_or(len).min(len);
     st.messages.insert(at, msg.clone());
     if at == len {
         hub.emit_message(&s.id, &msg);
     } else {
-        hub.emit(&s.id, st.reset_event(&hub.store));
+        hub.emit(&s.id, st.reset_event());
     }
     // Estimated from the new effective context until the next real usage arrives.
     let chat = crate::convert::to_chat(&st.messages, prep.model.images);
@@ -310,6 +320,38 @@ pub async fn manual(hub: Arc<Hub>, s: Arc<Session>, cancel: CancellationToken) {
             SessionEvent::Error {
                 text: format!("Compaction failed: {e}"),
             },
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ref_proto::{Todo, TodoStatus};
+
+    #[test]
+    fn summary_text_empty_todos_matches_plain_format() {
+        assert_eq!(
+            summary_text("  did X  ", &[]),
+            "[Context compacted. Summary of the conversation so far:]\n\ndid X\n\n[Continue from here.]"
+        );
+    }
+
+    #[test]
+    fn summary_text_non_empty_todos_includes_staleness_note() {
+        let todos = vec![
+            Todo {
+                content: "Step 1".into(),
+                status: TodoStatus::Completed,
+            },
+            Todo {
+                content: "Step 2".into(),
+                status: TodoStatus::InProgress,
+            },
+        ];
+        assert_eq!(
+            summary_text("did Step 1", &todos),
+            "[Context compacted. Summary of the conversation so far:]\n\ndid Step 1\n\n[Todo list at compaction time (may be stale or inaccurate; prefer the summary above):]\n[x] Step 1\n[~] Step 2\n\n[Continue from here.]"
         );
     }
 }

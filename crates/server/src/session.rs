@@ -77,6 +77,8 @@ pub struct SessionState {
     pub window_start_seq: u64,
     /// Persist the session row even when `messages` is empty (used when stashing empty sessions).
     pub force_persist: bool,
+    /// Cached layout metadata for persisted messages before `window_start_seq` (`0..window_start_seq`).
+    pub layout_metas_prefix: Vec<MessageLayoutMeta>,
 }
 pub struct Session {
     pub id: String,
@@ -118,6 +120,7 @@ impl Session {
                 model_explicit: false,
                 window_start_seq: 0,
                 force_persist: false,
+                layout_metas_prefix: Vec::new(),
             }),
         })
     }
@@ -186,12 +189,12 @@ impl SessionState {
     }
 
     /// `Reset` event with the newest page of messages and `layout_metas` for `0..start_seq`.
-    pub(crate) fn reset_event(&self, store: &crate::store::Store) -> SessionEvent {
+    pub(crate) fn reset_event(&self) -> SessionEvent {
         let total_messages = self.window_start_seq + self.messages.len() as u64;
         let (messages, _) = page(&self.messages, self.messages.len(), None);
         let start_seq = total_messages.saturating_sub(messages.len() as u64);
         let more_before = start_seq > 0;
-        let layout_metas = self.layout_metas_before(store, start_seq);
+        let layout_metas = self.layout_metas_before(start_seq);
         SessionEvent::Reset {
             messages,
             more_before,
@@ -201,37 +204,28 @@ impl SessionState {
         }
     }
 
-    pub(crate) fn layout_metas_before(
-        &self,
-        store: &crate::store::Store,
-        end_seq: u64,
-    ) -> Vec<MessageLayoutMeta> {
+    pub(crate) fn layout_metas_before(&self, end_seq: u64) -> Vec<MessageLayoutMeta> {
         if end_seq == 0 {
             return Vec::new();
         }
-        let mut metas = Vec::new();
         let disk_end = end_seq.min(self.window_start_seq);
-        if disk_end > 0 {
-            match store.load_layout_metas(&self.info.id, 0, disk_end) {
-                Ok(loaded) => metas.extend(loaded),
-                Err(e) => {
-                    tracing::warn!(session = %self.info.id, "loading layout_metas failed: {e}")
-                }
-            }
-        }
+        let mut metas: Vec<MessageLayoutMeta> = self
+            .layout_metas_prefix
+            .iter()
+            .take_while(|m| m.seq < disk_end)
+            .cloned()
+            .collect();
         let mem_count = end_seq.saturating_sub(self.window_start_seq) as usize;
         for (idx, m) in self.messages.iter().take(mem_count).enumerate() {
             let seq = self.window_start_seq + idx as u64;
-            metas.push(crate::store::compute_layout_meta(seq, m));
+            metas.push(ref_proto::compute_layout_meta(seq, m));
         }
         metas
     }
 }
 
 /// Messages per page when the client does not say (`Attach`, `Messages`, `Reset`).
-pub(crate) const PAGE_DEFAULT: usize = 100;
-pub(crate) const PAGE_MAX: usize = 1000;
-/// A page stops growing once its serialized size (images as stubs) reaches this.
+pub(crate) use ref_proto::{PAGE_DEFAULT, PAGE_MAX};
 pub(crate) const PAGE_BYTES: usize = 1 << 20;
 
 /// The newest messages of `messages[..end]` that fit one page, with images as stubs, and

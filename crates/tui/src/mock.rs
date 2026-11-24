@@ -1624,7 +1624,9 @@ impl Mock {
     fn on_attach(&self, request_id: Option<u64>, sid: &str, foreground: bool, limit: Option<u32>) {
         // History-only session → load it live.
         self.revive_from_history(sid);
-        let limit = limit.map_or(100, |l| l as usize).clamp(1, 1000);
+        let limit = limit
+            .map_or(ref_proto::PAGE_DEFAULT, |l| l as usize)
+            .clamp(1, ref_proto::PAGE_MAX);
         let snap = {
             let mut w = self.world();
             w.subs.insert(sid.to_string());
@@ -1635,7 +1637,7 @@ impl Mock {
                 let total = s.messages.len();
                 let start_seq = total.saturating_sub(limit);
                 let layout_metas = (0..start_seq)
-                    .map(|i| crate::util::compute_layout_meta(i as u64, &s.messages[i]))
+                    .map(|i| ref_proto::compute_layout_meta(i as u64, &s.messages[i]))
                     .collect();
                 SessionSnapshot {
                     info: s.info.clone(),
@@ -1667,7 +1669,9 @@ impl Mock {
         end_seq: Option<u64>,
         limit: Option<u32>,
     ) {
-        let lim = limit.map_or(100, |l| l as usize).clamp(1, 1000);
+        let lim = limit
+            .map_or(ref_proto::PAGE_DEFAULT, |l| l as usize)
+            .clamp(1, ref_proto::PAGE_MAX);
         let res = {
             let w = self.world();
             w.sessions.get(sid).map(|s| {

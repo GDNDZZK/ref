@@ -15,14 +15,14 @@ use tokio_util::sync::CancellationToken;
 /// Key of the argument every tool call carries to say why it is made.
 pub(crate) const PURPOSE_KEY: &str = "purpose";
 
-const PURPOSE_DESC: &str = "One short sentence saying why you are calling this tool; shown to the user. Use the language of the user's messages.";
+const PURPOSE_DESC: &str = "One short sentence saying why you are calling this tool, in the language of the user's messages.";
 
 /// Name of the builtin shell tool.
 pub(crate) const BASH: &str = "bash";
 
 /// Names of the harness tools.
 pub(crate) const CONTEXT_WINDOW: &str = "context_window";
-pub(crate) const TODO: &str = "todo";
+pub(crate) const TODO: &str = ref_proto::TOOL_TODO;
 pub(crate) const COMPACT_CONTEXT: &str = "compact_context";
 
 /// Longest tool name providers accept.
@@ -123,7 +123,7 @@ fn harness_defs() -> Vec<ToolDef> {
         ),
         def(
             TODO,
-            "Maintain a todo list for multi-step work; the user sees it live. Each call REPLACES the whole list, so always send every item. Keep exactly one item in_progress while working, mark items completed as soon as they are done, and add follow-ups when discovered. Skip it for trivial single-step tasks.",
+            "Maintain a todo list for multi-step work. Each call REPLACES the whole list, so always send every item. Mark items completed as soon as they are done, and add follow-ups when discovered. Skip it for trivial single-step tasks.",
             json!({"type": "object", "properties": {
                 "todos": {"type": "array", "description": "The complete, updated list.", "items": {
                     "type": "object",
@@ -137,7 +137,7 @@ fn harness_defs() -> Vec<ToolDef> {
         ),
         def(
             COMPACT_CONTEXT,
-            "Drop the conversation history from your context and continue with only the given summary (the user still sees the full transcript). Use when the context is large (see context_window) or the history is no longer relevant. The summary must contain everything needed to continue: the user's goals and constraints, decisions made, current state, files touched, and next steps.",
+            "Drop the conversation history from your context and continue with only the given summary. Use when the context is large (see context_window) or the history is no longer relevant. The summary must contain everything needed to continue: the user's goals and constraints, decisions made, current state, files touched, and next steps.",
             json!({"type": "object", "properties": {
                 "summary": {"type": "string", "description": "Complete summary that replaces the conversation history in your context."}
             }, "required": ["summary"]}),
@@ -391,16 +391,9 @@ fn status_names() -> String {
     }
 }
 
-/// Text echoed to the model after a `todo` update.
-fn format_todos(todos: &[Todo]) -> String {
-    if todos.is_empty() {
-        return "Todo list cleared.".into();
-    }
-    let done = todos
-        .iter()
-        .filter(|t| t.status == TodoStatus::Completed)
-        .count();
-    let mut out = format!("Todo list updated ({done}/{} completed):\n", todos.len());
+/// Formatted `[ ]` / `[~]` / `[x]` / `[-]` lines for a non-empty todo list.
+pub(crate) fn format_todo_items(todos: &[Todo]) -> String {
+    let mut out = String::new();
     for t in todos {
         let mark = match t.status {
             TodoStatus::Pending => "[ ]",
@@ -411,6 +404,22 @@ fn format_todos(todos: &[Todo]) -> String {
         out.push_str(&format!("{mark} {}\n", t.content));
     }
     out.trim_end().to_string()
+}
+
+/// Text echoed to the model after a `todo` update.
+fn format_todos(todos: &[Todo]) -> String {
+    if todos.is_empty() {
+        return "Todo list cleared.".into();
+    }
+    let done = todos
+        .iter()
+        .filter(|t| t.status == TodoStatus::Completed)
+        .count();
+    format!(
+        "Todo list updated ({done}/{} completed):\n{}",
+        todos.len(),
+        format_todo_items(todos)
+    )
 }
 
 #[cfg(test)]

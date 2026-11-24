@@ -71,15 +71,22 @@ async fn nothing_reaches_the_backend_before_the_handshake_ends() {
     );
     let auth = channel::auth_json(&cn, &root.auth_mac(&sn, &cn));
     ws.send(Message::text(auth)).await.unwrap();
+    let (mut sealer, mut opener) = root.client_channel(&sn, &cn);
     // Frame 0 arrives before any backend connection is made.
-    assert!(matches!(next_message(&mut ws).await, Message::Binary(_)));
+    let frame_zero = match next_message(&mut ws).await {
+        Message::Binary(wire) => {
+            let (kind, plain) = opener.open(&wire).unwrap();
+            assert_eq!(kind, Kind::Text);
+            serde_json::from_slice::<serde_json::Value>(&plain).unwrap()
+        }
+        other => panic!("expected frame 0, got {other:?}"),
+    };
     tokio::time::sleep(SETTLE).await;
     assert!(
         !backend_was_contacted(&upstream),
         "connected before connect_upstream"
     );
 
-    let (mut sealer, mut opener) = root.client_channel(&sn, &cn);
     let connect_cmd = sealer.seal(
         Kind::Binary,
         br#"{"op":"connect_upstream","mode":"cli_default"}"#,
@@ -91,6 +98,7 @@ async fn nothing_reaches_the_backend_before_the_handshake_ends() {
             assert_eq!(kind, Kind::Binary);
             let reply: serde_json::Value = serde_json::from_slice(&plain).unwrap();
             assert_eq!(reply["op"], "upstream_ready");
+            assert_eq!(reply["cwd"], frame_zero["cwd"]);
         }
         other => panic!("expected upstream_ready, got {other:?}"),
     }

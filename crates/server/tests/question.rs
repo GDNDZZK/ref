@@ -154,7 +154,7 @@ async fn the_session_waits_for_the_answer_and_the_model_gets_it() {
     assert_eq!(last_text(&rig.session), "thanks");
     assert_eq!(
         rig.result_seen_by_the_model(),
-        "User has answered your questions: \"Which?\"=\"A\". You can now continue with the user's answers in mind."
+        "User has answered your questions: \"Which?\"=\"A\"."
     );
     assert!(is_resolved(&rig.events()));
     assert!(rig.session.lock().questions.is_empty());

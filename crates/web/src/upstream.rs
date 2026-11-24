@@ -59,6 +59,9 @@ impl Upstream {
         match request {
             UpstreamRequest::CliDefault => self.connect().await,
             UpstreamRequest::Auto => {
+                if matches!(self, Upstream::Mock(_)) {
+                    return self.connect().await;
+                }
                 let connected =
                     ref_client::discover_or_connect(&BackendTarget::Auto, || {}).await?;
                 Ok(connected.ws)

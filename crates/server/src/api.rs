@@ -502,7 +502,7 @@ async fn list_history(
         Some(cr) if cr != CREATOR_USER => {
             let cr_lower = cr.to_lowercase();
             live.iter()
-                .filter(|s| s.name == cr || s.name.to_lowercase() == cr_lower)
+                .filter(|s| s.name.to_lowercase() == cr_lower)
                 .map(|s| s.id.clone())
                 .collect()
         }
@@ -641,7 +641,7 @@ async fn attach(
         let (messages, _) = crate::session::page(&st.messages, st.messages.len(), limit);
         let start_seq = total_messages.saturating_sub(messages.len() as u64);
         let more_before = start_seq > 0;
-        let layout_metas = st.layout_metas_before(&hub.store, start_seq);
+        let layout_metas = st.layout_metas_before(start_seq);
         let mut queued: Vec<Message> = st.queue.iter().cloned().collect();
         queued.iter_mut().for_each(Message::strip_image_data);
         SessionSnapshot {
@@ -935,7 +935,6 @@ async fn undo(hub: &Arc<Hub>, session_id: String, message_id: Option<String>) ->
                     .iter()
                     .rposition(|m| m.role == Role::User && m.source == MessageSource::Human);
                 match in_mem {
-                    Some(0) if st.window_start_seq > 0 => Some((st.window_start_seq, true)),
                     Some(_) => None,
                     None if st.window_start_seq > 0 => Some((st.window_start_seq, false)),
                     None => return Err("Nothing to undo.".into()),
@@ -973,6 +972,7 @@ async fn undo(hub: &Arc<Hub>, session_id: String, message_id: Option<String>) ->
             combined.append(&mut st.messages);
             st.messages = combined;
             st.window_start_seq = new_start;
+            st.layout_metas_prefix.retain(|m| m.seq < new_start);
         }
     }
 
@@ -1002,7 +1002,7 @@ async fn undo(hub: &Arc<Hub>, session_id: String, message_id: Option<String>) ->
             crate::engine::emit_queue(hub, &s, &st);
         }
         st.info.updated_at = ref_proto::now_ms();
-        hub.emit(&s.id, st.reset_event(&hub.store));
+        hub.emit(&s.id, st.reset_event());
         hub.emit_info(&st);
         (text, images)
     };
@@ -1914,5 +1914,107 @@ mod tests {
         );
         assert_eq!(windows_binary_stem(".exe", &["exe".into()]), None);
         std::fs::remove_dir_all(&root).unwrap();
+    }
+    #[tokio::test]
+    async fn attach_and_undo_succeed_with_corrupt_history_row() {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/tmp")
+            .join(format!("ref-api-corrupt-{}", crate::util::random_hex(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut opts = crate::HubOptions::new(dir.clone());
+        opts.home = None;
+        let hub = Hub::new(opts);
+
+        let mk_msg = |id: &str, src: MessageSource, text: &str| Message {
+            id: id.into(),
+            role: Role::User,
+            time: 1,
+            time_end: None,
+            source: src,
+            parts: vec![Part::Text {
+                text: text.into(),
+                time: 1,
+            }],
+            model: None,
+            agent: None,
+            usage: None,
+            error: None,
+        };
+        let info = SessionInfo {
+            id: "ses_corrupt_api".into(),
+            name: "corrupt-api".into(),
+            title: String::new(),
+            agent: "build".into(),
+            model: Default::default(),
+            cwd: "/tmp".into(),
+            created_at: 1,
+            updated_at: 2,
+            status: ref_proto::SessionStatus::Idle,
+            attached: 0,
+            live: false,
+            parent: None,
+            must_report: false,
+            context: Default::default(),
+            todos: Vec::new(),
+            busy_since: None,
+            last_error: None,
+        };
+        hub.store.save(crate::store::Persisted {
+            info,
+            messages: vec![
+                mk_msg("m0", MessageSource::Human, "broken before compaction"),
+                mk_msg("m1", MessageSource::Human, "kept human"),
+                mk_msg("m2", MessageSource::Compaction, "summary"),
+            ],
+            reported: false,
+            context_notice: false,
+            model_explicit: false,
+            window_start_seq: 0,
+            force_persist: false,
+        });
+        hub.store.flush().unwrap();
+        {
+            let conn = rusqlite::Connection::open(&hub.store.path).unwrap();
+            conn.execute(
+                "UPDATE messages SET data = '{corrupt' WHERE session_id = 'ses_corrupt_api' AND seq = 0",
+                [],
+            )
+            .unwrap();
+        }
+
+        let conn = hub.add_conn();
+        conn.lock().hello = true;
+        let snap = handle(
+            &hub,
+            &conn,
+            Request::Attach {
+                session_id: "ses_corrupt_api".into(),
+                foreground: true,
+                limit: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(snap["snapshot"]["start_seq"], 2);
+        assert_eq!(
+            snap["snapshot"]["layout_metas"].as_array().unwrap().len(),
+            2
+        );
+
+        // Undoing back across the compaction boundary finds m1 (seq 1) without failing on seq 0.
+        let undone = handle(
+            &hub,
+            &conn,
+            Request::Undo {
+                session_id: "ses_corrupt_api".into(),
+                message_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(undone["text"], "kept human");
+
+        let _ = hub.store.close();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

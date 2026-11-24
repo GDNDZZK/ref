@@ -4,15 +4,16 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use ref_proto::{
-    ImageData, Message, MessageLayoutMeta, MessageSource, Part, PermissionRequest, QuestionRequest,
-    Role, SessionEvent, SessionInfo, SessionSnapshot,
+    ImageData, Message, MessageLayoutMeta, MessageSource, PART_KIND_IMAGE, PART_KIND_REASONING,
+    PART_KIND_TEXT, PART_KIND_TOOL, Part, PartLayoutMeta, PermissionRequest, QuestionRequest, Role,
+    SOURCE_KIND_COMPACTION, SessionEvent, SessionInfo, SessionSnapshot, compute_layout_meta,
 };
 
 use crate::ui::chat::ChatState;
-use crate::util::{apply_delta, compute_layout_meta};
+use crate::util::apply_delta;
 
 /// Messages per page for `Attach` and `Messages` range queries.
-pub const PAGE_SIZE: usize = 100;
+pub const PAGE_SIZE: usize = ref_proto::PAGE_DEFAULT;
 /// Maximum materialized messages kept in a `SessionView` before evicting distant slots.
 pub const MAX_RESIDENT_MESSAGES: usize = 300;
 /// Newest messages retained when returning to the bottom or detaching.
@@ -29,6 +30,8 @@ const MIN_ESTIMATE_WIDTH: usize = 20;
 const USER_BUBBLE_CHROME_COLS: usize = 5;
 const USER_BUBBLE_OVERHEAD_ROWS: usize = 2;
 const COMPACT_USER_MAX_LINES: usize = 6;
+const COMPACT_USER_INDENT_COLS: usize = 2;
+const MIN_ASSISTANT_INNER_COLS: usize = 10;
 const ASSISTANT_CONTENT_PAD: usize = 3;
 const ASSISTANT_FOOTER_ROWS: usize = 2;
 const ERROR_BANNER_ROWS: usize = 2;
@@ -72,7 +75,7 @@ impl MessageSlot {
                 m.role == Role::User && m.source == MessageSource::Compaction
             }
             MessageSlot::Placeholder(meta) => {
-                meta.role == Role::User && meta.source_kind == "compaction"
+                meta.role == Role::User && meta.source_kind == SOURCE_KIND_COMPACTION
             }
         }
     }
@@ -103,6 +106,49 @@ impl MessageSlot {
     }
 }
 
+fn estimate_part_rows(
+    p: &PartLayoutMeta,
+    inner: usize,
+    details: bool,
+    thinking: bool,
+) -> (usize, bool) {
+    match p.kind.as_str() {
+        PART_KIND_TEXT => {
+            let base = (p.chars as usize)
+                .div_ceil(inner)
+                .max(p.lines as usize)
+                .max(1);
+            let extra = p.code_blocks as usize * CODE_BLOCK_BORDER_ROWS
+                + p.tables as usize * TABLE_OVERHEAD_ROWS;
+            (base + extra, false)
+        }
+        PART_KIND_REASONING => {
+            if thinking {
+                let r_inner = inner.saturating_sub(REASONING_INDENT_COLS).max(1);
+                let body = (p.chars as usize)
+                    .div_ceil(r_inner)
+                    .max(p.lines as usize)
+                    .max(1);
+                (1 + body, false)
+            } else {
+                (1, true)
+            }
+        }
+        PART_KIND_TOOL => {
+            if details {
+                (
+                    TOOL_BOX_OVERHEAD_ROWS + (p.tool_lines as usize).max(1),
+                    false,
+                )
+            } else {
+                (1, true)
+            }
+        }
+        PART_KIND_IMAGE => (1, false),
+        _ => (1, false),
+    }
+}
+
 /// Estimates the rendered row count of an unloaded message from its [`MessageLayoutMeta`].
 pub fn estimate_lines(
     meta: &MessageLayoutMeta,
@@ -117,7 +163,7 @@ pub fn estimate_lines(
     }
     match meta.role {
         Role::User => {
-            if meta.source_kind == "compaction" {
+            if meta.source_kind == SOURCE_KIND_COMPACTION {
                 return COMPACTION_ESTIMATE_ROWS;
             }
             let inner = w.saturating_sub(USER_BUBBLE_CHROME_COLS).max(1);
@@ -125,14 +171,14 @@ pub fn estimate_lines(
             let mut has_image = false;
             for p in &meta.parts {
                 match p.kind.as_str() {
-                    "text" => {
+                    PART_KIND_TEXT => {
                         let wrapped = (p.chars as usize)
                             .div_ceil(inner)
                             .max(p.lines as usize)
                             .max(1);
                         body += wrapped;
                     }
-                    "image" => has_image = true,
+                    PART_KIND_IMAGE => has_image = true,
                     _ => {}
                 }
             }
@@ -142,45 +188,13 @@ pub fn estimate_lines(
             USER_BUBBLE_OVERHEAD_ROWS + body + usize::from(has_image)
         }
         Role::Assistant => {
-            let inner = w.saturating_sub(ASSISTANT_CONTENT_PAD).max(10);
+            let inner = w
+                .saturating_sub(ASSISTANT_CONTENT_PAD)
+                .max(MIN_ASSISTANT_INNER_COLS);
             let mut rows = 0usize;
             let mut prev_single = false;
             for (idx, p) in meta.parts.iter().enumerate() {
-                let (part_rows, single) = match p.kind.as_str() {
-                    "text" => {
-                        let base = (p.chars as usize)
-                            .div_ceil(inner)
-                            .max(p.lines as usize)
-                            .max(1);
-                        let extra = p.code_blocks as usize * CODE_BLOCK_BORDER_ROWS
-                            + p.tables as usize * TABLE_OVERHEAD_ROWS;
-                        (base + extra, false)
-                    }
-                    "reasoning" => {
-                        if thinking {
-                            let r_inner = inner.saturating_sub(REASONING_INDENT_COLS).max(1);
-                            let body = (p.chars as usize)
-                                .div_ceil(r_inner)
-                                .max(p.lines as usize)
-                                .max(1);
-                            (1 + body, false)
-                        } else {
-                            (1, true)
-                        }
-                    }
-                    "tool" => {
-                        if details {
-                            (
-                                TOOL_BOX_OVERHEAD_ROWS + (p.tool_lines as usize).max(1),
-                                false,
-                            )
-                        } else {
-                            (1, true)
-                        }
-                    }
-                    "image" => (1, false),
-                    _ => (1, false),
-                };
+                let (part_rows, single) = estimate_part_rows(p, inner, details, thinking);
                 if idx > 0 && !(prev_single && single) {
                     rows += 1;
                 }
@@ -198,14 +212,14 @@ pub fn estimate_lines(
 fn estimate_compact_lines(meta: &MessageLayoutMeta, w: usize) -> usize {
     match meta.role {
         Role::User => {
-            if meta.source_kind == "compaction" {
+            if meta.source_kind == SOURCE_KIND_COMPACTION {
                 return 1;
             }
-            let inner = w.saturating_sub(2).max(1);
+            let inner = w.saturating_sub(COMPACT_USER_INDENT_COLS).max(1);
             let lines: usize = meta
                 .parts
                 .iter()
-                .filter(|p| p.kind == "text")
+                .filter(|p| p.kind == PART_KIND_TEXT)
                 .map(|p| (p.chars as usize).div_ceil(inner).max(p.lines as usize))
                 .sum();
             let capped = lines.max(1).min(COMPACT_USER_MAX_LINES);
@@ -215,7 +229,7 @@ fn estimate_compact_lines(meta: &MessageLayoutMeta, w: usize) -> usize {
             let mut rows = 0usize;
             for p in &meta.parts {
                 rows += match p.kind.as_str() {
-                    "text" => (p.chars as usize).div_ceil(w).max(p.lines as usize).max(1),
+                    PART_KIND_TEXT => (p.chars as usize).div_ceil(w).max(p.lines as usize).max(1),
                     _ => 1,
                 };
             }
@@ -538,12 +552,19 @@ impl SessionView {
             if seq >= self.slots.len() {
                 break;
             }
+            let old_id = self.slots[seq].id();
+            if old_id != msg.id {
+                let old_id = old_id.to_string();
+                self.index.remove(&old_id);
+                self.index.insert(msg.id.clone(), seq);
+            } else {
+                self.index.entry(msg.id.clone()).or_insert(seq);
+            }
             self.slots[seq] = MessageSlot::Materialized(msg);
             self.versions[seq] = next_version();
             changed = true;
         }
         if changed {
-            self.reindex();
             self.needs_anchor_restore = true;
         }
         self.more_before = self.slots.first().is_some_and(|s| !s.is_materialized())
@@ -705,8 +726,16 @@ impl SessionView {
                 if let Some(i) = self.find(&message_id) {
                     self.slots.remove(i);
                     self.versions.remove(i);
+                    self.index.remove(&message_id);
+                    for (j, slot) in self.slots.iter_mut().enumerate().skip(i) {
+                        if let MessageSlot::Placeholder(meta) = slot {
+                            meta.seq = j as u64;
+                        }
+                        if let Some(idx) = self.index.get_mut(slot.id()) {
+                            *idx = j;
+                        }
+                    }
                     self.total_messages = self.slots.len() as u64;
-                    self.reindex();
                 }
             }
             SessionEvent::Reset {
@@ -848,7 +877,7 @@ pub fn message_live(m: &Message) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use ref_proto::{Delta, PartLayoutMeta};
+    use ref_proto::Delta;
 
     use super::*;
 
@@ -1137,5 +1166,42 @@ mod tests {
         assert!(!v.slots[15].is_materialized());
         assert!(v.slots[440].is_materialized());
         assert!(v.more_before);
+    }
+    #[test]
+    fn removed_shifts_trailing_placeholder_seqs_and_index() {
+        let mut v = SessionView::new(info(), true);
+        let m0 = msg("m0", Role::User);
+        let m1 = msg("m1", Role::Assistant);
+        let m2 = msg("m2", Role::User);
+        let mut p1 = compute_layout_meta(1, &m1);
+        p1.id = "p1".into();
+        let mut p2 = compute_layout_meta(2, &m2);
+        p2.id = "p2".into();
+        v.load_snapshot(SessionSnapshot {
+            info: info(),
+            messages: vec![m0],
+            more_before: false,
+            total_messages: 1,
+            start_seq: 0,
+            layout_metas: vec![],
+            pending_permissions: vec![],
+            pending_questions: vec![],
+            queued: vec![],
+        });
+        v.slots.push(MessageSlot::Placeholder(p1));
+        v.versions.push(next_version());
+        v.slots.push(MessageSlot::Placeholder(p2));
+        v.versions.push(next_version());
+        v.total_messages = 3;
+        v.reindex();
+
+        assert!(v.apply(SessionEvent::Removed {
+            message_id: "m0".into()
+        }));
+        assert_eq!(v.find("m0"), None);
+        assert_eq!(v.find("p1"), Some(0));
+        assert_eq!(v.find("p2"), Some(1));
+        assert_eq!(v.slots[0].as_meta().unwrap().seq, 0);
+        assert_eq!(v.slots[1].as_meta().unwrap().seq, 1);
     }
 }

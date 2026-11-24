@@ -1117,7 +1117,9 @@ pub enum BackendAction {
 const BACKEND_DIALOG_W: u16 = 74;
 const BACKEND_DIALOG_H: u16 = 15;
 const BACKEND_MIN_W: u16 = 24;
-const BACKEND_MIN_H: u16 = 10;
+const BACKEND_MIN_H: u16 = 12;
+const BACKEND_INNER_MIN_W: u16 = 10;
+const BACKEND_INNER_MIN_H: u16 = 10;
 
 pub struct BackendDialog {
     pub url: Editor,
@@ -1308,7 +1310,7 @@ impl BackendDialog {
             .min(screen.height);
         let r = frame(buf, screen, w, h, "Backend connection", t);
         self.rect = r;
-        if r.width < 10 || r.height < 8 {
+        if r.width < BACKEND_INNER_MIN_W || r.height < BACKEND_INNER_MIN_H {
             return;
         }
         let inner = Rect::new(
@@ -1394,16 +1396,25 @@ impl BackendDialog {
             self.cursor_at = tok_cur;
         }
 
+        let btn_y = inner.y + inner.height.saturating_sub(3);
+        let hint_y = inner.y + inner.height.saturating_sub(1);
+
         if let Some(err) = &self.error {
-            buf.set_string(
-                inner.x,
-                inner.y + 8,
-                text::truncate(err, iw),
-                Style::new().fg(fade(theme::ERROR)).bg(bg),
-            );
+            let err_y = if btn_y > tok_y + 2 {
+                inner.y + 8
+            } else {
+                btn_y + 1
+            };
+            if err_y < hint_y {
+                buf.set_string(
+                    inner.x,
+                    err_y,
+                    text::truncate(err, iw),
+                    Style::new().fg(fade(theme::ERROR)).bg(bg),
+                );
+            }
         }
 
-        let btn_y = inner.y + inner.height.saturating_sub(3);
         let mut bx = inner.x;
         let btns = [
             ("Connect (temp)", BackendField::ConnectTemp),
@@ -1435,7 +1446,6 @@ impl BackendDialog {
             bx += bw + 1;
         }
 
-        let hint_y = inner.y + inner.height.saturating_sub(1);
         buf.set_string(
             inner.x,
             hint_y,
@@ -1467,5 +1477,50 @@ impl Dialog {
             Dialog::Stash(d) => d.opened,
         };
         o.elapsed() < OPEN_SETTLE
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backend_dialog_error_never_overlaps_token_buttons_or_hint_at_min_height() {
+        for height in [BACKEND_MIN_H, 13, 14, 20] {
+            let area = Rect::new(0, 0, 80, height);
+            let mut buf = Buffer::empty(area);
+            let mut dlg = BackendDialog::new(Some("http://bad"), None, "local".into());
+            dlg.error = Some("invalid URL".into());
+            dlg.draw(&mut buf, area);
+
+            let row_text = |y: u16| -> String {
+                (0..area.width)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+            };
+            assert!(
+                !dlg.btn_rects.is_empty(),
+                "buttons must render at height={height}"
+            );
+            let tok_y = dlg.token_rect.y;
+            let btn_y = dlg.btn_rects[0].0.y;
+            let hint_y = dlg.rect.y + dlg.rect.height - 2;
+            assert!(
+                !row_text(tok_y).contains("invalid URL"),
+                "error overlapped token at height={height}"
+            );
+            assert!(
+                !row_text(btn_y).contains("invalid URL"),
+                "error overlapped buttons at height={height}"
+            );
+            assert!(
+                !row_text(hint_y).contains("invalid URL"),
+                "error overlapped hint at height={height}"
+            );
+            assert!(
+                (tok_y + 1..hint_y).any(|y| row_text(y).contains("invalid URL")),
+                "error text was not drawn at height={height}"
+            );
+        }
     }
 }

@@ -175,9 +175,15 @@ pub fn validate_explicit_url(url: &str) -> Result<(), ConnectError> {
             reason: "URL is empty".into(),
         });
     }
-    let rest = if trimmed.len() >= 5 && trimmed[..5].eq_ignore_ascii_case("ws://") {
+    let rest = if trimmed
+        .get(..5)
+        .is_some_and(|p| p.eq_ignore_ascii_case("ws://"))
+    {
         &trimmed[5..]
-    } else if trimmed.len() >= 6 && trimmed[..6].eq_ignore_ascii_case("wss://") {
+    } else if trimmed
+        .get(..6)
+        .is_some_and(|p| p.eq_ignore_ascii_case("wss://"))
+    {
         &trimmed[6..]
     } else {
         return Err(ConnectError::InvalidUrl {
@@ -264,7 +270,9 @@ pub async fn discover_or_connect(
                     mock: Some(mock),
                 }),
                 Err(e) => {
-                    let _ = mock.shutdown().await;
+                    if let Err(shutdown_err) = mock.shutdown().await {
+                        tracing::warn!("failed to shut down mock backend: {shutdown_err}");
+                    }
                     Err(e)
                 }
             }
@@ -402,6 +410,9 @@ mod tests {
         assert!(validate_explicit_url("ws:///path").is_err());
         assert!(validate_explicit_url("ws://:8080").is_err());
         assert!(validate_explicit_url("ws://[]").is_err());
+        assert!(validate_explicit_url("网址:1").is_err());
+        assert!(validate_explicit_url("网址:1234").is_err());
+        assert!(validate_explicit_url("ｗｓ://x").is_err());
     }
 
     #[tokio::test]

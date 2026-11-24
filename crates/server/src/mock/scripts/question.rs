@@ -28,7 +28,7 @@ fn option(label: &str, description: &str, default: bool) -> Value {
 fn answers(ctx: &Ctx) -> Option<&str> {
     let result = ctx.tool_results.first()?;
     let rest = result.strip_prefix(ANSWERED_PREFIX)?;
-    rest.split(ANSWERED_SUFFIX).next()
+    Some(rest.strip_suffix(ANSWERED_SUFFIX).unwrap_or(rest))
 }
 
 fn reply(ctx: &Ctx) -> Round {

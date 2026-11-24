@@ -623,7 +623,7 @@ const TITLE_MAX_CHARS: usize = 80;
 /// Extra score of a canonical command name over its aliases.
 const CANONICAL_NAME_SCORE_BONUS: i64 = 5;
 /// Letters of a logo line printed in the primary colour; the rest is muted.
-const LOGO_PRIMARY_CHARS: usize = 10;
+pub(crate) const LOGO_PRIMARY_CHARS: usize = 10;
 const EPILOGUE_LABEL_WIDTH: usize = 10;
 
 pub(crate) fn load_prompt_history_from(
@@ -2021,10 +2021,6 @@ impl App {
         if let Some(old) = self.current.clone()
             && old != sid
         {
-            if let Some(v) = self.views.get_mut(&old) {
-                v.foreground = false;
-                v.trim_to_tail(TAIL_KEEP_MESSAGES);
-            }
             self.views.remove(&old);
             self.client.notify(Request::Detach { session_id: old });
         }
@@ -2064,10 +2060,6 @@ impl App {
             self.toasts.info("No active session");
             return;
         };
-        if let Some(v) = self.views.get_mut(&sid) {
-            v.foreground = false;
-            v.trim_to_tail(TAIL_KEEP_MESSAGES);
-        }
         self.views.remove(&sid);
         if let Some(info) = self.live.iter_mut().find(|s| s.id == sid) {
             info.attached = info.attached.saturating_sub(1);

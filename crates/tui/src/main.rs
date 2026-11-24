@@ -223,11 +223,13 @@ fn main() -> anyhow::Result<()> {
         match prefs::resolve_target(cli.server.as_deref(), cli.token.as_deref(), &prefs) {
             Ok((t, s)) => (t, s, warn),
             Err(e) if cli.server.is_some() => anyhow::bail!("{e}"),
-            Err(e) => (
-                BackendTarget::Auto,
-                BackendSource::Auto,
-                Some(warn.unwrap_or(e)),
-            ),
+            Err(e) => {
+                let combined = match warn {
+                    Some(w) => format!("{w}; {e}"),
+                    None => e,
+                };
+                (BackendTarget::Auto, BackendSource::Auto, Some(combined))
+            }
         }
     };
 
