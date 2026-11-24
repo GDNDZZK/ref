@@ -54,6 +54,7 @@ const layout = useLayoutStore()
 const mcp = useMcpStore()
 const notices = useNoticesStore()
 
+const MAX_STASH_BADGE_COUNT = 9
 const HISTORY_SEARCH_DEBOUNCE_MS = 150
 const query = computed({
   get: () => workspace.historyQuery,
@@ -192,6 +193,12 @@ function toggleFilterMenu(): void {
 function report(promise: Promise<unknown>): void {
   promise.catch(notices.pushError)
 }
+
+const stashBadgeLabel = computed(() =>
+  workspace.groups.length > MAX_STASH_BADGE_COUNT
+    ? `${MAX_STASH_BADGE_COUNT}+`
+    : String(workspace.groups.length),
+)
 
 function onStashButtonClick(): void {
   if (workspace.live.length > 0) {
@@ -585,7 +592,7 @@ onBeforeUnmount(() => {
           @contextmenu.prevent="openStashDialog"
         >
           <Icon :icon="workspace.groups.length > 0 ? 'stash-count-20' : 'stash-20'" />
-          <span v-if="workspace.groups.length > 0" class="stash-count">{{ workspace.groups.length }}</span>
+          <span v-if="workspace.groups.length > 0" class="stash-count">{{ stashBadgeLabel }}</span>
         </button>
         <button type="button" class="new" @click="report(commands.run('new'))">
           <Icon icon="plus-20" />
@@ -985,7 +992,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   padding-top: 2px;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1;

@@ -7,6 +7,7 @@ import {
   clearSavedBackend,
   maskToken,
   readSavedBackend,
+  resolveBackend,
   subscribeBackendStorage,
   validateBackendUrl,
   writeSavedBackend,
@@ -49,12 +50,9 @@ export const useConnectionStore = defineStore('connection', () => {
   const fatal = ref<string>() // i18n key of an error that stops the app before it connects
   const keyRequired = ref(false) // ref-web needs a key we do not have: the key-entry page shows
   const reconnected = ref(0) // counts the times the connection came back after a loss
-  const switchEpoch = ref(0)
 
   const temporaryBackend = shallowRef<BackendConfig>()
   const savedBackend = shallowRef<BackendConfig | undefined>(readSavedBackend())
-  const backendSource = ref<BackendSource>('auto')
-
   const frameListeners = new Set<(frame: EventFrame) => void>()
   const openListeners = new Set<(isReconnect: boolean) => void>()
   const beforeSwitchListeners = new Set<() => void>()
@@ -65,14 +63,22 @@ export const useConnectionStore = defineStore('connection', () => {
   let reloadingCount = 0
   let mutatingCount = 0
   let sawConfigChangedDuringMutation = false
-  let address: { url: string; cwd: string | undefined; direct?: boolean; token?: string } | undefined
+  const address = shallowRef<{ url: string; cwd: string | undefined; direct?: boolean; token?: string }>()
   let keyOutcome: ((accepted: boolean) => void) | undefined
 
-  const activeOverride = computed(() => temporaryBackend.value ?? savedBackend.value)
-  const activeBackendUrl = computed(() => activeOverride.value?.url ?? address?.url ?? '')
-  const activeBackendToken = computed(() => activeOverride.value?.token ?? address?.token)
+  const resolved = computed(() => {
+    const addr = address.value
+    return resolveBackend({
+      directUrl: addr?.direct ? addr.url : directServerUrl(),
+      temporary: temporaryBackend.value,
+      saved: savedBackend.value,
+      defaultUrl: addr?.url ?? '',
+    })
+  })
+  const backendSource = computed<BackendSource>(() => resolved.value.source)
+  const activeBackendUrl = computed(() => resolved.value.upstreamUrl ?? resolved.value.url)
+  const activeBackendToken = computed(() => resolved.value.token ?? address.value?.token)
   const maskedBackendToken = computed(() => maskToken(activeBackendToken.value))
-
   function settleKey(accepted: boolean): void {
     keyOutcome?.(accepted)
     keyOutcome = undefined
@@ -86,37 +92,27 @@ export const useConnectionStore = defineStore('connection', () => {
     return true
   }
 
-  function resolveEffectiveSource(isDirect: boolean): BackendSource {
-    if (temporaryBackend.value) return 'temporary'
-    if (savedBackend.value) return 'saved'
-    return isDirect ? 'direct' : 'auto'
-  }
-
   // `cwd`: the directory new sessions start in; ref-web's own is used when there is none.
   function start(url: string, cwd?: string, options: StartOptions = {}): void {
-    address = { url, cwd, direct: options.direct, token: options.token }
-    const direct = Boolean(options.direct) || directServerUrl() !== undefined
-    const override = activeOverride.value
-    const source = resolveEffectiveSource(direct)
-    backendSource.value = source
+    address.value = { url, cwd, direct: options.direct, token: options.token }
+    const target = resolved.value
 
-    if (!direct && !keys.hasKey()) {
+    if (!target.direct && !keys.hasKey()) {
       keys.required = true
       keyRequired.value = true
       return
     }
 
-    const dialUrl = direct && override ? override.url : url
     const upstreamTarget: UpstreamTarget | undefined =
-      !direct && override
-        ? { mode: 'explicit', url: override.url, token: override.token }
+      !target.direct && target.upstreamUrl
+        ? { mode: 'explicit', url: target.upstreamUrl, token: target.token }
         : undefined
-    const token = override?.token ?? options.token
+    const token = target.token ?? options.token
 
     const created = new RefConnection({
-      connect: direct
-        ? webSocketTransport(dialUrl)
-        : channelTransport(webSocket(url), keys, undefined, upstreamTarget),
+      connect: target.direct
+        ? webSocketTransport(target.url)
+        : channelTransport(webSocket(target.url), keys, undefined, upstreamTarget),
       client: CLIENT_NAME,
       cwd,
       token,
@@ -166,7 +162,6 @@ export const useConnectionStore = defineStore('connection', () => {
     fatal.value = undefined
     state.value = 'connecting'
     detail.value = ''
-    switchEpoch.value++
     for (const listener of beforeSwitchListeners) listener()
   }
 
@@ -180,34 +175,39 @@ export const useConnectionStore = defineStore('connection', () => {
       savedBackend.value = writeSavedBackend({ url: action.url, token: action.token })
       temporaryBackend.value = undefined
     } else {
+      const hadOverride = temporaryBackend.value !== undefined || savedBackend.value !== undefined
       temporaryBackend.value = undefined
       clearSavedBackend()
       savedBackend.value = undefined
+      if (!hadOverride) return
     }
     resetConnectionState()
-    if (!address) return
-    start(address.url, address.cwd, { direct: address.direct, token: address.token })
+    const addr = address.value
+    if (!addr) return
+    start(addr.url, addr.cwd, { direct: addr.direct, token: addr.token })
   }
 
   const stopStorageSync = subscribeBackendStorage((next) => {
     const previous = savedBackend.value
     savedBackend.value = next
     const same = previous?.url === next?.url && previous?.token === next?.token
-    if (same || !address || temporaryBackend.value || backendSource.value === 'direct') return
+    const addr = address.value
+    if (same || !addr || temporaryBackend.value || backendSource.value === 'direct') return
     resetConnectionState()
-    start(address.url, address.cwd, { direct: address.direct, token: address.token })
+    start(addr.url, addr.cwd, { direct: addr.direct, token: addr.token })
   })
   onScopeDispose(stopStorageSync)
 
   // The key-entry page: signs in with the typed key. True when ref-web accepted it.
   function submitKey(key: string): Promise<boolean> {
     return new Promise((resolve) => {
-      if (!address) return resolve(false)
+      const addr = address.value
+      if (!addr) return resolve(false)
       keys.setKey(key)
       settleKey(false)
       keyOutcome = resolve
       connection?.close()
-      start(address.url, address.cwd, { direct: address.direct, token: address.token })
+      start(addr.url, addr.cwd, { direct: addr.direct, token: addr.token })
     })
   }
 
@@ -332,7 +332,6 @@ export const useConnectionStore = defineStore('connection', () => {
     config,
     backendTooOld,
     reconnected,
-    switchEpoch,
     backendSource,
     temporaryBackend,
     savedBackend,

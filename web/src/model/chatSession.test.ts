@@ -273,7 +273,10 @@ describe('ChatSession', () => {
       )
       let resolveSlow!: (v: unknown) => void
       const messagesRange = vi.fn().mockImplementationOnce(
-        () => new Promise((resolve) => { resolveSlow = resolve }),
+        () =>
+          new Promise((resolve) => {
+            resolveSlow = resolve
+          }),
       )
       Object.assign(api, { messagesRange })
       await session.attach(true)
@@ -303,13 +306,15 @@ describe('ChatSession', () => {
       ...userMessage(`m${i}`, `text ${i}`),
       parts: [
         { type: 'text' as const, text: `text ${i}`, time: 0 },
-        { type: 'image' as const, mime: 'image/png', data: '', id: `img_${i}`, size: 10 },
+        { type: 'image' as const, name: null, mime: 'image/png', data: '', id: `img_${i}`, size: 10 },
       ],
     }))
     api.attach.mockResolvedValue(snapshot(messages))
-    const getImage = vi.fn().mockImplementation((_sid: string, imgId: string) =>
-      Promise.resolve({ mime: 'image/png', data: imgId }),
-    )
+    const getImage = vi
+      .fn()
+      .mockImplementation((_sid: string, imgId: string) =>
+        Promise.resolve({ mime: 'image/png', data: imgId }),
+      )
     Object.assign(api, { getImage })
     await session.attach(true)
     await session.imageUrl('img_0')
@@ -333,5 +338,73 @@ describe('ChatSession', () => {
     expect(session.residentCount).toBe(100)
     await session.imageUrl('img_199')
     expect(getImage).toHaveBeenCalledTimes(4)
+  })
+
+  it('does not reset the range timer when the target range is unchanged during streaming, and updates moreBefore on start_seq 0', async () => {
+    vi.useFakeTimers()
+    try {
+      const { api, session } = setup()
+      const metas = Array.from({ length: 4 }, (_, seq) => ({
+        seq,
+        id: `m${seq}`,
+        role: 'user' as const,
+        source_kind: 'human',
+        has_error: false,
+        parts: [],
+      }))
+      api.attach.mockResolvedValue(
+        snapshot([userMessage('m4', 'latest')], {
+          more_before: true,
+          total_messages: 5,
+          start_seq: 4,
+          layout_metas: metas,
+        }),
+      )
+      const messagesRange = vi.fn().mockResolvedValue({
+        messages: metas.map((m) => userMessage(m.id, m.id)),
+        more_before: false,
+        start_seq: 0,
+        end_seq: 4,
+      })
+      Object.assign(api, { messagesRange })
+      await session.attach(true)
+
+      session.requestRange(0, 2)
+      vi.advanceTimersByTime(50)
+      session.requestRange(0, 2) // repeated call while streaming must not reset the 80ms timer
+      vi.advanceTimersByTime(30)
+      expect(messagesRange).toHaveBeenCalledTimes(1)
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(session.moreBefore).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('cancels in-flight range loads when a message is removed or undone', async () => {
+    const { api, session } = setup()
+    const metas = [
+      { seq: 0, id: 'm0', role: 'user' as const, source_kind: 'human', has_error: false, parts: [] },
+    ]
+    api.attach.mockResolvedValue(
+      snapshot([userMessage('m1', 'keep')], {
+        more_before: true,
+        total_messages: 2,
+        start_seq: 1,
+        layout_metas: metas,
+      }),
+    )
+    let resolveRange!: (v: unknown) => void
+    const messagesRange = vi.fn().mockReturnValue(new Promise((resolve) => (resolveRange = resolve)))
+    const undo = vi.fn().mockResolvedValue({ text: '', images: [] })
+    Object.assign(api, { messagesRange, undo })
+    await session.attach(true)
+
+    const loading = session.loadRange(0, 1)
+    await session.undo('m1')
+    resolveRange({ messages: [userMessage('m0', 'stale')], more_before: false, start_seq: 0, end_seq: 1 })
+    await loading
+    expect(session.slots[0]?.kind).toBe('placeholder')
   })
 })

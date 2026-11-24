@@ -70,10 +70,15 @@ export const useNoticesStore = defineStore('notices', () => {
     start(id, SHOWN_FOR_MS[level])
     while (notices.value.length > MAX_SHOWN) dismiss(notices.value[0]!.id)
   }
+  function clear(): void {
+    for (const timer of timers.values()) clearTimeout(timer.handle)
+    timers.clear()
+    notices.value = []
+  }
 
   function pushError(error: unknown): void {
     push('error', describeError(error))
   }
 
-  return { notices, push, pushError, dismiss, pause, resume }
+  return { notices, push, pushError, dismiss, pause, resume, clear }
 })

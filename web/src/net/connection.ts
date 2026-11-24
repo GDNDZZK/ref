@@ -12,6 +12,8 @@ import { PROTOCOL_VERSION } from '../proto/generated'
 import type { JsonValue, NotifyKind, Request, ServerFrame } from '../proto/generated'
 import type { ServerInfo, Transport, TransportFactory } from './transport.ts'
 
+export type ConnectionState = 'connecting' | 'open' | 'closed'
+
 export type EventFrame = Exclude<ServerFrame, { kind: 'response' }>
 
 export interface HelloResult {
@@ -217,6 +219,7 @@ export class RefConnection {
         return
       default:
         this.reportError(new RefError(`unknown frame kind "${String((frame as { kind: unknown }).kind)}"`))
+    }
   }
 
   private settle(frame: Extract<ServerFrame, { kind: 'response' }>): void {

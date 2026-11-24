@@ -1,3 +1,4 @@
+import { describeError } from '../errorMessage.ts'
 import { browserStorage, type KeyStorage } from './keystore.ts'
 import { defaultServerUrl, directServerUrl } from './transport.ts'
 
@@ -21,8 +22,7 @@ export interface ResolvedBackend {
 }
 
 export type UrlValidation =
-  | { ok: true; url: string }
-  | { ok: false; errorKey: 'dialog.backend.emptyUrl' | 'dialog.backend.invalidUrl' }
+  { ok: true; url: string } | { ok: false; errorKey: 'dialog.backend.emptyUrl' | 'dialog.backend.invalidUrl' }
 
 export function validateBackendUrl(raw: string): UrlValidation {
   const trimmed = raw.trim()
@@ -43,13 +43,7 @@ export function maskToken(token?: string): string {
   return `••••${token.slice(-4)}`
 }
 
-export function readSavedBackend(storage: KeyStorage | undefined = browserStorage()): BackendConfig | undefined {
-  let raw: string | null
-  try {
-    raw = storage?.getItem(BACKEND_STORAGE_KEY) ?? null
-  } catch {
-    return undefined
-  }
+export function parseSavedBackend(raw: string | null): BackendConfig | undefined {
   if (!raw) return undefined
   try {
     const parsed = JSON.parse(raw) as Partial<BackendConfig>
@@ -63,6 +57,16 @@ export function readSavedBackend(storage: KeyStorage | undefined = browserStorag
   }
 }
 
+export function readSavedBackend(
+  storage: KeyStorage | undefined = browserStorage(),
+): BackendConfig | undefined {
+  try {
+    return parseSavedBackend(storage?.getItem(BACKEND_STORAGE_KEY) ?? null)
+  } catch {
+    return undefined
+  }
+}
+
 export function writeSavedBackend(
   config: BackendConfig,
   storage: KeyStorage | undefined = browserStorage(),
@@ -71,7 +75,11 @@ export function writeSavedBackend(
   if (!checked.ok) throw new Error(checked.errorKey)
   const token = config.token?.trim() || undefined
   const stored: BackendConfig = token ? { url: checked.url, token } : { url: checked.url }
-  storage?.setItem(BACKEND_STORAGE_KEY, JSON.stringify(stored))
+  try {
+    storage?.setItem(BACKEND_STORAGE_KEY, JSON.stringify(stored))
+  } catch (error) {
+    throw new Error(`Failed to save backend configuration: ${describeError(error)}`, { cause: error })
+  }
   return stored
 }
 
@@ -129,7 +137,7 @@ export function resolveBackend(
       direct: false,
     }
   }
-  const saved = options.saved ?? readSavedBackend()
+  const saved = 'saved' in options ? options.saved : readSavedBackend()
   if (saved) {
     return {
       source: 'saved',
@@ -150,7 +158,7 @@ export function subscribeBackendStorage(onChange: (saved: BackendConfig | undefi
   if (typeof window === 'undefined') return () => {}
   const handler = (event: StorageEvent): void => {
     if (event.key !== BACKEND_STORAGE_KEY && event.key !== null) return
-    onChange(readSavedBackend())
+    onChange(event.key === null ? undefined : parseSavedBackend(event.newValue))
   }
   window.addEventListener('storage', handler)
   return () => window.removeEventListener('storage', handler)

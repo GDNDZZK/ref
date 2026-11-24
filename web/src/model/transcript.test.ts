@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Message, MessageLayoutMeta, SessionEvent } from '../proto/generated'
 import type { Block } from './blocks.ts'
-import { EVICT_BUFFER, MAX_RESIDENT_MESSAGES, PAGE_SIZE, TAIL_KEEP_MESSAGES, Transcript } from './transcript.ts'
+import { EVICT_BUFFER, PAGE_SIZE, TAIL_KEEP_MESSAGES, Transcript } from './transcript.ts'
 import {
   assistantMessage,
   info,
@@ -107,7 +107,16 @@ describe('Transcript: loading', () => {
   it('reset replaces the history', () => {
     const { transcript } = setup()
     transcript.load(snapshot([userMessage('u1', 'old')]))
-    transcript.apply({ type: 'reset', messages: [userMessage('u2', 'new')], more_before: false, total_messages: 1, start_seq: 0 }, 0)
+    transcript.apply(
+      {
+        type: 'reset',
+        messages: [userMessage('u2', 'new')],
+        more_before: false,
+        total_messages: 1,
+        start_seq: 0,
+      },
+      0,
+    )
     transcript.flush(0)
     expect(texts(transcript.blocks)).toEqual(['new'])
   })
@@ -399,7 +408,10 @@ describe('Transcript: compaction', () => {
     const { transcript } = setup()
     transcript.load(snapshot(compacted))
     transcript.flush(0)
-    transcript.apply({ type: 'reset', messages: compacted.slice(0, 3), more_before: false, total_messages: 3, start_seq: 0 }, 0)
+    transcript.apply(
+      { type: 'reset', messages: compacted.slice(0, 3), more_before: false, total_messages: 3, start_seq: 0 },
+      0,
+    )
     transcript.flush(0)
     expect(transcript.blocks.filter((block) => block.kind === 'compaction')).toMatchObject([{ last: true }])
     expect(transcript.blocks.filter((block) => block.stale).map((block) => block.key)).toEqual([
@@ -415,7 +427,16 @@ describe('Transcript: reset and older pages', () => {
     transcript.load(snapshot([userMessage('u1', 'a'), userMessage('u2', 'b')]))
     transcript.flush(0)
     const before = transcript.blocks
-    transcript.apply({ type: 'reset', messages: [userMessage('u1', 'a')], more_before: false, total_messages: 1, start_seq: 0 }, 0)
+    transcript.apply(
+      {
+        type: 'reset',
+        messages: [userMessage('u1', 'a')],
+        more_before: false,
+        total_messages: 1,
+        start_seq: 0,
+      },
+      0,
+    )
     transcript.flush(0)
     expect(transcript.blocks).toHaveLength(2)
     expect(transcript.blocks[0]).toBe(before[0])
@@ -473,18 +494,33 @@ describe('Transcript: sliding window and eviction', () => {
     role: 'user',
     source_kind: 'human',
     has_error: false,
-    parts: [{ kind: 'text', chars: 10, lines: 1, code_blocks: 0, code_lines: 0, tables: 0, tool: null, tool_lines: 0, width: null, height: null }],
+    parts: [
+      {
+        kind: 'text',
+        chars: 10,
+        lines: 1,
+        code_blocks: 0,
+        code_lines: 0,
+        tables: 0,
+        tool: null,
+        tool_lines: 0,
+        width: null,
+        height: null,
+      },
+    ],
   })
 
   it('exports expected sliding-window constants', () => {
-    expect([PAGE_SIZE, MAX_RESIDENT_MESSAGES, TAIL_KEEP_MESSAGES, EVICT_BUFFER]).toEqual([100, 300, 100, 150])
+    expect([PAGE_SIZE, TAIL_KEEP_MESSAGES, EVICT_BUFFER]).toEqual([100, 100, 150])
   })
 
   it('populates 0..total_messages slots from layout_metas and messages, inserts ranges, and evicts outside window', () => {
     const { transcript } = setup()
     const metas = [meta(0, 'm0'), meta(1, 'm1'), meta(2, 'm2')]
     const msgs: Message[] = [userMessage('m3', 'three'), userMessage('m4', 'four')]
-    transcript.load(snapshot(msgs, { more_before: true, total_messages: 5, start_seq: 3, layout_metas: metas }))
+    transcript.load(
+      snapshot(msgs, { more_before: true, total_messages: 5, start_seq: 3, layout_metas: metas }),
+    )
     transcript.flush(0)
 
     expect(transcript.totalCount).toBe(5)
@@ -537,5 +573,22 @@ describe('Transcript: sliding window and eviction', () => {
       'materialized',
       'materialized',
     ])
+  })
+
+  it('reuses unchanged slot objects across streaming flushes', () => {
+    const { transcript } = setup()
+    transcript.load(
+      snapshot([userMessage('u1', 'hi'), assistantMessage('a1', [textPart('start')])], {
+        info: info({ status: { state: 'busy' } }),
+      }),
+    )
+    transcript.flush(0)
+    const before = transcript.slots
+
+    transcript.apply({ type: 'delta', message_id: 'a1', index: 0, delta: { type: 'text', text: ' more' } }, 0)
+    transcript.flush(LATER)
+    const after = transcript.slots
+    expect(after[0]).toBe(before[0])
+    expect(after[1]).not.toBe(before[1])
   })
 })

@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { channelTransport } from './channel.ts'
 import type { KeySource } from './channel.ts'
 import { KIND_BINARY, KIND_TEXT, Opener, Sealer, channelKeys, fromHex, toHex, utf8 } from './channelCrypto.ts'
+import type { SocketHandlers, TransportHandlers } from './transport.ts'
 
 // The vectors shared with crates/web: the page's nonce is fixed, so its auth message is too.
 const FIXTURE = fileURLToPath(new URL('../../../crates/web/fixtures/channel.json', import.meta.url))
@@ -291,5 +292,72 @@ describe('channelTransport', () => {
     socketHandlers.message(ready)
     await flush()
     expect(handlers.opened).toHaveBeenCalledOnce()
+  })
+
+  it('sends cli_default for mock or cli_server and auto otherwise when no upstream override is set', async () => {
+    for (const [frame0Payload, expectedMode] of [
+      [{ version: '0.2.4', cwd: '/work', mock: true, channel_control: true }, 'cli_default'],
+      [
+        { version: '0.2.4', cwd: '/work', mock: false, cli_server: true, channel_control: true },
+        'cli_default',
+      ],
+      [{ version: '0.2.4', cwd: '/work', mock: false, channel_control: true }, 'auto'],
+    ] as const) {
+      const keys = { rootFor: vi.fn().mockResolvedValue(hex(fixture.root, 32)), rejected: vi.fn() }
+      const sent: (string | Uint8Array)[] = []
+      let socketHandlers!: SocketHandlers
+      const handlers = { opened: vi.fn(), message: vi.fn(), closed: vi.fn() } satisfies TransportHandlers
+      const factory = channelTransport(
+        (given) => {
+          socketHandlers = given
+          return { send: (data) => void sent.push(data), close: vi.fn() }
+        },
+        keys,
+        () => hex(fixture.cn, 16),
+      )
+      factory(handlers)
+      socketHandlers.opened()
+      socketHandlers.message(helloText())
+      await flush()
+
+      const derived = channelKeys(hex(fixture.root, 32), hex(fixture.sn, 16), hex(fixture.cn, 16))
+      const serverSealer = new Sealer(derived.toPage)
+      const serverOpener = new Opener(derived.toServer)
+      socketHandlers.message(serverSealer.seal(KIND_TEXT, utf8(JSON.stringify(frame0Payload))))
+      await flush()
+
+      const ctrlOpened = serverOpener.open(sent[1] as Uint8Array)
+      expect(ctrlOpened.kind).toBe(KIND_BINARY)
+      expect(JSON.parse(new TextDecoder().decode(ctrlOpened.plaintext))).toEqual({
+        op: 'connect_upstream',
+        mode: expectedMode,
+      })
+    }
+  })
+
+  it('fails explicitly when a non-default upstream is requested without channel_control', async () => {
+    const keys = { rootFor: vi.fn().mockResolvedValue(hex(fixture.root, 32)), rejected: vi.fn() }
+    let socketHandlers!: SocketHandlers
+    const socketClose = vi.fn()
+    const handlers = { opened: vi.fn(), message: vi.fn(), closed: vi.fn() } satisfies TransportHandlers
+    const factory = channelTransport(
+      (given) => {
+        socketHandlers = given
+        return { send: vi.fn(), close: socketClose }
+      },
+      keys,
+      () => hex(fixture.cn, 16),
+      { mode: 'explicit', url: 'ws://custom:9000/ws' },
+    )
+    factory(handlers)
+    socketHandlers.opened()
+    socketHandlers.message(helloText())
+    await flush()
+    socketHandlers.message(frame(0))
+    await flush()
+
+    expect(handlers.opened).not.toHaveBeenCalled()
+    expect(handlers.closed).toHaveBeenCalledWith('this ref-web cannot switch the upstream')
+    expect(socketClose).toHaveBeenCalled()
   })
 })

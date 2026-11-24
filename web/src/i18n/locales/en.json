@@ -499,7 +499,8 @@
     "compacting": "Compacting context…",
     "retrying": "Retrying in {seconds}s (attempt {attempt}): {error}",
     "retryNow": "Click to retry now",
-    "contextTitle": "Context: {used} of {max} tokens ({percent}%). Recommended compaction at {recommend}, automatic at {auto}."
+    "contextTitle": "Context: {used} of {max} tokens ({percent}%). Recommended compaction at {recommend}, automatic at {auto}.",
+    "waitingQuestion": "Waiting for your answer"
   },
   "question": {
     "custom": "Type your own answer",

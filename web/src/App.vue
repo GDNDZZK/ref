@@ -21,6 +21,8 @@ import ThemeToggle from './components/ThemeToggle.vue'
 import { registerBuiltinCommands } from './commands/builtin.ts'
 import { installCustomCommands } from './commands/custom.ts'
 import { setBaseTitle } from './composables/useAttention.ts'
+import { usePermissionKeys } from './composables/usePermissionKeys.ts'
+import { useShortcuts } from './composables/useShortcuts.ts'
 import { APP_TITLE } from './notify/center.ts'
 import type { SessionInfo } from './proto/generated'
 import { creatorLabel, liveLabel } from './shell/sessionRow.ts'
@@ -37,6 +39,7 @@ const workspace = useWorkspaceStore()
 const commands = useCommandsStore()
 const dialogs = useDialogsStore()
 const layout = useLayoutStore()
+const SPLIT_FILTER_MENU_GAP_PX = 6
 const notices = useNoticesStore()
 
 registerBuiltinCommands()
@@ -132,7 +135,10 @@ function toggleSplitFilterMenu(): void {
     return
   }
   const rect = splitFilterButton.value?.getBoundingClientRect()
-  splitFilterMenuCoords.value = { x: rect ? rect.left : 0, y: rect ? rect.bottom + 6 : 0 }
+  splitFilterMenuCoords.value = {
+    x: rect ? rect.left : 0,
+    y: rect ? rect.bottom + SPLIT_FILTER_MENU_GAP_PX : 0,
+  }
   splitFilterMenuMounted.value = true
   splitFilterMenuOpen.value = true
 }
@@ -374,7 +380,8 @@ function toggleSplit(): void {
   align-items: center;
   gap: 2px;
   height: 34px;
-  max-width: calc(100% - 260px);
+  --split-filter-corner-reserve: 260px;
+  max-width: calc(100% - var(--split-filter-corner-reserve));
   padding: 3px;
   border-radius: 17px;
   background: var(--surface);

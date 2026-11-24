@@ -123,6 +123,7 @@ function onDragOverGroup(event: DragEvent, group: StashGroup): void {
   dropGroupId.value = group.id
   dropNewGroup.value = false
   dropOutside.value = false
+  dropMemberKey.value = undefined
 }
 
 function onDropGroup(event: DragEvent, targetGroup: StashGroup): void {
@@ -175,8 +176,16 @@ function onDropMember(event: DragEvent, targetGroup: StashGroup, targetIndex: nu
     )
     return
   }
+  const sourceIndex =
+    payload.groupId === targetGroup.id
+      ? targetGroup.members.findIndex((member) => member.session_id === payload.sessionId)
+      : -1
+  const position =
+    payload.groupId === targetGroup.id && sourceIndex >= 0 && sourceIndex < targetIndex
+      ? targetIndex - 1
+      : targetIndex
   report(
-    workspace.moveGroupMember(targetGroup.id, payload.sessionId, targetIndex, {
+    workspace.moveGroupMember(targetGroup.id, payload.sessionId, position, {
       fromGroupId: payload.groupId,
       stashLive: false,
     }),
@@ -198,6 +207,19 @@ function onDropOutside(event: DragEvent): void {
   clearDragState()
   if (payload?.kind !== 'member') return
   report(workspace.removeFromGroup(payload.groupId, payload.sessionId))
+}
+function moveMemberBy(group: StashGroup, index: number, delta: -1 | 1): void {
+  if (group.locked) return
+  const targetIndex = index + delta
+  if (targetIndex < 0 || targetIndex >= group.members.length) return
+  const member = group.members[index]
+  if (!member) return
+  report(
+    workspace.moveGroupMember(group.id, member.session_id, targetIndex, {
+      fromGroupId: group.id,
+      stashLive: false,
+    }),
+  )
 }
 
 async function beginRename(group: StashGroup): Promise<void> {
@@ -221,11 +243,7 @@ function cancelRename(): void {
   editingGroupId.value = undefined
 }
 
-function openAssignMenu(
-  event: MouseEvent,
-  sessionId: string,
-  sourceGroup?: StashGroup,
-): void {
+function openAssignMenu(event: MouseEvent, sessionId: string, sourceGroup?: StashGroup): void {
   const button = event.currentTarget as HTMLElement | null
   const rect = button?.getBoundingClientRect()
   menuCoords.value = { x: rect ? rect.left : event.clientX, y: rect ? rect.bottom + 4 : event.clientY }
@@ -274,12 +292,7 @@ function createEmptyGroup(): void {
 </script>
 
 <template>
-  <ModalDialog
-    class="stash-modal"
-    :title="t('dialog.stash.title')"
-    width="wide"
-    @close="dialogs.close()"
-  >
+  <ModalDialog class="stash-modal" :title="t('dialog.stash.title')" width="wide" @close="dialogs.close()">
     <div class="columns">
       <section
         class="column running-column"
@@ -360,7 +373,7 @@ function createEmptyGroup(): void {
           >
             <header
               class="group-header"
-              :draggable="!group.locked"
+              :draggable="!group.locked && editingGroupId !== group.id"
               @dragstart="startGroupDrag($event, group)"
               @dragend="clearDragState"
             >
@@ -426,6 +439,8 @@ function createEmptyGroup(): void {
                 @dragend="clearDragState"
                 @dragover="onDragOverMember($event, group, member)"
                 @drop="onDropMember($event, group, index)"
+                @keydown.alt.up.prevent="moveMemberBy(group, index, -1)"
+                @keydown.alt.down.prevent="moveMemberBy(group, index, 1)"
               >
                 <span class="tint-bar" :style="{ background: creatorTint(member.info) }" />
                 <span class="tint-dot" :style="{ background: creatorTint(member.info) }" />
@@ -434,6 +449,26 @@ function createEmptyGroup(): void {
                   <span class="card-sub">{{ dirName(member.info.cwd) }}</span>
                 </div>
                 <div class="member-actions">
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    :disabled="group.locked || index === 0"
+                    :aria-label="t('config.moveUp')"
+                    :title="t('config.moveUp')"
+                    @click="moveMemberBy(group, index, -1)"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    :disabled="group.locked || index === group.members.length - 1"
+                    :aria-label="t('config.moveDown')"
+                    :title="t('config.moveDown')"
+                    @click="moveMemberBy(group, index, 1)"
+                  >
+                    ↓
+                  </button>
                   <button
                     type="button"
                     class="icon-btn"
@@ -450,7 +485,7 @@ function createEmptyGroup(): void {
                     :title="t('dialog.stash.restoreMember')"
                     @click="report(workspace.restoreGroupMember(group.id, member.session_id))"
                   >
-                    <Icon icon="restore-20" />
+                    <Icon icon="undo-16" />
                   </button>
                   <button
                     type="button"

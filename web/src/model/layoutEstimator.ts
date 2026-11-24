@@ -41,20 +41,31 @@ const IMAGE_THUMB_HEIGHT = components.imageStrip.maxHeight
 const ERROR_HEIGHT = components.errorBlock.verticalPadding * 2 + ERROR_LINE_HEIGHT
 const TURN_OPENING_SOURCES = new Set(['human', 'peer', 'spawn'])
 
+const MIN_CHARS_PER_LINE = 12
+const AVG_CODE_CHARS_PER_LINE = 24
+const ESTIMATED_CODE_LINE_CHARS = 36
+const TOOL_TODO_TOP_GAP = 6
+const MIN_IMAGE_HEIGHT = 36
+const TURN_DIVIDER_HEIGHT = 1
+const MIN_BUBBLE_INNER_WIDTH = 120
+
 function wrappedLineCount(chars: number, lines: number, charsPerLine: number): number {
   const safeLines = Math.max(1, lines)
-  const wrapped = chars > 0 ? Math.ceil(chars / Math.max(12, charsPerLine)) : 1
+  const wrapped = chars > 0 ? Math.ceil(chars / Math.max(MIN_CHARS_PER_LINE, charsPerLine)) : 1
   return Math.max(safeLines, wrapped)
 }
 
 function estimateTextPartHeight(part: PartLayoutMeta, innerWidth: number): number {
   const proseCharsPerLine = Math.floor(innerWidth / PROSE_CHAR_WIDTH)
   const codeCharsPerLine = Math.floor((innerWidth - USER_H_PADDING) / CODE_CHAR_WIDTH)
-  const proseChars = Math.max(0, part.chars - part.code_lines * 24)
+  const proseChars = Math.max(0, part.chars - part.code_lines * AVG_CODE_CHARS_PER_LINE)
   const proseLines = Math.max(0, part.lines - part.code_lines)
-  const wrappedProse = proseChars > 0 || proseLines > 0 ? wrappedLineCount(proseChars, proseLines, proseCharsPerLine) : 0
+  const wrappedProse =
+    proseChars > 0 || proseLines > 0 ? wrappedLineCount(proseChars, proseLines, proseCharsPerLine) : 0
   const wrappedCode =
-    part.code_lines > 0 ? wrappedLineCount(part.code_lines * 36, part.code_lines, codeCharsPerLine) : 0
+    part.code_lines > 0
+      ? wrappedLineCount(part.code_lines * ESTIMATED_CODE_LINE_CHARS, part.code_lines, codeCharsPerLine)
+      : 0
   const proseHeight = wrappedProse * PROSE_LINE_HEIGHT
   const codeOverhead = part.code_blocks * (CODE_HEADER_HEIGHT + CODE_BOTTOM_PADDING + BLOCK_SPACING)
   const codeHeight = wrappedCode * CODE_LINE_HEIGHT
@@ -65,7 +76,7 @@ function estimateTextPartHeight(part: PartLayoutMeta, innerWidth: number): numbe
 function estimateToolPartHeight(part: PartLayoutMeta, detailsExpanded: boolean): number {
   if (part.tool === 'todo') {
     const todoRows = Math.max(1, part.tool_lines)
-    return TOOL_HEADER_HEIGHT + 6 + todoRows * TOOL_TODO_ROW_HEIGHT
+    return TOOL_HEADER_HEIGHT + TOOL_TODO_TOP_GAP + todoRows * TOOL_TODO_ROW_HEIGHT
   }
   if (detailsExpanded) {
     const previewLines = Math.max(1, Math.min(part.tool_lines, MAX_TOOL_PREVIEW_LINES))
@@ -73,7 +84,9 @@ function estimateToolPartHeight(part: PartLayoutMeta, detailsExpanded: boolean):
   }
   if ((part.tool === 'edit' || part.tool === 'write') && part.tool_lines > 0) {
     const diffRows = Math.min(part.tool_lines, TOOL_DIFF_MAX_ROWS)
-    return TOOL_HEADER_HEIGHT + TOOL_BODY_VERTICAL_PADDING + diffRows * TOOL_DIFF_ROW_HEIGHT + TOOL_DIFF_ROW_HEIGHT
+    return (
+      TOOL_HEADER_HEIGHT + TOOL_BODY_VERTICAL_PADDING + diffRows * TOOL_DIFF_ROW_HEIGHT + TOOL_DIFF_ROW_HEIGHT
+    )
   }
   return TOOL_HEADER_HEIGHT
 }
@@ -81,16 +94,16 @@ function estimateToolPartHeight(part: PartLayoutMeta, detailsExpanded: boolean):
 function estimateImagePartHeight(part: PartLayoutMeta, innerWidth: number, maxHeight: number): number {
   if (part.width && part.height && part.width > 0 && part.height > 0) {
     const scale = Math.min(1, innerWidth / part.width, maxHeight / part.height)
-    return Math.max(36, Math.round(part.height * scale))
+    return Math.max(MIN_IMAGE_HEIGHT, Math.round(part.height * scale))
   }
   return maxHeight
 }
 
 function estimateUserHeight(meta: MessageLayoutMeta, innerWidth: number, isFirst: boolean): number {
   const opensTurn = !isFirst && TURN_OPENING_SOURCES.has(meta.source_kind)
-  const turnPrefix = opensTurn ? TURN_GAP * 2 + 1 : 0
+  const turnPrefix = opensTurn ? TURN_GAP * 2 + TURN_DIVIDER_HEIGHT : 0
   const caption = meta.source_kind !== 'human' ? CAPTION_HEIGHT : 0
-  const bubbleInnerWidth = Math.max(120, innerWidth - USER_H_PADDING)
+  const bubbleInnerWidth = Math.max(MIN_BUBBLE_INNER_WIDTH, innerWidth - USER_H_PADDING)
   const charsPerLine = Math.floor(bubbleInnerWidth / PROSE_CHAR_WIDTH)
   let textLines = 0
   let hasImage = false

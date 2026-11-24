@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { maskToken, validateBackendUrl } from '../../net/backend.ts'
 import { useConnectionStore } from '../../stores/connection.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
+import { useNoticesStore } from '../../stores/notices.ts'
 import DialogButton from '../DialogButton.vue'
 import Icon from '../Icon.vue'
 import ModalDialog from '../ModalDialog.vue'
@@ -12,10 +13,13 @@ import TextField from '../TextField.vue'
 const { t } = useI18n()
 const connection = useConnectionStore()
 const dialogs = useDialogsStore()
+const notices = useNoticesStore()
 
 const urlField = useTemplateRef<InstanceType<typeof TextField>>('urlField')
 const existingOverride = computed(() => connection.temporaryBackend ?? connection.savedBackend)
-const url = ref(existingOverride.value?.url ?? (connection.backendSource === 'direct' ? connection.activeBackendUrl : ''))
+const url = ref(
+  existingOverride.value?.url ?? (connection.backendSource === 'direct' ? connection.activeBackendUrl : ''),
+)
 const tokenInput = ref('')
 const tokenCleared = ref(false)
 const showToken = ref(false)
@@ -64,11 +68,19 @@ function switchTemporarily(): void {
 function saveAsDefault(): void {
   const validUrl = validate()
   if (!validUrl) return
-  connection.switchBackend({ mode: 'saveDefault', url: validUrl, token: effectiveToken() })
-  dialogs.close()
+  try {
+    connection.switchBackend({ mode: 'saveDefault', url: validUrl, token: effectiveToken() })
+    dialogs.close()
+  } catch (error) {
+    notices.pushError(error)
+  }
 }
 
 function restoreLocalDefault(): void {
+  if (connection.backendSource === 'auto' && !connection.temporaryBackend && !connection.savedBackend) {
+    dialogs.close()
+    return
+  }
   connection.switchBackend({ mode: 'restoreDefault' })
   dialogs.close()
 }
@@ -110,12 +122,7 @@ onMounted(() => urlField.value?.focus())
     <div class="field-group">
       <div class="label-row">
         <label class="label" for="backend-token-input">{{ t('dialog.backend.tokenLabel') }}</label>
-        <button
-          v-if="savedToken && !tokenInput"
-          type="button"
-          class="clear-token"
-          @click="clearToken"
-        >
+        <button v-if="savedToken && !tokenInput" type="button" class="clear-token" @click="clearToken">
           {{ t('dialog.backend.clearToken') }}
         </button>
       </div>
@@ -127,7 +134,11 @@ onMounted(() => urlField.value?.focus())
           class="token-input"
           spellcheck="false"
           autocomplete="off"
-          :placeholder="maskedExistingToken ? t('dialog.backend.keepToken', { token: maskedExistingToken }) : t('dialog.backend.tokenPlaceholder')"
+          :placeholder="
+            maskedExistingToken
+              ? t('dialog.backend.keepToken', { token: maskedExistingToken })
+              : t('dialog.backend.tokenPlaceholder')
+          "
           @keydown.enter.prevent="switchTemporarily"
         />
         <button
@@ -150,15 +161,8 @@ onMounted(() => urlField.value?.focus())
           @click="restoreLocalDefault"
         />
         <div class="right-actions">
-          <DialogButton
-            :label="t('dialog.backend.switchTemporary')"
-            @click="switchTemporarily"
-          />
-          <DialogButton
-            kind="primary"
-            :label="t('dialog.backend.saveDefault')"
-            @click="saveAsDefault"
-          />
+          <DialogButton :label="t('dialog.backend.switchTemporary')" @click="switchTemporarily" />
+          <DialogButton kind="primary" :label="t('dialog.backend.saveDefault')" @click="saveAsDefault" />
         </div>
       </div>
     </template>

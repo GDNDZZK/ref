@@ -11,20 +11,29 @@ const props = defineProps<{
 
 const MAX_TEXT_BARS = 4
 const MAX_TODO_BARS = 4
+const ESTIMATED_CHARS_PER_LINE = 60
+const DEFAULT_TODO_ROWS = 2
+const MAX_IMAGE_WIDTH = 160
+const DEFAULT_IMAGE_WIDTH = 140
+const MAX_IMAGE_HEIGHT = 96
+const DEFAULT_IMAGE_HEIGHT = 84
 
 function textBarWidths(part: PartLayoutMeta): string[] {
-  const count = Math.max(1, Math.min(MAX_TEXT_BARS, part.lines || Math.ceil(part.chars / 60)))
+  const count = Math.max(
+    1,
+    Math.min(MAX_TEXT_BARS, part.lines || Math.ceil(part.chars / ESTIMATED_CHARS_PER_LINE)),
+  )
   const pattern = ['92%', '84%', '76%', '58%']
   return Array.from({ length: count }, (_, idx) => pattern[idx % pattern.length]!)
 }
 
 function todoRows(part: PartLayoutMeta): number {
-  return Math.max(1, Math.min(MAX_TODO_BARS, part.tool_lines || 2))
+  return Math.max(1, Math.min(MAX_TODO_BARS, part.tool_lines || DEFAULT_TODO_ROWS))
 }
 
 function imageBoxStyle(part: PartLayoutMeta): Record<string, string> {
-  const w = part.width && part.width > 0 ? Math.min(160, part.width) : 140
-  const h = part.height && part.height > 0 ? Math.min(96, part.height) : 84
+  const w = part.width && part.width > 0 ? Math.min(MAX_IMAGE_WIDTH, part.width) : DEFAULT_IMAGE_WIDTH
+  const h = part.height && part.height > 0 ? Math.min(MAX_IMAGE_HEIGHT, part.height) : DEFAULT_IMAGE_HEIGHT
   return { width: `${w}px`, height: `${h}px` }
 }
 
@@ -49,11 +58,7 @@ const isCompaction = computed(() => props.meta.source_kind === 'compaction')
 
       <div v-else-if="isUser" class="user-skeleton">
         <div class="user-bubble">
-          <div
-            v-for="(part, idx) in meta.parts"
-            :key="idx"
-            class="user-part"
-          >
+          <div v-for="(part, idx) in meta.parts" :key="idx" class="user-part">
             <div v-if="part.kind === 'image'" class="image-box small" />
             <div v-else class="lines">
               <span
@@ -130,12 +135,6 @@ const isCompaction = computed(() => props.meta.source_kind === 'compaction')
 .skeleton-frame {
   overflow: hidden;
   box-sizing: border-box;
-}
-
-.skeleton-frame + .skeleton-frame,
-:deep(.frame) + .skeleton-frame,
-.skeleton-frame + :deep(.frame) {
-  margin-top: var(--block-spacing);
 }
 
 .column {

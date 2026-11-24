@@ -28,7 +28,6 @@ import { StreamPacer } from './streamPacer.ts'
 import { partialPurpose } from './toolArgs.ts'
 
 export const PAGE_SIZE = 100
-export const MAX_RESIDENT_MESSAGES = 300
 export const TAIL_KEEP_MESSAGES = 100
 export const EVICT_BUFFER = 150
 
@@ -704,24 +703,48 @@ export class Transcript {
       next.length === this.flat.length && next.every((block, i) => block === this.flat[i])
     if (!blocksUnchanged) this.flat = next
 
-    const nextSlots: TranscriptSlot[] = this.slotModels.map((slot) => {
+    const prevSlots = this.publishedSlots
+    let slotsChanged = forceSlots || this.slotModels.length !== prevSlots.length
+    const nextSlots: TranscriptSlot[] = this.slotModels.map((slot, index) => {
+      const prev = prevSlots[index]
       if (slot.kind === 'placeholder') {
+        if (
+          prev?.kind === 'placeholder' &&
+          prev.seq === slot.seq &&
+          prev.id === slot.id &&
+          prev.meta === slot.meta
+        ) {
+          return prev
+        }
+        slotsChanged = true
         return { kind: 'placeholder', seq: slot.seq, id: slot.id, meta: slot.meta }
       }
+      const message = slot.entry.entry.message
+      const blocks = slot.entry.blocks
+      const stale = slot.entry.stale
+      const lastCompaction = slot.entry.lastCompaction
+      if (
+        prev?.kind === 'materialized' &&
+        prev.seq === slot.seq &&
+        prev.id === message.id &&
+        prev.message === message &&
+        prev.blocks === blocks &&
+        prev.stale === stale &&
+        prev.lastCompaction === lastCompaction
+      ) {
+        return prev
+      }
+      slotsChanged = true
       return {
         kind: 'materialized',
         seq: slot.seq,
-        id: slot.entry.entry.message.id,
-        message: slot.entry.entry.message,
-        blocks: slot.entry.blocks,
-        stale: slot.entry.stale,
-        lastCompaction: slot.entry.lastCompaction,
+        id: message.id,
+        message,
+        blocks,
+        stale,
+        lastCompaction,
       }
     })
-    const slotsChanged =
-      forceSlots ||
-      !blocksUnchanged ||
-      nextSlots.length !== this.publishedSlots.length
     if (slotsChanged) this.publishedSlots = nextSlots
 
     return !blocksUnchanged || slotsChanged

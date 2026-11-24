@@ -26,6 +26,8 @@ export type DialogRequest =
   | { kind: 'backend' }
   | { kind: 'stash' }
   | { kind: 'config'; section?: ConfigSectionId }
+
+export const useDialogsStore = defineStore('dialogs', () => {
   const current = shallowRef<DialogRequest>()
   let onClosed: (() => void) | undefined
   let closeGuard: ((source: 'escape' | 'scrim' | 'button') => boolean) | undefined

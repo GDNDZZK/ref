@@ -418,7 +418,10 @@ export class RefApi {
     return this.callWhole({ op: 'restore_group', group_id: groupId })
   }
 
-  async restoreGroupMember(groupId: string, sessionId: string): Promise<{ restored: boolean; groups: StashGroup[] }> {
+  async restoreGroupMember(
+    groupId: string,
+    sessionId: string,
+  ): Promise<{ restored: boolean; groups: StashGroup[] }> {
     return this.callWhole({ op: 'restore_group_member', group_id: groupId, session_id: sessionId })
   }
 }

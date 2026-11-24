@@ -16,6 +16,7 @@ const api = {
   watchAll: vi.fn(),
   setAgent: vi.fn(),
   setCwd: vi.fn(),
+  listGroups: vi.fn(),
 }
 const connection = {
   getApi: () => api,
@@ -44,7 +45,9 @@ beforeEach(() => {
   localStorage.clear()
   setActivePinia(createPinia())
   for (const fn of Object.values(api)) fn.mockReset().mockResolvedValue(undefined)
+  api.listSessions.mockResolvedValue([])
   api.listHistory.mockResolvedValue([])
+  api.listGroups.mockResolvedValue([])
   connection.config = { agents: [{ name: 'build' }, { name: 'plan' }, { name: 'review' }] }
 })
 
