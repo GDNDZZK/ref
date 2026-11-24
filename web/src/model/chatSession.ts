@@ -25,8 +25,8 @@ import type {
 } from '../proto/generated'
 import type { Block } from './blocks.ts'
 import { QuestionForm } from './questionForm.ts'
-import { Transcript } from './transcript.ts'
-
+import { EVICT_BUFFER, TAIL_KEEP_MESSAGES, Transcript } from './transcript.ts'
+import type { TranscriptSlot } from './transcript.ts'
 // How this window is attached: `foreground` counts as a direct connection, `watching` only
 // receives events (split view tiles).
 export type Attachment = 'detached' | 'watching' | 'foreground'
@@ -56,11 +56,14 @@ function isNoPendingPermission(error: unknown): boolean {
   return error instanceof Error && error.message === NO_PENDING_PERMISSION // remove with protocol 5
 }
 
+export const RANGE_DEBOUNCE_MS = 80
+
 export class ChatSession {
   readonly id: string
 
   private readonly state = shallowReactive({
     blocks: [] as readonly Block[],
+    slots: [] as readonly TranscriptSlot[],
     info: undefined as SessionInfo | undefined,
     permissions: [] as PermissionRequest[],
     questions: [] as QuestionRequest[],
@@ -81,7 +84,11 @@ export class ChatSession {
   private transcript: Transcript
   private readonly flushing = ref(false) // something waits for the next frame
   private readonly images = new Map<string, Promise<string>>() // image id -> data URL
+  private readonly messageImages = new Map<string, Set<string>>() // message id -> image ids
   private readonly forms = new Map<string, QuestionForm>() // call id -> what the user chose so far
+  private rangeTimer: ReturnType<typeof setTimeout> | undefined
+  private rangeSerial = 0
+  private pendingRange: { startSeq: number; endSeq: number } | undefined
 
   // `info` is what the session list already knows, so the session can be shown before it is attached.
   constructor(id: string, deps: ChatSessionDeps, info?: SessionInfo) {
@@ -91,7 +98,10 @@ export class ChatSession {
     this.transcript = markRaw(this.newTranscript())
     this.scope.run(() => {
       useFrame(this.flushing, (_frameSeconds, now) => {
-        if (this.transcript.flush(now)) this.state.blocks = this.transcript.blocks
+        if (this.transcript.flush(now)) {
+          this.state.blocks = this.transcript.blocks
+          this.state.slots = this.transcript.slots
+        }
         this.flushing.value = this.transcript.needsFlush
       })
     })
@@ -101,6 +111,17 @@ export class ChatSession {
     return this.state.blocks
   }
 
+  get slots(): readonly TranscriptSlot[] {
+    return this.state.slots
+  }
+
+  get totalMessages(): number {
+    return this.state.slots.length
+  }
+
+  get residentCount(): number {
+    return this.transcript.residentCount
+  }
   get info(): SessionInfo | undefined {
     return this.state.info
   }
@@ -205,6 +226,8 @@ export class ChatSession {
   async attach(foreground: boolean): Promise<void> {
     const snapshot = await this.deps.api().attach(this.id, foreground)
     this.transcript = markRaw(this.newTranscript())
+    this.messageImages.clear()
+    this.recordMessageImages(snapshot.messages)
     this.transcript.load(snapshot)
     this.state.attachment = foreground ? 'foreground' : 'watching'
     this.state.loaded = true
@@ -222,9 +245,19 @@ export class ChatSession {
   }
 
   async detach(): Promise<void> {
+    this.cancelPendingRange()
     await this.deps.api().detach(this.id)
     this.state.attachment = 'detached'
     this.images.clear() // pictures are fetched again when the session is shown again
+    this.messageImages.clear()
+    if (this.state.loaded) {
+      const evicted = this.transcript.evictBeforeTail(TAIL_KEEP_MESSAGES)
+      if (evicted.length > 0) {
+        this.transcript.flush(performance.now())
+        this.state.blocks = this.transcript.blocks
+        this.state.slots = this.transcript.slots
+      }
+    }
   }
 
   // The session list changed: keeps the status, name and the like fresh, also before the first attach.
@@ -238,6 +271,13 @@ export class ChatSession {
 
   applyEvent(event: SessionEvent): void {
     if (!this.state.loaded) return // before the snapshot: the snapshot already has it
+    if (event.type === 'message') this.recordMessageImages([event.message])
+    else if (event.type === 'reset') {
+      this.messageImages.clear()
+      this.recordMessageImages(event.messages)
+    } else if (event.type === 'part') {
+      this.recordPartImages(event.message_id, event.part)
+    }
     this.transcript.apply(event, performance.now())
     this.publish()
   }
@@ -245,7 +285,10 @@ export class ChatSession {
   // The connection came back: the history may have moved on without us.
   async resync(): Promise<void> {
     if (this.state.attachment === 'detached') return
-    this.transcript.load(await this.deps.api().attach(this.id, this.state.attachment === 'foreground'))
+    const snapshot = await this.deps.api().attach(this.id, this.state.attachment === 'foreground')
+    this.messageImages.clear()
+    this.recordMessageImages(snapshot.messages)
+    this.transcript.load(snapshot)
     this.showHistory()
   }
 
@@ -266,7 +309,8 @@ export class ChatSession {
     try {
       const page = await this.deps.api().messagesBefore(this.id, before)
       if (generation !== this.state.generation) return
-      this.transcript.prepend(page.messages, page.more_before)
+      this.recordMessageImages(page.messages)
+      this.transcript.prepend(page.messages, page.more_before, page.start_seq)
       this.publish()
     } catch (error) {
       if (generation !== this.state.generation) return
@@ -274,6 +318,57 @@ export class ChatSession {
     } finally {
       if (generation === this.state.generation) this.state.loadingOlder = false
     }
+  }
+
+  // Debounced range load for visible placeholder slots. Drops stale responses by generation and serial.
+  requestRange(visibleStart: number, visibleEnd: number): void {
+    const missing = this.transcript.missingRangeAround(visibleStart, visibleEnd)
+    if (!missing) {
+      this.clearRangeTimer()
+      this.pendingRange = undefined
+      return
+    }
+    this.pendingRange = missing
+    this.clearRangeTimer()
+    this.rangeTimer = setTimeout(() => {
+      this.rangeTimer = undefined
+      const target = this.pendingRange
+      this.pendingRange = undefined
+      if (!target) return
+      void this.loadRange(target.startSeq, target.endSeq).catch((error) => {
+        this.deps.notify('error', describeError(error))
+      })
+    }, RANGE_DEBOUNCE_MS)
+  }
+
+  async loadRange(startSeq: number, endSeq: number): Promise<void> {
+    if (startSeq >= endSeq) return
+    const generation = this.state.generation
+    const serial = ++this.rangeSerial
+    const page = await this.deps.api().messagesRange(this.id, startSeq, endSeq, endSeq - startSeq)
+    if (generation !== this.state.generation || serial !== this.rangeSerial) return
+    this.recordMessageImages(page.messages)
+    this.transcript.insertRange(page.start_seq, page.end_seq, page.messages)
+    this.publish()
+  }
+
+  // Trigger 1: scroll away -> evict outside [visibleStart - 150, visibleEnd + 150].
+  evictAround(visibleStart: number, visibleEnd: number): void {
+    const evicted = this.transcript.evictOutside(
+      Math.max(0, visibleStart - EVICT_BUFFER),
+      visibleEnd + EVICT_BUFFER,
+    )
+    if (evicted.length === 0) return
+    this.dropEvictedImages(evicted)
+    this.publish()
+  }
+
+  // Trigger 2: settle at bottom while following -> evict older than total - 100.
+  evictAtBottom(): void {
+    const evicted = this.transcript.evictBeforeTail(TAIL_KEEP_MESSAGES)
+    if (evicted.length === 0) return
+    this.dropEvictedImages(evicted)
+    this.publish()
   }
 
   // Takes back the message (default: the last prompt) and everything after it.
@@ -325,6 +420,10 @@ export class ChatSession {
     this.publish()
   }
 
+  async retryNow(): Promise<boolean> {
+    return this.deps.api().retryNow(this.id)
+  }
+
   // The request leaves at once, so a second key press cannot answer it twice; it comes back
   // when the answer was not sent.
   async answerPermission(callId: string, allow: boolean, always: boolean): Promise<void> {
@@ -358,8 +457,59 @@ export class ChatSession {
   }
 
   dispose(): void {
+    this.cancelPendingRange()
     this.images.clear()
+    this.messageImages.clear()
     this.scope.stop()
+  }
+
+  private clearRangeTimer(): void {
+    if (this.rangeTimer === undefined) return
+    clearTimeout(this.rangeTimer)
+    this.rangeTimer = undefined
+  }
+
+  private cancelPendingRange(): void {
+    this.clearRangeTimer()
+    this.pendingRange = undefined
+    this.rangeSerial++
+  }
+
+  private recordMessageImages(messages: readonly Message[]): void {
+    for (const message of messages) {
+      for (const part of message.parts) this.recordPartImages(message.id, part)
+    }
+  }
+
+  private recordPartImages(messageId: string, part: Message['parts'][number]): void {
+    const ids: string[] = []
+    if (part.type === 'image' && part.id) ids.push(part.id)
+    else if (part.type === 'tool' && part.images) {
+      for (const image of part.images) {
+        if (image.id) ids.push(image.id)
+      }
+    }
+    if (ids.length === 0) return
+    let set = this.messageImages.get(messageId)
+    if (!set) {
+      set = new Set<string>()
+      this.messageImages.set(messageId, set)
+    }
+    for (const id of ids) set.add(id)
+  }
+
+  private dropEvictedImages(evictedMessageIds: readonly string[]): void {
+    for (const messageId of evictedMessageIds) {
+      const ids = this.messageImages.get(messageId)
+      if (ids) {
+        for (const imageId of ids) this.images.delete(imageId)
+        this.messageImages.delete(messageId)
+      }
+      const prefix = `${messageId}:`
+      for (const imageId of [...this.images.keys()]) {
+        if (imageId.startsWith(prefix)) this.images.delete(imageId)
+      }
+    }
   }
 
   private newTranscript(): Transcript {
@@ -367,14 +517,15 @@ export class ChatSession {
   }
 
   private showHistory(): void {
+    this.cancelPendingRange()
     this.transcript.flush(performance.now())
     this.state.blocks = this.transcript.blocks
+    this.state.slots = this.transcript.slots
     this.state.generation++
     this.state.loadingOlder = false // a page still on its way is dropped
     this.state.olderError = ''
     this.publish()
   }
-
   private forgetAnsweredQuestions(): void {
     const pending = new Set(this.state.questions.map((request) => request.call_id))
     for (const callId of this.forms.keys()) if (!pending.has(callId)) this.forms.delete(callId)

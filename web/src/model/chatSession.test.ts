@@ -251,4 +251,87 @@ describe('ChatSession', () => {
     session.toggleDetails()
     expect([session.thinkingExpanded, session.detailsExpanded]).toEqual([true, true])
   })
+  it('debounces range requests by 80ms and drops stale range responses', async () => {
+    vi.useFakeTimers()
+    try {
+      const { api, session } = setup()
+      const metas = Array.from({ length: 4 }, (_, seq) => ({
+        seq,
+        id: `m${seq}`,
+        role: 'user' as const,
+        source_kind: 'human',
+        has_error: false,
+        parts: [],
+      }))
+      api.attach.mockResolvedValue(
+        snapshot([userMessage('m4', 'latest')], {
+          more_before: true,
+          total_messages: 5,
+          start_seq: 4,
+          layout_metas: metas,
+        }),
+      )
+      let resolveSlow!: (v: unknown) => void
+      const messagesRange = vi.fn().mockImplementationOnce(
+        () => new Promise((resolve) => { resolveSlow = resolve }),
+      )
+      Object.assign(api, { messagesRange })
+      await session.attach(true)
+      expect(session.slots).toHaveLength(5)
+
+      session.requestRange(0, 2)
+      session.requestRange(1, 3)
+      expect(messagesRange).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(80)
+      expect(messagesRange).toHaveBeenCalledTimes(1)
+
+      // Re-attach bumps generation -> stale slow response is dropped.
+      api.attach.mockResolvedValue(snapshot([userMessage('m9', 'fresh')]))
+      await session.attach(true)
+      resolveSlow({ messages: [userMessage('m0', 'stale')], more_before: false, start_seq: 0, end_seq: 1 })
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(session.slots.map((s) => s.id)).toEqual(['m9'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('evicts outside window, drops evicted image caches, evicts at bottom, and trims on detach', async () => {
+    const { api, session } = setup()
+    const messages = Array.from({ length: 200 }, (_, i) => ({
+      ...userMessage(`m${i}`, `text ${i}`),
+      parts: [
+        { type: 'text' as const, text: `text ${i}`, time: 0 },
+        { type: 'image' as const, mime: 'image/png', data: '', id: `img_${i}`, size: 10 },
+      ],
+    }))
+    api.attach.mockResolvedValue(snapshot(messages))
+    const getImage = vi.fn().mockImplementation((_sid: string, imgId: string) =>
+      Promise.resolve({ mime: 'image/png', data: imgId }),
+    )
+    Object.assign(api, { getImage })
+    await session.attach(true)
+    await session.imageUrl('img_0')
+    await session.imageUrl('img_199')
+    expect(getImage).toHaveBeenCalledTimes(2)
+
+    // Evict around [180, 199] -> keeps [30..199], evicts 0..29 (including img_0).
+    session.evictAround(180, 199)
+    expect(session.residentCount).toBe(170)
+    await session.imageUrl('img_199')
+    expect(getImage).toHaveBeenCalledTimes(2) // still cached
+    await session.imageUrl('img_0')
+    expect(getImage).toHaveBeenCalledTimes(3) // evicted -> re-fetched
+
+    // Evict at bottom keeps newest 100.
+    session.evictAtBottom()
+    expect(session.residentCount).toBe(100)
+
+    // Detach evicts all but newest 100 and clears image cache.
+    await session.detach()
+    expect(session.residentCount).toBe(100)
+    await session.imageUrl('img_199')
+    expect(getImage).toHaveBeenCalledTimes(4)
+  })
 })
