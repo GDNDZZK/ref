@@ -1082,14 +1082,8 @@ fn try_remap(
         return Some(res);
     }
     // Match `hashline::file_hash`: trailing spaces and tabs are insignificant when remapping.
-    let trim_end = |lines: &[&str]| -> Vec<&str> {
-        lines
-            .iter()
-            .map(|l| l.trim_end_matches([' ', '\t', '\r']))
-            .collect()
-    };
-    let old_trimmed = trim_end(&old_lines);
-    let cur_trimmed = trim_end(cur_lines);
+    let old_trimmed = trim_end_lines(&old_lines);
+    let cur_trimmed = trim_end_lines(cur_lines);
     try_remap_with(
         &old_lines,
         cur_lines,
@@ -1097,6 +1091,13 @@ fn try_remap(
         seen,
         &LineMap::build(&old_trimmed, &cur_trimmed),
     )
+}
+
+fn trim_end_lines<'a>(lines: &[&'a str]) -> Vec<&'a str> {
+    lines
+        .iter()
+        .map(|l| l.trim_end_matches([' ', '\t', '\r']))
+        .collect()
 }
 
 fn try_remap_with(
