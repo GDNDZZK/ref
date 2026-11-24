@@ -55,7 +55,7 @@ private slots:
 			ReasoningPart{.text = u"step 1\nstep 2"_s, .time = 1},
 			TextPart{.text = u"Intro\n\n```cpp\nint x = 1;\nint y = 2;\n```\n\n| A | B |\n| - | - |\n| 1 | 2 |"_s, .time = 2},
 			ToolPart{.callId = u"c1"_s, .name = u"todo"_s, .state = ToolState::Done, .output = u"1\n2\n3"_s},
-			ImagePart{.image = ImageData{.mime = u"image/png"_s}},
+			ImagePart{.image = ImageData{.mime = u"image/png"_s, .data = {}}},
 		};
 
 		const MessageLayoutMeta meta = LayoutEstimator::computeMeta(5, msg);
