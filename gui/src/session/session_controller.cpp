@@ -174,6 +174,11 @@ QCoro::Task<SessionController::Result<void>> SessionController::abort()
 	co_return co_await m_backend.client().abort(m_sessionId);
 }
 
+QCoro::Task<SessionController::Result<proto::RetryNowResult>> SessionController::retryNow()
+{
+	Q_ASSERT(hasSession());
+	co_return co_await m_backend.client().retryNow(m_sessionId);
+}
 QCoro::Task<SessionController::Result<proto::RemovedPrompt>> SessionController::undo(std::optional<QString> messageId)
 {
 	Q_ASSERT(hasSession());

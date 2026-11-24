@@ -91,9 +91,64 @@ Item {
 		}
 		Icon {
 			anchors.verticalCenter: parent.verticalCenter
-			visible: line.waiting || line.retrying
-			name: line.activity === Activity.waitingQuestion ? "question" : line.waiting ? "lock" : "retry"
+			visible: line.waiting
+			name: line.activity === Activity.waitingQuestion ? "question" : "lock"
 			color: Theme.warningText
+		}
+		Item {
+			id: retryButton
+			objectName: "retryNowButton"
+			anchors.verticalCenter: parent.verticalCenter
+			visible: line.retrying
+			width: 22
+			height: 22
+			activeFocusOnTab: visible
+			Accessible.role: Accessible.Button
+			Accessible.name: qsTr("Click to retry now")
+			Accessible.onPressAction: line.session.retryNow()
+			Keys.onReturnPressed: event => {
+				line.session.retryNow()
+				event.accepted = true
+			}
+			Keys.onSpacePressed: event => {
+				line.session.retryNow()
+				event.accepted = true
+			}
+
+			Rectangle {
+				anchors.fill: parent
+				radius: width / 2
+				color: retryHover.hovered ? Theme.surfaceHover : "transparent"
+				border.width: retryButton.activeFocus ? 1 : 0
+				border.color: Theme.accentText
+				scale: retryTap.pressed ? Motion.pressedScaleButton : 1
+
+				Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+				Behavior on scale { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+			}
+
+			Icon {
+				anchors.centerIn: parent
+				name: "retry"
+				size: 16
+				color: Theme.warningText
+			}
+
+			HoverHandler {
+				id: retryHover
+				enabled: retryButton.visible
+				cursorShape: Qt.PointingHandCursor
+			}
+			TapHandler {
+				id: retryTap
+				enabled: retryButton.visible
+				onTapped: line.session.retryNow()
+			}
+			PlainToolTip {
+				visible: retryHover.hovered
+				delay: line.tipDelay
+				text: qsTr("Click to retry now")
+			}
 		}
 		ShimmerText {
 			anchors.verticalCenter: parent.verticalCenter

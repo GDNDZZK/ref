@@ -126,8 +126,45 @@ ToolPart readToolPart(const Fields& fields)
 	return tool;
 }
 
-} // namespace
+Role readRole(const Fields& fields)
+{
+	static constexpr std::array<std::pair<QLatin1StringView, Role>, 2> roles{{
+		{"user"_L1, Role::User},
+		{"assistant"_L1, Role::Assistant},
+	}};
+	return readEnum(fields.childPath("role"_L1), fields.string("role"_L1), roles);
+}
 
+PartLayoutMeta readPartLayoutMeta(const Fields& fields)
+{
+	PartLayoutMeta meta;
+	meta.kind = fields.string("kind"_L1);
+	meta.chars = static_cast<quint32>(fields.unsignedOr("chars"_L1, 0));
+	meta.lines = static_cast<quint32>(fields.unsignedOr("lines"_L1, 0));
+	meta.codeBlocks = static_cast<quint16>(fields.unsignedOr("code_blocks"_L1, 0));
+	meta.codeLines = static_cast<quint32>(fields.unsignedOr("code_lines"_L1, 0));
+	meta.tables = static_cast<quint16>(fields.unsignedOr("tables"_L1, 0));
+	meta.tool = fields.optionalString("tool"_L1);
+	meta.toolLines = static_cast<quint16>(fields.unsignedOr("tool_lines"_L1, 0));
+	if(const std::optional<qint64> width = fields.optionalInteger("width"_L1))
+	{
+		meta.width = static_cast<quint32>(*width);
+	}
+	if(const std::optional<qint64> height = fields.optionalInteger("height"_L1))
+	{
+		meta.height = static_cast<quint32>(*height);
+	}
+	return meta;
+}
+
+StashMember readStashMember(const Fields& fields)
+{
+	return {.sessionId = fields.string("session_id"_L1),
+	        .position = static_cast<quint32>(fields.unsignedInteger("position"_L1)),
+	        .info = readSessionInfo(fields.child("info"_L1))};
+}
+
+} // namespace
 ImageData readImageData(const Fields& fields)
 {
 	ImageData image{.mime = fields.string("mime"_L1), .data = fields.string("data"_L1), .id = fields.optionalString("id"_L1)};
@@ -217,13 +254,9 @@ Part readPart(const Fields& fields)
 
 Message readMessage(const Fields& fields)
 {
-	static constexpr std::array<std::pair<QLatin1StringView, Role>, 2> roles{{
-		{"user"_L1, Role::User},
-		{"assistant"_L1, Role::Assistant},
-	}};
 	Message message;
 	message.id = fields.string("id"_L1);
-	message.role = readEnum(fields.childPath("role"_L1), fields.string("role"_L1), roles);
+	message.role = readRole(fields);
 	message.time = fields.integer("time"_L1);
 	message.timeEnd = fields.optionalInteger("time_end"_L1);
 	if(const std::optional<Fields> source = fields.optionalChild("source"_L1))
@@ -300,6 +333,26 @@ QuestionRequest readQuestionRequest(const Fields& fields)
 	        .callId = fields.string("call_id"_L1),
 	        .questions = fields.list<Question>("questions"_L1, readQuestion),
 	        .time = fields.integer("time"_L1)};
+}
+
+MessageLayoutMeta readMessageLayoutMeta(const Fields& fields)
+{
+	return {.seq = fields.unsignedInteger("seq"_L1),
+	        .id = fields.string("id"_L1),
+	        .role = readRole(fields),
+	        .sourceKind = fields.optionalString("source_kind"_L1).value_or(QString()),
+	        .hasError = fields.booleanOr("has_error"_L1, false),
+	        .parts = fields.listOrEmpty<PartLayoutMeta>("parts"_L1, readPartLayoutMeta)};
+}
+
+StashGroup readStashGroup(const Fields& fields)
+{
+	return {.id = fields.string("id"_L1),
+	        .name = fields.string("name"_L1),
+	        .locked = fields.booleanOr("locked"_L1, false),
+	        .createdAt = fields.integer("created_at"_L1),
+	        .updatedAt = fields.integer("updated_at"_L1),
+	        .members = fields.listOrEmpty<StashMember>("members"_L1, readStashMember)};
 }
 
 } // namespace json

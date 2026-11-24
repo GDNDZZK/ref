@@ -135,6 +135,8 @@ public:
 	Q_INVOKABLE void send(const QString& text);
 	// Precondition: busy.
 	Q_INVOKABLE void stop();
+	// Immediately triggers the next retry attempt while retrying.
+	Q_INVOKABLE void retryNow();
 	// Answers a tool call that waits for permission.
 	Q_INVOKABLE void permissionReply(const QString& callId, bool allow, bool always);
 	// Starts the guard time again for what the user is asked now, if anything: the view calls it when this session
@@ -190,6 +192,7 @@ private:
 	QCoro::Task<bool> awaitAndReport(QCoro::Task<refgui::client::Result<T>> request, std::function<void()> onFailure = {});
 	QCoro::Task<> sendPrompt(QString text);
 	QCoro::Task<> sendAbort();
+	QCoro::Task<> sendRetryNow();
 	QCoro::Task<> fetchOlder();
 	QCoro::Task<> sendUndo(std::optional<QString> messageId);
 	QCoro::Task<> sendPermission(QString callId, bool allow, bool always);

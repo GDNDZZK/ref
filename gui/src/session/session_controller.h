@@ -84,8 +84,9 @@ public:
 
 	QCoro::Task<Result<proto::PromptResult>> send(QString text, QList<proto::ImageData> images = {});
 	QCoro::Task<Result<void>> abort();
+	QCoro::Task<Result<proto::RetryNowResult>> retryNow();
 	QCoro::Task<Result<void>> permissionReply(QString callId, bool allow, bool always);
-	// One list of answers per question (empty: not answered); none dismisses the questions. The
+	// One list of answers per question, in order (empty: not answered); none dismisses the questions. The
 	// question stays pending until the backend reports it resolved.
 	QCoro::Task<Result<void>> questionReply(QString callId, std::optional<QList<QStringList>> answers);
 	// Forgets a pending question that was answered elsewhere.

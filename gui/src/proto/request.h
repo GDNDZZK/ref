@@ -64,8 +64,27 @@ QJsonObject completeShell(const QString& cwd,
                           const std::optional<int>& limit = {});
 // A page of messages ending right before message `before`.
 QJsonObject messages(const QString& sessionId, const QString& before, int limit);
+// A range of messages in [startSeq, endSeq).
+QJsonObject messagesRange(const QString& sessionId, quint64 startSeq, quint64 endSeq, std::optional<int> limit = {});
 // The bytes of an image the messages only name.
 QJsonObject getImage(const QString& sessionId, const QString& imageId);
+QJsonObject retryNow(const QString& sessionId);
+QJsonObject listGroups();
+QJsonObject stashAll(const std::optional<QString>& name = {});
+QJsonObject createGroup(const std::optional<QString>& name, const QStringList& sessionIds, bool stashLive);
+QJsonObject renameGroup(const QString& groupId, const QString& name);
+QJsonObject setGroupLocked(const QString& groupId, bool locked);
+QJsonObject deleteGroup(const QString& groupId);
+QJsonObject addToGroup(const QString& groupId, const QString& sessionId, const std::optional<quint32>& position = {}, bool stashLive = true);
+QJsonObject moveGroupMember(const std::optional<QString>& fromGroupId,
+                            const QString& toGroupId,
+                            const QString& sessionId,
+                            quint32 position,
+                            bool stashLive = true);
+QJsonObject removeFromGroup(const QString& groupId, const QString& sessionId);
+QJsonObject mergeGroups(const QString& sourceGroupId, const QString& targetGroupId);
+QJsonObject restoreGroup(const QString& groupId);
+QJsonObject restoreGroupMember(const QString& groupId, const QString& sessionId);
 QJsonObject shutdown();
 QJsonObject ping();
 

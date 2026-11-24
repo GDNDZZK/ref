@@ -55,7 +55,11 @@ SessionEvent readSessionEvent(const Fields& fields)
 	}
 	if(type == "reset"_L1)
 	{
-		return ResetEvent{.messages = readMessages(fields, "messages"_L1), .moreBefore = fields.booleanOr("more_before"_L1, false)};
+		return ResetEvent{.messages = readMessages(fields, "messages"_L1),
+		                  .moreBefore = fields.booleanOr("more_before"_L1, false),
+		                  .totalMessages = fields.unsignedOr("total_messages"_L1, 0),
+		                  .startSeq = fields.unsignedOr("start_seq"_L1, 0),
+		                  .layoutMetas = fields.listOrEmpty<MessageLayoutMeta>("layout_metas"_L1, readMessageLayoutMeta)};
 	}
 	if(type == "permission"_L1)
 	{
@@ -164,6 +168,10 @@ ServerFrame readServerFrame(const Fields& fields)
 		}
 		return ConfigChangedFrame{.warnings = std::move(warnings)};
 	}
+	if(kind == "groups_changed"_L1)
+	{
+		return GroupsChangedFrame{.groups = fields.listOrEmpty<StashGroup>("groups"_L1, readStashGroup)};
+	}
 	failUnknown(fields.childPath("kind"_L1), u"unknown frame kind \"%1\""_s.arg(kind));
 }
 
@@ -172,6 +180,9 @@ SessionSnapshot readSnapshot(const Fields& fields)
 	return {.info = readSessionInfo(fields.child("info"_L1)),
 	        .messages = readMessages(fields, "messages"_L1),
 	        .moreBefore = fields.booleanOr("more_before"_L1, false),
+	        .totalMessages = fields.unsignedOr("total_messages"_L1, 0),
+	        .startSeq = fields.unsignedOr("start_seq"_L1, 0),
+	        .layoutMetas = fields.listOrEmpty<MessageLayoutMeta>("layout_metas"_L1, readMessageLayoutMeta),
 	        .pendingPermissions = fields.listOrEmpty<PermissionRequest>("pending_permissions"_L1, readPermissionRequest),
 	        .pendingQuestions = fields.listOrEmpty<QuestionRequest>("pending_questions"_L1, readQuestionRequest),
 	        .queued = fields.listOrEmpty<Message>("queued"_L1, readMessage)};
@@ -230,10 +241,12 @@ Parsed<MessagesPage> parseMessagesResult(const QJsonObject& result)
 {
 	return json::guarded([&] {
 		const json::Fields fields = json::resultFields(result);
-		return MessagesPage{.messages = json::readMessages(fields, "messages"_L1), .moreBefore = fields.booleanOr("more_before"_L1, false)};
+		return MessagesPage{.messages = json::readMessages(fields, "messages"_L1),
+		                    .moreBefore = fields.booleanOr("more_before"_L1, false),
+		                    .startSeq = fields.unsignedOr("start_seq"_L1, 0),
+		                    .endSeq = fields.unsignedOr("end_seq"_L1, 0)};
 	});
 }
-
 Parsed<RemovedPrompt> parseRemovedPromptResult(const QJsonObject& result)
 {
 	return json::guarded([&] {
@@ -279,6 +292,71 @@ Parsed<QList<NamedImage>> parseNamedImages(const QJsonValue& images)
 Parsed<ImageData> parseImageResult(const QJsonObject& result)
 {
 	return json::guarded([&] { return json::readImageData(json::resultFields(result).child("image"_L1)); });
+}
+
+Parsed<RetryNowResult> parseRetryNowResult(const QJsonObject& result)
+{
+	return json::guarded([&] {
+		return RetryNowResult{.retried = json::resultFields(result).booleanOr("retried"_L1, false)};
+	});
+}
+
+Parsed<QList<StashGroup>> parseGroupsResult(const QJsonObject& result)
+{
+	return json::guarded([&] {
+		return json::resultFields(result).listOrEmpty<StashGroup>("groups"_L1, json::readStashGroup);
+	});
+}
+
+Parsed<StashGroupResult> parseStashAllResult(const QJsonObject& result)
+{
+	return json::guarded([&] {
+		const json::Fields fields = json::resultFields(result);
+		StashGroupResult out;
+		if(const std::optional<json::Fields> group = fields.optionalChild("group"_L1))
+		{
+			out.group = json::readStashGroup(*group);
+		}
+		out.groups = fields.listOrEmpty<StashGroup>("groups"_L1, json::readStashGroup);
+		return out;
+	});
+}
+
+Parsed<StashGroupResult> parseCreateGroupResult(const QJsonObject& result)
+{
+	return json::guarded([&] {
+		const json::Fields fields = json::resultFields(result);
+		return StashGroupResult{.group = json::readStashGroup(fields.child("group"_L1)),
+		                        .groups = fields.listOrEmpty<StashGroup>("groups"_L1, json::readStashGroup)};
+	});
+}
+
+Parsed<RestoreGroupResult> parseRestoreGroupResult(const QJsonObject& result)
+{
+	return json::guarded([&] {
+		const json::Fields fields = json::resultFields(result);
+		QStringList restoredIds;
+		const QJsonArray array = fields.arrayOrEmpty("restored_ids"_L1);
+		for(qsizetype i = 0; i < array.size(); ++i)
+		{
+			if(!array.at(i).isString())
+			{
+				json::fail(fields.childPath("restored_ids"_L1) + u"[%1]"_s.arg(i), u"expected a string"_s);
+			}
+			restoredIds.append(array.at(i).toString());
+		}
+		return RestoreGroupResult{.restoredIds = std::move(restoredIds),
+		                          .groups = fields.listOrEmpty<StashGroup>("groups"_L1, json::readStashGroup)};
+	});
+}
+
+Parsed<RestoreGroupMemberResult> parseRestoreGroupMemberResult(const QJsonObject& result)
+{
+	return json::guarded([&] {
+		const json::Fields fields = json::resultFields(result);
+		return RestoreGroupMemberResult{.restored = fields.booleanOr("restored"_L1, false),
+		                                .groups = fields.listOrEmpty<StashGroup>("groups"_L1, json::readStashGroup)};
+	});
 }
 
 } // namespace refgui::proto

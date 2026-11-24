@@ -25,6 +25,8 @@ ImageData readImageData(const Fields& fields);
 PermissionRequest readPermissionRequest(const Fields& fields);
 QuestionRequest readQuestionRequest(const Fields& fields);
 NamedImage readNamedImage(const Fields& fields);
+MessageLayoutMeta readMessageLayoutMeta(const Fields& fields);
+StashGroup readStashGroup(const Fields& fields);
 
 // The `result` object of a response.
 inline Fields resultFields(const QJsonObject& result)

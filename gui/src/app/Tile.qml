@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Effects
 import RefGui
 // One session in split view: a header with its state and the session pane below. The pane is
 // the same item while the tile is zoomed, so scroll position and streaming survive.
@@ -59,9 +58,6 @@ Item {
 	property bool resizingLayout: false
 	property real settledLayoutWidth: 0
 	readonly property int resizeSettleMs: 130
-	readonly property real resizeFadeOpacity: 0.15
-	readonly property int resizeBlurMax: 16
-	readonly property real resizeBlurStrength: 0.6
 	readonly property real pixelScale: Math.max(1, (Screen.devicePixelRatio || 1) * UiScale.factor)
 	x: expanded ? zoomRect.x : placedSlot.x
 	y: expanded ? zoomRect.y : placedSlot.y
@@ -339,14 +335,6 @@ Item {
 		}
 		SessionPane {
 			id: pane
-			readonly property bool supportsBlur: GraphicsInfo.api !== GraphicsInfo.Software
-			property real resizeBlurAmount: tile.resizingLayout ? tile.resizeBlurStrength : 0
-			Behavior on resizeBlurAmount {
-				NumberAnimation {
-					duration: tile.resizingLayout ? Motion.quick : Motion.standard
-					easing.type: tile.resizingLayout ? Easing.OutCubic : Easing.OutExpo
-				}
-			}
 			anchors {
 				top: header.bottom
 				left: parent.left
@@ -371,23 +359,7 @@ Item {
 			}
 			keysEnabled: tile.focused || tile.expanded
 			composerShown: tile.focused || tile.expanded
-			opacity: tile.resizingLayout ? tile.resizeFadeOpacity : 1
-			Behavior on opacity {
-				NumberAnimation {
-					duration: tile.resizingLayout ? Motion.quick : Motion.standard
-					easing.type: tile.resizingLayout ? Easing.OutCubic : Easing.OutExpo
-				}
-			}
-			layer.enabled: pane.supportsBlur && (tile.resizingLayout || pane.resizeBlurAmount > 0.01)
-			layer.smooth: true
-			layer.textureSize: Qt.size(Math.max(1, Math.ceil(pane.width * tile.pixelScale)), Math.max(1, Math.ceil(pane.height * tile.pixelScale)))
-			layer.effect: MultiEffect {
-				blurEnabled: true
-				blurMax: tile.resizeBlurMax
-				blur: pane.resizeBlurAmount
-			}
 		}
-
 		// A click anywhere in an unfocused pane focuses the tile, and its input box. The overlay
 		// sits in front so that it sees the press first while letting selectable text and buttons
 		// handle the click as well.

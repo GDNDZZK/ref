@@ -406,16 +406,96 @@ QCoro::Task<Result<proto::MessagesPage>> ServerClient::messages(QString sessionI
 	co_return asResult(co_await request(proto::request::messages(sessionId, before, limit)), proto::parseMessagesResult);
 }
 
+QCoro::Task<Result<proto::MessagesPage>> ServerClient::messagesRange(QString sessionId,
+                                                                    quint64 startSeq,
+                                                                    quint64 endSeq,
+                                                                    std::optional<int> limit)
+{
+	co_return asResult(co_await request(proto::request::messagesRange(sessionId, startSeq, endSeq, limit)), proto::parseMessagesResult);
+}
+
 QCoro::Task<Result<proto::ImageData>> ServerClient::getImage(QString sessionId, QString imageId)
 {
 	co_return asResult(co_await request(proto::request::getImage(sessionId, imageId)), proto::parseImageResult);
+}
+
+QCoro::Task<Result<proto::RetryNowResult>> ServerClient::retryNow(QString sessionId)
+{
+	co_return asResult(co_await request(proto::request::retryNow(sessionId)), proto::parseRetryNowResult);
+}
+
+QCoro::Task<Result<QList<proto::StashGroup>>> ServerClient::listGroups()
+{
+	co_return asResult(co_await request(proto::request::listGroups()), proto::parseGroupsResult);
+}
+
+QCoro::Task<Result<proto::StashGroupResult>> ServerClient::stashAll(std::optional<QString> name)
+{
+	co_return asResult(co_await request(proto::request::stashAll(name)), proto::parseStashAllResult);
+}
+
+QCoro::Task<Result<proto::StashGroupResult>> ServerClient::createGroup(std::optional<QString> name, QStringList sessionIds, bool stashLive)
+{
+	co_return asResult(co_await request(proto::request::createGroup(name, sessionIds, stashLive)), proto::parseCreateGroupResult);
+}
+
+QCoro::Task<Result<QList<proto::StashGroup>>> ServerClient::renameGroup(QString groupId, QString name)
+{
+	co_return asResult(co_await request(proto::request::renameGroup(groupId, name)), proto::parseGroupsResult);
+}
+
+QCoro::Task<Result<QList<proto::StashGroup>>> ServerClient::setGroupLocked(QString groupId, bool locked)
+{
+	co_return asResult(co_await request(proto::request::setGroupLocked(groupId, locked)), proto::parseGroupsResult);
+}
+
+QCoro::Task<Result<QList<proto::StashGroup>>> ServerClient::deleteGroup(QString groupId)
+{
+	co_return asResult(co_await request(proto::request::deleteGroup(groupId)), proto::parseGroupsResult);
+}
+
+QCoro::Task<Result<QList<proto::StashGroup>>> ServerClient::addToGroup(QString groupId,
+                                                                       QString sessionId,
+                                                                       std::optional<quint32> position,
+                                                                       bool stashLive)
+{
+	co_return asResult(co_await request(proto::request::addToGroup(groupId, sessionId, position, stashLive)), proto::parseGroupsResult);
+}
+
+QCoro::Task<Result<QList<proto::StashGroup>>> ServerClient::moveGroupMember(std::optional<QString> fromGroupId,
+                                                                            QString toGroupId,
+                                                                            QString sessionId,
+                                                                            quint32 position,
+                                                                            bool stashLive)
+{
+	co_return asResult(co_await request(proto::request::moveGroupMember(fromGroupId, toGroupId, sessionId, position, stashLive)),
+	                   proto::parseGroupsResult);
+}
+
+QCoro::Task<Result<QList<proto::StashGroup>>> ServerClient::removeFromGroup(QString groupId, QString sessionId)
+{
+	co_return asResult(co_await request(proto::request::removeFromGroup(groupId, sessionId)), proto::parseGroupsResult);
+}
+
+QCoro::Task<Result<QList<proto::StashGroup>>> ServerClient::mergeGroups(QString sourceGroupId, QString targetGroupId)
+{
+	co_return asResult(co_await request(proto::request::mergeGroups(sourceGroupId, targetGroupId)), proto::parseGroupsResult);
+}
+
+QCoro::Task<Result<proto::RestoreGroupResult>> ServerClient::restoreGroup(QString groupId)
+{
+	co_return asResult(co_await request(proto::request::restoreGroup(groupId)), proto::parseRestoreGroupResult);
+}
+
+QCoro::Task<Result<proto::RestoreGroupMemberResult>> ServerClient::restoreGroupMember(QString groupId, QString sessionId)
+{
+	co_return asResult(co_await request(proto::request::restoreGroupMember(groupId, sessionId)), proto::parseRestoreGroupMemberResult);
 }
 
 QCoro::Task<Result<void>> ServerClient::shutdown()
 {
 	co_return asVoidResult(co_await request(proto::request::shutdown()));
 }
-
 void ServerClient::ResponseAwaiter::await_suspend(std::coroutine_handle<> handle)
 {
 	waiter = handle;

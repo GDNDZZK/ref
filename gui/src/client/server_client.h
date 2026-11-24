@@ -117,9 +117,33 @@ public:
 	                                                                     std::optional<int> limit = {});
 	// A page of messages before `before`, see Request::Messages.
 	QCoro::Task<Result<proto::MessagesPage>> messages(QString sessionId, QString before, int limit);
+	// A range of messages in [startSeq, endSeq).
+	QCoro::Task<Result<proto::MessagesPage>> messagesRange(QString sessionId,
+	                                                       quint64 startSeq,
+	                                                       quint64 endSeq,
+	                                                       std::optional<int> limit = {});
 	QCoro::Task<Result<proto::ImageData>> getImage(QString sessionId, QString imageId);
+	QCoro::Task<Result<proto::RetryNowResult>> retryNow(QString sessionId);
+	QCoro::Task<Result<QList<proto::StashGroup>>> listGroups();
+	QCoro::Task<Result<proto::StashGroupResult>> stashAll(std::optional<QString> name = {});
+	QCoro::Task<Result<proto::StashGroupResult>> createGroup(std::optional<QString> name, QStringList sessionIds, bool stashLive);
+	QCoro::Task<Result<QList<proto::StashGroup>>> renameGroup(QString groupId, QString name);
+	QCoro::Task<Result<QList<proto::StashGroup>>> setGroupLocked(QString groupId, bool locked);
+	QCoro::Task<Result<QList<proto::StashGroup>>> deleteGroup(QString groupId);
+	QCoro::Task<Result<QList<proto::StashGroup>>> addToGroup(QString groupId,
+	                                                          QString sessionId,
+	                                                          std::optional<quint32> position = {},
+	                                                          bool stashLive = true);
+	QCoro::Task<Result<QList<proto::StashGroup>>> moveGroupMember(std::optional<QString> fromGroupId,
+	                                                               QString toGroupId,
+	                                                               QString sessionId,
+	                                                               quint32 position,
+	                                                               bool stashLive = true);
+	QCoro::Task<Result<QList<proto::StashGroup>>> removeFromGroup(QString groupId, QString sessionId);
+	QCoro::Task<Result<QList<proto::StashGroup>>> mergeGroups(QString sourceGroupId, QString targetGroupId);
+	QCoro::Task<Result<proto::RestoreGroupResult>> restoreGroup(QString groupId);
+	QCoro::Task<Result<proto::RestoreGroupMemberResult>> restoreGroupMember(QString groupId, QString sessionId);
 	QCoro::Task<Result<void>> shutdown();
-
 signals:
 	// Every frame but responses, in arrival order.
 	void frameReceived(const refgui::proto::ServerFrame& frame);

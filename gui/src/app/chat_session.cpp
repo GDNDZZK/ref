@@ -297,6 +297,15 @@ void ChatSession::stop()
 	m_controller.showPendingNow(); // the server is done, only the display lags
 }
 
+void ChatSession::retryNow()
+{
+	if(!isReady())
+	{
+		return;
+	}
+	sendRetryNow();
+}
+
 bool ChatSession::lastToolDelayed() const
 {
 	return m_controller.model().toolSummary().lastToolDelayed;
@@ -519,6 +528,11 @@ QCoro::Task<> ChatSession::sendPrompt(QString text)
 QCoro::Task<> ChatSession::sendAbort()
 {
 	co_await awaitAndReport(m_controller.abort());
+}
+
+QCoro::Task<> ChatSession::sendRetryNow()
+{
+	co_await awaitAndReport(m_controller.retryNow());
 }
 
 QCoro::Task<> ChatSession::sendPermission(QString callId, bool allow, bool always)
