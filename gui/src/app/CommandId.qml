@@ -18,4 +18,8 @@ QtObject {
 	readonly property string uiZoomIn: "ui-zoom-in"
 	readonly property string uiZoomOut: "ui-zoom-out"
 	readonly property string uiZoomReset: "ui-zoom-reset"
+	readonly property string floating: "floating"
+	readonly property string stash: "stash"
+	readonly property string stashed: "stashed"
+	readonly property string backend: "backend"
 }

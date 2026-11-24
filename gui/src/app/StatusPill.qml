@@ -8,11 +8,17 @@ Rectangle {
 	id: pill
 
 	property string text: ""
+	property string actionText: ""
 	readonly property bool shown: text !== ""
+	readonly property int horizontalPadding: 14
+	readonly property int actionGap: 10
+	readonly property real contentWidth: label.implicitWidth + (actionButton.visible ? actionButton.width + actionGap : 0)
+
+	signal actionClicked()
 
 	anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: 14 }
-	width: Math.min(label.implicitWidth + 2 * 14, parent.width - 2 * 80) // clear of the corner buttons
-	height: label.implicitHeight + 2 * 6
+	width: Math.min(contentWidth + 2 * horizontalPadding, parent.width - 2 * 80) // clear of the corner buttons
+	height: Math.max(label.implicitHeight + 2 * 6, actionButton.visible ? actionButton.height + 8 : 0)
 	radius: height / 2
 	color: Theme.surface
 	border.color: Theme.border
@@ -24,12 +30,26 @@ Rectangle {
 	Text {
 		textFormat: Text.PlainText
 		id: label
-		x: 14
-		y: 6
-		width: parent.width - 2 * 14
+		anchors {
+			left: parent.left
+			leftMargin: pill.horizontalPadding
+			right: actionButton.visible ? actionButton.left : parent.right
+			rightMargin: actionButton.visible ? pill.actionGap : pill.horizontalPadding
+			verticalCenter: parent.verticalCenter
+		}
 		text: pill.text
 		elide: Text.ElideRight
 		color: Theme.textMuted
 		font.pixelSize: Theme.smallFontSize
+	}
+
+	DialogButton {
+		id: actionButton
+		objectName: "statusPillActionButton"
+		anchors { right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
+		small: true
+		visible: pill.actionText !== ""
+		text: pill.actionText
+		onClicked: pill.actionClicked()
 	}
 }

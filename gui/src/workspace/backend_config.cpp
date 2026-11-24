@@ -128,6 +128,20 @@ void BackendConfig::apply(proto::ServerConfig config)
 	emit changed();
 }
 
+void BackendConfig::reset()
+{
+\t++m_configSerial;
+\t++m_mcpSerial;
+\tm_reloadsInFlight = 0;
+\tm_config = {};
+\tm_agents.clear();
+\tm_models.clear();
+\tm_commands.clear();
+\tm_mcpServers.clear();
+\temit changed();
+\temit mcpChanged();
+}
+
 QCoro::Task<client::Result<proto::ReloadConfigResult>> BackendConfig::reload(std::optional<QString> cwdOverride)
 {
 	const QPointer<BackendConfig> self(this);

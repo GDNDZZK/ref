@@ -55,8 +55,13 @@ SessionController::SessionController(client::Backend& backend, QObject* parent)
 	});
 	connect(&m_feed, &ConversationFeed::pendingChanged, this, &SessionController::turnInProgressChanged);
 	connect(&m_feed, &ConversationFeed::pendingChanged, this, &SessionController::activelyWorkingChanged);
-	connect(&backend, &client::Backend::stateChanged, this, &SessionController::connectionChanged);
-	connect(&m_model, &ConversationModel::messagesEvicted, this, &SessionController::messagesEvicted);
+\tconnect(\u0026backend, \u0026client::Backend::stateChanged, this, [this] {
+\t\tif(!isConnected())
+\t\t{
+\t\t\tcancelPendingRangeFetch();
+\t\t}
+\t\temit connectionChanged();
+\t});
 	m_rangeFetchTimer.setSingleShot(true);
 	m_rangeFetchTimer.setInterval(RangeFetchDebounceMs);
 	connect(&m_rangeFetchTimer, &QTimer::timeout, this, &SessionController::onRangeFetchTimeout);

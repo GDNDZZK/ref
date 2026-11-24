@@ -72,6 +72,7 @@ private slots:
 	void typoSuggestionsAndSingleSlashTokenDetection();
 	void requiresArgsReflectsOptionalVsRequiredHints();
 	void uiZoomCommandsAreRegisteredWithUniqueShortcutsAndNeedNothing();
+	void stashFloatingAndBackendCommandsAreRegistered();
 };
 
 void TestCommandRegistry::idsShortcutsAndSlashNamesAreUnique()
@@ -327,5 +328,30 @@ void TestCommandRegistry::uiZoomCommandsAreRegisteredWithUniqueShortcutsAndNeedN
 	QCOMPARE(zoomOut.value(u"category"_s).toString(), u"View"_s);
 	QCOMPARE(zoomReset.value(u"category"_s).toString(), u"View"_s);
 }
+
+void TestCommandRegistry::stashFloatingAndBackendCommandsAreRegistered()
+{
+	Fixture f;
+	f.registry.setContext({.connected = false, .hasSession = false, .canDetach = false, .liveSessions = 0, .splitView = false});
+	QVERIFY(!f.registry.run(u"stash"_s));
+	QVERIFY(!f.registry.run(u"stashed"_s));
+	QVERIFY(f.registry.run(u"floating"_s));
+	QVERIFY(f.registry.run(u"backend"_s));
+
+	f.registry.setContext({.connected = true, .hasSession = false, .canDetach = false, .liveSessions = 0, .splitView = false});
+	QVERIFY(!f.registry.run(u"stash"_s));
+	QVERIFY(f.registry.run(u"stashed"_s));
+
+	f.registry.setContext(Idle);
+	QVERIFY(f.registry.runSlash(u"/stash sprint-1"_s));
+	QVERIFY(f.registry.runSlash(u"/stash-groups"_s));
+	QVERIFY(f.registry.runSlash(u"/float"_s));
+	QVERIFY(f.registry.runSlash(u"/server"_s));
+	QVERIFY(f.ran.contains(u"stash|sprint-1|"_s));
+	QVERIFY(f.ran.contains(u"stashed||"_s));
+	QVERIFY(f.ran.contains(u"floating||"_s));
+	QVERIFY(f.ran.contains(u"backend||"_s));
+}
+
 QTEST_GUILESS_MAIN(TestCommandRegistry)
 #include "tst_command_registry.moc"

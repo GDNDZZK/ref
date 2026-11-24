@@ -88,7 +88,10 @@ private:
 		QJsonArray array;
 		for(const QJsonObject& info : m_sessions)
 		{
-			array.append(info);
+			if(info.value(u"live"_s).toBool(true))
+			{
+				array.append(info);
+			}
 		}
 		return array;
 	}
@@ -264,6 +267,137 @@ private:
 			m_fake.respond(request, {{u"session"_s, info}});
 			m_fake.send({{u"kind"_s, u"sessions"_s}, {u"sessions"_s, list()}});
 		}
+		else if(op == u"list_groups"_s)
+		{
+			m_fake.respond(request, {{u"groups"_s, m_groups}});
+		}
+		else if(op == u"stash_all"_s)
+		{
+			QJsonArray members;
+			int pos = 0;
+			for(auto it = m_sessions.begin(); it != m_sessions.end(); ++it)
+			{
+				if(!it->value(u"live"_s).toBool(true))
+				{
+					continue;
+				}
+				(*it)[u"live"_s] = false;
+				(*it)[u"attached"_s] = 0;
+				members.append(QJsonObject{{u"session_id"_s, it.key()}, {u"position"_s, pos++}, {u"info"_s, *it}});
+			}
+			if(members.isEmpty())
+			{
+				m_fake.respond(request, {{u"group"_s, QJsonValue::Null}, {u"groups"_s, m_groups}});
+				return;
+			}
+			const QString gid = u"grp_%1"_s.arg(++m_groupSeq);
+			const QString name = request.value(u"name"_s).toString().isEmpty() ? u"Stash %1"_s.arg(m_groupSeq) : request.value(u"name"_s).toString();
+			const QJsonObject group{{u"id"_s, gid}, {u"name"_s, name}, {u"locked"_s, false}, {u"created_at"_s, 1000}, {u"updated_at"_s, 1000}, {u"members"_s, members}};
+			m_groups.prepend(group);
+			m_fake.respond(request, {{u"group"_s, group}, {u"groups"_s, m_groups}});
+			broadcastSessions();
+		}
+		else if(op == u"create_group"_s)
+		{
+			const QString gid = u"grp_%1"_s.arg(++m_groupSeq);
+			const QString name = request.value(u"name"_s).toString().isEmpty() ? u"Group %1"_s.arg(m_groupSeq) : request.value(u"name"_s).toString();
+			const bool stashLive = request.value(u"stash_live"_s).toBool(true);
+			QJsonArray members;
+			int pos = 0;
+			for(const QJsonValue& val : request.value(u"session_ids"_s).toArray())
+			{
+				const QString sid = val.toString();
+				if(m_sessions.contains(sid))
+				{
+					if(stashLive)
+					{
+						m_sessions[sid][u"live"_s] = false;
+						m_sessions[sid][u"attached"_s] = 0;
+					}
+					members.append(QJsonObject{{u"session_id"_s, sid}, {u"position"_s, pos++}, {u"info"_s, m_sessions.value(sid)}});
+				}
+			}
+			const QJsonObject group{{u"id"_s, gid}, {u"name"_s, name}, {u"locked"_s, false}, {u"created_at"_s, 1000}, {u"updated_at"_s, 1000}, {u"members"_s, members}};
+			m_groups.prepend(group);
+			m_fake.respond(request, {{u"group"_s, group}, {u"groups"_s, m_groups}});
+			if(stashLive)
+			{
+				broadcastSessions();
+			}
+		}
+		else if(op == u"rename_group"_s)
+		{
+			const QString gid = request.value(u"group_id"_s).toString();
+			const QString name = request.value(u"name"_s).toString();
+			for(int i = 0; i < m_groups.size(); ++i)
+			{
+				QJsonObject g = m_groups.at(i).toObject();
+				if(g.value(u"id"_s).toString() == gid)
+				{
+					g[u"name"_s] = name;
+					m_groups[i] = g;
+				}
+			}
+			m_fake.respond(request, {{u"groups"_s, m_groups}});
+		}
+		else if(op == u"set_group_locked"_s)
+		{
+			const QString gid = request.value(u"group_id"_s).toString();
+			const bool locked = request.value(u"locked"_s).toBool();
+			for(int i = 0; i < m_groups.size(); ++i)
+			{
+				QJsonObject g = m_groups.at(i).toObject();
+				if(g.value(u"id"_s).toString() == gid)
+				{
+					g[u"locked"_s] = locked;
+					m_groups[i] = g;
+				}
+			}
+			m_fake.respond(request, {{u"groups"_s, m_groups}});
+		}
+		else if(op == u"delete_group"_s)
+		{
+			const QString gid = request.value(u"group_id"_s).toString();
+			QJsonArray next;
+			for(const QJsonValue& val : m_groups)
+			{
+				if(val.toObject().value(u"id"_s).toString() != gid)
+				{
+					next.append(val);
+				}
+			}
+			m_groups = next;
+			m_fake.respond(request, {{u"groups"_s, m_groups}});
+		}
+		else if(op == u"restore_group"_s)
+		{
+			const QString gid = request.value(u"group_id"_s).toString();
+			QJsonArray restoredIds;
+			for(int i = 0; i < m_groups.size(); ++i)
+			{
+				QJsonObject g = m_groups.at(i).toObject();
+				if(g.value(u"id"_s).toString() == gid)
+				{
+					QJsonArray members = g.value(u"members"_s).toArray();
+					for(int j = 0; j < members.size(); ++j)
+					{
+						QJsonObject m = members.at(j).toObject();
+						const QString sid = m.value(u"session_id"_s).toString();
+						if(m_sessions.contains(sid) && !m_sessions[sid].value(u"live"_s).toBool(true))
+						{
+							m_sessions[sid][u"live"_s] = true;
+							restoredIds.append(sid);
+						}
+						m[u"info"_s] = m_sessions.value(sid);
+						members[j] = m;
+					}
+					g[u"members"_s] = members;
+					m_groups[i] = g;
+				}
+			}
+			m_fake.respond(request, {{u"restored_ids"_s, restoredIds}, {u"groups"_s, m_groups}});
+			broadcastSessions();
+		}
 		else
 		{
 			m_fake.respond(request, {});
@@ -283,6 +417,8 @@ private:
 	QJsonArray m_models;
 	QList<QJsonObject> m_setVariantRequests;
 	QStringList m_files;
+	QJsonArray m_groups;
+	int m_groupSeq = 0;
 };
 
 QJsonArray manyMessagesJson()
@@ -461,6 +597,9 @@ private slots:
 	void lightboxNavigatesZoomsAndResets();
 	void sidebarHistoryFilterMenuAndCustomHeightCollapseWork();
 	void splitViewSidebarToggleBlursFadesAndFreezesLayoutWidth();
+	void backendDialogSwitchAndStatusPillActionWorkWithoutWarnings();
+	void stashButtonDialogAndSplitFilterCapsuleWorkWithoutWarnings();
+	void floatingBallModeTransitionsBetweenBallHoverCardAndMiniPanelWithoutWarnings();
 	void cleanupTestCase();
 };
 
@@ -3935,6 +4074,194 @@ void TestMainWindow::splitViewSidebarToggleBlursFadesAndFreezesLayoutWidth()
 	QTRY_VERIFY(qFuzzyCompare(pane->property("opacity").toReal(), 1.0));
 	QTRY_VERIFY(qFuzzyIsNull(pane->property("resizeBlurAmount").toReal()));
 	QVERIFY2(warningSpy.isEmpty(), "Split-view sidebar toggle transition emitted QML warnings");
+}
+
+void TestMainWindow::backendDialogSwitchAndStatusPillActionWorkWithoutWarnings()
+{
+	MainFixture f;
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+
+	// Open BackendDialog via SettingsDialog "Switch backend..." button.
+	f.workspace->openDialog(u"settings"_s);
+	QQuickItem* switchBtn = nullptr;
+	QTRY_VERIFY([&] {
+		switchBtn = findItem(window->contentItem(), [](QQuickItem* item) { return item->objectName() == u"settingsSwitchBackendButton"_s; });
+		return switchBtn != nullptr && switchBtn->isVisible();
+	}());
+	const QPoint switchCenter = switchBtn->mapToScene(QPointF(switchBtn->width() / 2.0, switchBtn->height() / 2.0)).toPoint();
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, switchCenter);
+	QTRY_COMPARE(f.workspace->dialog(), u"backend"_s);
+
+	QQuickItem* urlField = nullptr;
+	QQuickItem* tempBtn = nullptr;
+	QTRY_VERIFY([&] {
+		urlField = findItem(window->contentItem(), [](QQuickItem* item) { return item->objectName() == u"backendUrlField"_s; });
+		tempBtn = findItem(window->contentItem(), [](QQuickItem* item) { return item->objectName() == u"backendTemporaryButton"_s; });
+		return urlField != nullptr && tempBtn != nullptr && tempBtn->isVisible();
+	}());
+
+	// Invalid URL shows inline error without closing.
+	urlField->setProperty("text", u"http://bad-scheme"_s);
+	const QPoint tempCenter = tempBtn->mapToScene(QPointF(tempBtn->width() / 2.0, tempBtn->height() / 2.0)).toPoint();
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, tempCenter);
+	QCOMPARE(f.workspace->dialog(), u"backend"_s);
+	QVERIFY(!urlField->property("errorText").toString().isEmpty());
+
+	// Valid URL switches temporarily to a second FakeBackend.
+	FakeBackend secondFake;
+	StubMainServer secondStub(secondFake);
+	secondStub.add(u"ses_second"_s, 5);
+	urlField->setProperty("text", secondFake.url().toString());
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, tempCenter);
+	QTRY_COMPARE(f.workspace->dialog(), QString());
+	QCOMPARE(f.workspace->backendSource(), u"temporary"_s);
+	QTRY_COMPARE(f.workspace->connectionState(), u"connected"_s);
+	QTRY_VERIFY(f.workspace->sessions()->indexOf(u"ses_second"_s) >= 0);
+
+	// Disconnected StatusPill shows "Switch Backend..." action button that opens BackendDialog.
+	QVERIFY(f.workspace->switchBackend(u"ws://127.0.0.1:1/"_s, {}, false));
+	QTRY_VERIFY(f.workspace->connectionState() != u"connected"_s);
+	QQuickItem* pillBtn = nullptr;
+	QTRY_VERIFY([&] {
+		pillBtn = findItem(window->contentItem(), [](QQuickItem* item) { return item->objectName() == u"statusPillActionButton"_s; });
+		return pillBtn != nullptr && pillBtn->isVisible();
+	}());
+	const QPoint pillCenter = pillBtn->mapToScene(QPointF(pillBtn->width() / 2.0, pillBtn->height() / 2.0)).toPoint();
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, pillCenter);
+	QTRY_COMPARE(f.workspace->dialog(), u"backend"_s);
+
+	QVERIFY2(warningSpy.isEmpty(), "BackendDialog or StatusPill emitted QML warnings");
+}
+
+void TestMainWindow::stashButtonDialogAndSplitFilterCapsuleWorkWithoutWarnings()
+{
+	MainFixture f;
+	f.stub.setSession(u"ses_child"_s, sessionInfoJson(u"ses_child"_s, {.title = u"Child"_s, .createdAt = 3, .parent = u"ses_a"_s}));
+	f.stub.broadcastSessions();
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 3);
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	window->resize(1100, 720);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+
+	// Split view filter capsule filters by User-created and All without warnings.
+	f.workspace->toggleSplit();
+	QTRY_VERIFY(f.workspace->isSplitView());
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+
+	QQuickItem* userPill = nullptr;
+	QQuickItem* allPill = nullptr;
+	QTRY_VERIFY([&] {
+		userPill = findItem(window->contentItem(), [](QQuickItem* item) { return item->objectName() == u"splitFilterUser"_s; });
+		allPill = findItem(window->contentItem(), [](QQuickItem* item) { return item->objectName() == u"splitFilterAll"_s; });
+		return userPill != nullptr && allPill != nullptr && userPill->isVisible();
+	}());
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, userPill->mapToScene(QPointF(userPill->width() / 2.0, userPill->height() / 2.0)).toPoint());
+	QTRY_COMPARE(f.workspace->splitFilter(), u"user"_s);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, allPill->mapToScene(QPointF(allPill->width() / 2.0, allPill->height() / 2.0)).toPoint());
+	QTRY_COMPARE(f.workspace->splitFilter(), u"all"_s);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	f.workspace->toggleSplit();
+	QTRY_VERIFY(!f.workspace->isSplitView());
+
+	// Sidebar stash button left-click stashes all running sessions; second left-click opens StashDialog.
+	QQuickItem* stashBtn = findItem(window->contentItem(), [](QQuickItem* item) { return item->objectName() == u"sidebarStashButton"_s; });
+	QVERIFY(stashBtn);
+	const QPoint stashCenter = stashBtn->mapToScene(QPointF(stashBtn->width() / 2.0, stashBtn->height() / 2.0)).toPoint();
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, stashCenter);
+	QTRY_COMPARE(f.workspace->stash()->groupCount(), 1);
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 0);
+
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, stashCenter);
+	QTRY_COMPARE(f.workspace->dialog(), u"stash"_s);
+	QQuickItem* newGroupBtn = nullptr;
+	QTRY_VERIFY([&] {
+		newGroupBtn = findItem(window->contentItem(), [](QQuickItem* item) { return item->objectName() == u"newStashGroupButton"_s; });
+		return newGroupBtn != nullptr && newGroupBtn->isVisible();
+	}());
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, newGroupBtn->mapToScene(QPointF(newGroupBtn->width() / 2.0, newGroupBtn->height() / 2.0)).toPoint());
+	QTRY_COMPARE(f.workspace->stash()->groupCount(), 2);
+
+	QVERIFY2(warningSpy.isEmpty(), "Stash UI or split filter capsule emitted QML warnings");
+}
+
+void TestMainWindow::floatingBallModeTransitionsBetweenBallHoverCardAndMiniPanelWithoutWarnings()
+{
+	MainFixture f;
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+
+	// Enter floating ball mode via topbar button.
+	QQuickItem* floatBtn = findItem(window->contentItem(), [](QQuickItem* item) { return item->objectName() == u"floatingBallButton"_s; });
+	QVERIFY(floatBtn);
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, floatBtn->mapToScene(QPointF(floatBtn->width() / 2.0, floatBtn->height() / 2.0)).toPoint());
+	QTRY_VERIFY(f.workspace->isFloatingMode());
+	QTRY_VERIFY(!window->isVisible());
+
+	QQuickWindow* ballWin = nullptr;
+	QQuickWindow* panelWin = nullptr;
+	QTRY_VERIFY([&] {
+		ballWin = window->findChild<QQuickWindow*>(u"floatingBallWindow"_s);
+		panelWin = window->findChild<QQuickWindow*>(u"floatingPanelWindow"_s);
+		return ballWin != nullptr && panelWin != nullptr && ballWin->isVisible();
+	}());
+	QCOMPARE(ballWin->width(), 56);
+	QCOMPARE(ballWin->height(), 56);
+	QVERIFY(QTest::qWaitForWindowExposed(ballWin));
+
+	// Click ball to open mini panel.
+	QTest::mouseClick(ballWin, Qt::LeftButton, Qt::NoModifier, QPoint(28, 28));
+	QTRY_VERIFY(panelWin->isVisible());
+	QTRY_VERIFY(!ballWin->isVisible());
+	QVERIFY(QTest::qWaitForWindowExposed(panelWin));
+
+	// Return to full window from panel button.
+	QQuickItem* returnBtn = nullptr;
+	QTRY_VERIFY([&] {
+		returnBtn = findItem(panelWin->contentItem(), [](QQuickItem* item) { return item->objectName() == u"floatingReturnButton"_s; });
+		return returnBtn != nullptr && returnBtn->isVisible();
+	}());
+	QTest::mouseClick(panelWin, Qt::LeftButton, Qt::NoModifier, returnBtn->mapToScene(QPointF(returnBtn->width() / 2.0, returnBtn->height() / 2.0)).toPoint());
+	QTRY_VERIFY(window->isVisible());
+
+	QVERIFY2(warningSpy.isEmpty(), "FloatingBallWindow emitted QML warnings");
 }
 
 QTEST_MAIN(TestMainWindow)

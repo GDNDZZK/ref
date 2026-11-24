@@ -25,35 +25,39 @@ public:
 	// workspace and notify layers). The app hands it on and calls nothing on it.
 	client::Backend& backend() { return m_backend; }
 
-	void start();
-	// Closes the connection for good; requests that are out fail.
-	void shutdown();
+\tvoid start();
+\tvoid switchSource(client::Backend::Source source);
+\t// Closes the connection for good; requests that are out fail.
+\tvoid shutdown();
 
-	State state() const { return m_backend.state(); }
-	bool isConnected() const { return state() == State::Connected; }
-	// Why the connection is down, while it is.
-	const QString& reason() const { return m_backend.reason(); }
-	// What the backend said in Hello.
-	const QString& serverVersion() const { return m_backend.hello().serverVersion; }
-	int protocol() const { return m_backend.hello().protocol; }
-	// Connected to a backend that speaks an older protocol than this frontend.
-	bool isProtocolOutdated() const;
-	// The backend runs on this machine (started here, or a remote one on a loopback address).
-	bool isLocal() const { return m_local; }
+\tState state() const { return m_backend.state(); }
+\tbool isConnected() const { return state() == State::Connected; }
+\t// Why the connection is down, while it is.
+\tconst QString\u0026 reason() const { return m_backend.reason(); }
+\t// What the backend said in Hello.
+\tconst QString\u0026 serverVersion() const { return m_backend.hello().serverVersion; }
+\tint protocol() const { return m_backend.hello().protocol; }
+\t// Connected to a backend that speaks an older protocol than this frontend.
+\tbool isProtocolOutdated() const;
+\t// The backend runs on this machine (started here, or a remote one on a loopback address).
+\tbool isLocal() const { return m_local; }
+\tQString backendUrl() const;
+\tQString backendToken() const;
+\tQString backendMode() const;
 
-	// Asks the backend to exit. The connection drops with it, so the request ends with
-	// client::ConnectionClosed when it worked.
-	QCoro::Task<client::Result<void>> stopServer();
+\t// Asks the backend to exit. The connection drops with it, so the request ends with
+\t// client::ConnectionClosed when it worked.
+\tQCoro::Task\u003cclient::Result\u003cvoid\u003e\u003e stopServer();
 
 signals:
-	void stateChanged();
-	// Hello was answered, after the first connection and after each reconnect.
-	void connected();
-	// The backend has a message for the user.
-	void toastReceived(const proto::ToastFrame& toast);
-	// Configuration was reloaded or modified on the backend.
-	void configChangedReceived(const QStringList& warnings);
-
+\tvoid stateChanged();
+\tvoid sourceChanged();
+\t// Hello was answered, after the first connection and after each reconnect.
+\tvoid connected();
+\t// The backend has a message for the user.
+\tvoid toastReceived(const proto::ToastFrame\u0026 toast);
+\t// Configuration was reloaded or modified on the backend.
+\tvoid configChangedReceived(const QStringList\u0026 warnings);
 private:
 	void onFrame(const proto::ServerFrame& frame);
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/chat_session.h"
+#include "app/floating_ball_helper.h"
 #include "app/tile_model.h"
 #include "app/tile_stage.h"
 #include "cli/launch_options.h"
@@ -11,8 +12,8 @@
 #include "workspace/connection.h"
 #include "workspace/session_directory.h"
 #include "workspace/settings.h"
+#include "workspace/stash_controller.h"
 #include "workspace/toast_text.h"
-
 #include <QCoroTask>
 #include <QHash>
 #include <QJSValue>
@@ -54,6 +55,8 @@ class Workspace : public QObject
 	Q_PROPERTY(double startupUiScale READ startupUiScale CONSTANT)
 	Q_PROPERTY(refgui::workspace::BackendConfig* config READ config CONSTANT)
 	Q_PROPERTY(refgui::workspace::ConfigEditorController* configEditor READ configEditor CONSTANT)
+	Q_PROPERTY(refgui::workspace::StashController* stash READ stash CONSTANT)
+	Q_PROPERTY(FloatingBallHelper* floatingBallHelper READ floatingBallHelper CONSTANT)
 	Q_PROPERTY(QVariantList mcpServers READ mcpServers NOTIFY mcpServersChanged)
 	Q_PROPERTY(refgui::workspace::SessionListModel* sessions READ sessions CONSTANT)
 	Q_PROPERTY(refgui::workspace::SessionListModel* history READ history CONSTANT)
@@ -69,23 +72,33 @@ class Workspace : public QObject
 	Q_PROPERTY(QAbstractItemModel* tiles READ tiles CONSTANT)
 	Q_PROPERTY(TileStage* tileStage READ tileStage CONSTANT)
 	Q_PROPERTY(bool splitView READ isSplitView NOTIFY splitViewChanged)
+	Q_PROPERTY(QString splitFilter READ splitFilter NOTIFY splitFilterChanged)
+	Q_PROPERTY(QString splitFilterLabel READ splitFilterLabel NOTIFY splitFilterChanged)
+	Q_PROPERTY(QVariantList splitCreators READ splitCreators NOTIFY splitCreatorsChanged)
 	Q_PROPERTY(QString focusedTileId READ focusedTileId NOTIFY focusedTileChanged)
 	// The session in front: the focused tile's in split view, else the current one. What the sidebar marks and shows the to-do list of.
 	Q_PROPERTY(ChatSession* frontSession READ frontSession NOTIFY frontSessionChanged)
 	Q_PROPERTY(QString zoomedId READ zoomedId NOTIFY zoomedChanged)
+	// Floating ball mode.
+	Q_PROPERTY(bool floatingMode READ isFloatingMode WRITE setFloatingMode NOTIFY floatingModeChanged)
 	// The dialog on screen: "" for none, else palette, settings, sessions, models, agents,
-	// variants, help, mcp, peers, export, cd, new-in, close, rename or delete-history.
+	// variants, help, mcp, peers, export, cd, new-in, close, rename, delete-history, stash or backend.
 	Q_PROPERTY(QString dialog READ dialog NOTIFY dialogChanged)
 	Q_PROPERTY(QVariantMap dialogArgs READ dialogArgs NOTIFY dialogChanged)
 	// The backend.
 	Q_PROPERTY(bool smoke READ isSmoke CONSTANT)
-	Q_PROPERTY(bool backendLocal READ isBackendLocal CONSTANT)
+	Q_PROPERTY(bool backendLocal READ isBackendLocal NOTIFY backendChanged)
 	Q_PROPERTY(bool protocolOutdated READ isProtocolOutdated NOTIFY backendChanged)
 	Q_PROPERTY(QString backendVersion READ backendVersion NOTIFY backendChanged)
 	Q_PROPERTY(int protocolVersion READ protocolVersion NOTIFY backendChanged)
 	Q_PROPERTY(int requiredProtocol READ requiredProtocol CONSTANT)
 	Q_PROPERTY(bool canRestartBackend READ canRestartBackend NOTIFY backendChanged)
-
+	Q_PROPERTY(QString backendUrl READ backendUrl NOTIFY backendChanged)
+	Q_PROPERTY(QString maskedBackendToken READ maskedBackendToken NOTIFY backendChanged)
+	Q_PROPERTY(QString backendSource READ backendSource NOTIFY backendChanged)
+	Q_PROPERTY(QString editableBackendUrl READ editableBackendUrl NOTIFY backendChanged)
+	Q_PROPERTY(bool hasEditableBackendToken READ hasEditableBackendToken NOTIFY backendChanged)
+	Q_PROPERTY(QString maskedEditableBackendToken READ maskedEditableBackendToken NOTIFY backendChanged)
 public:
 	// `settingsPath` is the file the settings are kept in.
 	Workspace(refgui::cli::LaunchOptions options, QString settingsPath, QObject* parent = nullptr);
@@ -121,6 +134,8 @@ public:
 	double startupUiScale() const { return m_startupUiScale; }
 	refgui::workspace::ConfigEditorController* configEditor() { return &m_configEditor; }
 	refgui::workspace::BackendConfig* config() { return &m_config; }
+	refgui::workspace::StashController* stash() { return &m_stash; }
+	FloatingBallHelper* floatingBallHelper() { return &m_floatingBallHelper; }
 	refgui::workspace::CommandRegistry* commands() { return &m_commands; }
 	QVariantList mcpServers() const { return m_config.mcpServers(); }
 	refgui::workspace::SessionListModel* sessions() { return &m_directory.live(); }
@@ -135,8 +150,12 @@ public:
 	QAbstractItemModel* tiles() { return &m_tiles; }
 	TileStage* tileStage() { return &m_stage; }
 	bool isSplitView() const { return m_split; }
+	const QString& splitFilter() const { return m_splitFilter; }
+	QString splitFilterLabel() const;
+	QVariantList splitCreators() const;
 	const QString& focusedTileId() const { return m_focusedTile; }
 	const QString& zoomedId() const { return m_zoomed; }
+	bool isFloatingMode() const { return m_floatingMode; }
 	const QString& dialog() const { return m_dialog; }
 	const QVariantMap& dialogArgs() const { return m_dialogArgs; }
 	bool isSmoke() const { return m_options.smoke; }
@@ -147,7 +166,12 @@ public:
 	static constexpr int requiredProtocol() { return refgui::proto::ProtocolVersion; }
 	// Restarting is only offered when no session would lose work.
 	bool canRestartBackend() const;
-
+	QString backendUrl() const;
+	QString maskedBackendToken() const;
+	QString backendSource() const;
+	QString editableBackendUrl() const;
+	bool hasEditableBackendToken() const;
+	QString maskedEditableBackendToken() const;
 	// The chat session for `sessionId`, made when the window does not have it yet. Null for an empty id.
 	Q_INVOKABLE ChatSession* session(const QString& sessionId);
 
@@ -190,9 +214,13 @@ public:
 	void endLocalConfigMutation() { --m_localMutationsInFlight; }
 
 	Q_INVOKABLE void toggleSplit();
+	Q_INVOKABLE void setSplitFilter(const QString& filter);
 	Q_INVOKABLE void focusTile(const QString& sessionId);
 	Q_INVOKABLE void zoomTile(const QString& sessionId);
 	Q_INVOKABLE void unzoom();
+	Q_INVOKABLE void setFloatingMode(bool floating);
+	Q_INVOKABLE void activateFromNotification(const QString& sessionId);
+	Q_INVOKABLE bool anySessionWorking() const;
 
 	// The user picked a theme (system, light or dark). The window changes it under a crossfade
 	// and then sets Settings.theme.
@@ -207,8 +235,9 @@ public:
 
 	// Restarts the backend (stops it; the connection then starts a new one). Only when canRestartBackend.
 	Q_INVOKABLE void restartBackend();
-
-	// The language changed: texts built here are built again.
+	Q_INVOKABLE bool isValidBackendUrl(const QString& url) const;
+	Q_INVOKABLE bool switchBackend(const QString& url, const QString& token, bool saveAsDefault, bool keepExistingToken = false);
+	Q_INVOKABLE void restoreDefaultBackend();
 	void retranslate();
 
 signals:
@@ -224,6 +253,8 @@ signals:
 	void historyFilterChanged();
 	void historySearchChanged();
 	void splitViewChanged();
+	void splitFilterChanged();
+	void splitCreatorsChanged();
 	void focusedTileChanged();
 	void frontSessionChanged();
 	// A session is about to be deleted; whoever shows it must let go first. It is no longer current.
@@ -231,9 +262,9 @@ signals:
 	void sessionMessagesEvicted(const QString& sessionId, const QStringList& messageIds);
 	void clearImageCacheRequested();
 	void zoomedChanged();
+	void floatingModeChanged();
 	void dialogChanged();
 	void backendChanged();
-	void themeChangeRequested(const QString& theme);
 	// A message for the user that is not about one session. `level` is info, warn or error.
 	void toastRequested(const QString& level, const QString& text);
 	// The user asked for a new session in a folder of their choice; the window shows a folder dialog
@@ -299,7 +330,7 @@ private:
 	void exportTo(const QString& sessionId, const QString& path, Reply reply);
 	void peerText(const QString& sessionId, const QString& command, const QString& args, Reply reply);
 
-	// Split view.
+	// Split view and backend switching.
 	QCoro::Task<> enterSplit();
 	QCoro::Task<> leaveSplit(bool adoptZoomed = true, QString openId = {});
 	QCoro::Task<> attachTile(ChatSession* tile);
@@ -308,11 +339,8 @@ private:
 	void syncTiles();
 	QStringList wantedTileIds() const;
 	void setFocusedTile(const QString& sessionId);
-
-	// Commands.
-	void registerCommands();
-	void updateCommandContext();
-	void runOnSession(const QString& sessionId, void (ChatSession::*method)());
+	void applyBackendSwitch(refgui::client::Backend::Source source);
+	QString currentEditableToken() const;
 	void runCustomCommand(const QString& name, const QString& args, const QString& sessionId);
 
 	refgui::cli::LaunchOptions m_options;
@@ -325,6 +353,8 @@ private:
 	refgui::workspace::SessionDirectory m_directory{m_connection};
 	refgui::workspace::BackendConfig m_config{m_connection};
 	refgui::workspace::ConfigEditorController m_configEditor{m_connection, m_config};
+	refgui::workspace::StashController m_stash{m_connection, m_directory};
+	FloatingBallHelper m_floatingBallHelper;
 	QHash<QString, ChatSession*> m_chats;
 	TileModel m_tiles;
 	TileStage m_stage{&m_tiles};
@@ -342,6 +372,8 @@ private:
 	QJSEngine* m_engine = nullptr;
 	int m_showSerial = 0;
 	bool m_split = false;
+	QString m_splitFilter;
+	bool m_floatingMode = false;
 	bool m_started = false;
 	bool m_windowActive = false;
 	QString m_effectiveCwd;
@@ -351,4 +383,7 @@ private:
 	QString m_historySearch;
 	bool m_updatingHistoryFilter = false;
 	int m_localMutationsInFlight = 0;
+	std::optional<refgui::client::Endpoint> m_temporaryBackend;
+	bool m_cliRemoteSource = false;
+	bool m_cliMockSource = false;
 };

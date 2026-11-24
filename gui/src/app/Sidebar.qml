@@ -345,7 +345,7 @@ Rectangle {
 				id: newButton
 				x: Theme.sidebarPadding
 				anchors.verticalCenter: parent.verticalCenter
-				width: parent.width - 2 * Theme.sidebarPadding - folderButton.width - 8
+				width: parent.width - 2 * Theme.sidebarPadding - stashButton.width - folderButton.width - 16
 				height: 36
 
 				Rectangle {
@@ -384,6 +384,82 @@ Rectangle {
 				TapHandler {
 					id: newTap
 					onTapped: Commands.run(CommandId.newSession)
+				}
+			}
+			Item {
+				id: stashButton
+				objectName: "sidebarStashButton"
+				anchors { right: folderButton.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
+				width: 36
+				height: 36
+				enabled: Workspace.connectionState === "connected"
+				opacity: enabled ? 1 : Theme.disabledOpacity
+
+				Rectangle {
+					anchors.fill: parent
+					radius: width / 2
+					color: stashHover.hovered && stashButton.enabled ? Theme.surfaceHover : Theme.surface
+					border.color: Theme.border
+					scale: stashTap.pressed && stashButton.enabled ? 0.96 : 1
+
+					Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+					Behavior on scale { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+
+					Icon {
+						anchors.centerIn: parent
+						name: Workspace.stash.groupCount > 0 ? "stash-count" : "stash"
+						size: 20
+						color: Theme.textMuted
+					}
+
+					Text {
+						textFormat: Text.PlainText
+						visible: Workspace.stash.groupCount > 0
+						anchors.centerIn: parent
+						anchors.verticalCenterOffset: 1
+						text: String(Workspace.stash.groupCount)
+						color: Theme.text
+						font { pixelSize: 10; bold: true }
+					}
+				}
+
+				HoverHandler {
+					id: stashHover
+					enabled: stashButton.enabled
+					cursorShape: Qt.PointingHandCursor
+				}
+				TapHandler {
+					id: stashTap
+					enabled: stashButton.enabled
+					acceptedButtons: Qt.LeftButton
+					onTapped: {
+						if (Workspace.sessions.count > 0)
+							Workspace.stash.stashAll()
+						else
+							Workspace.openDialog(DialogId.stash)
+					}
+				}
+				TapHandler {
+					enabled: stashButton.enabled
+					acceptedButtons: Qt.RightButton
+					onTapped: Workspace.openDialog(DialogId.stash)
+				}
+				PlainToolTip {
+					visible: stashHover.hovered
+					delay: 400
+					text: Workspace.sessions.count > 0
+						? qsTr("Stash all running sessions (right-click to manage)")
+						: qsTr("Manage stashed groups")
+				}
+				Accessible.role: Accessible.Button
+				Accessible.name: Workspace.sessions.count > 0 ? qsTr("Stash all running sessions") : qsTr("Manage stashed groups")
+				Accessible.onPressAction: {
+					if (!stashButton.enabled)
+						return
+					if (Workspace.sessions.count > 0)
+						Workspace.stash.stashAll()
+					else
+						Workspace.openDialog(DialogId.stash)
 				}
 			}
 			IconButton {

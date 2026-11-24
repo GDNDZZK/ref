@@ -117,6 +117,10 @@ QCoro::Task<Result<proto::HelloResult>> ServerClient::open(Endpoint endpoint,
                                                            std::chrono::milliseconds timeout,
                                                            QList<proto::NotifyFrame::Kind> notify)
 {
+\tif(m_socket.state() != QAbstractSocket::UnconnectedState)
+\t{
+\t\tm_socket.abort();
+\t}
 	m_closeReason.clear();
 	const bool connected = co_await ConnectAwaiter{*this, withToken(endpoint.url, endpoint.token), timeout};
 	if(!connected)

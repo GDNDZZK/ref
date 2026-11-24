@@ -78,6 +78,8 @@ public:
 	Q_INVOKABLE void save();
 	// Reverts unsaved Visual / JSON edits back to the last loaded or saved state.
 	Q_INVOKABLE void discard();
+\t// Clears all editor state and cancels pending fetches (e.g. on backend switch).
+\tvoid reset();
 	// Creates a new active `ref.json` (backing up the current one when it exists).
 	Q_INVOKABLE void createProfile(const QString& label, bool cloneCurrent);
 	// Swaps `fileName` (`ref.json.<n>.bak`) into active `ref.json`.

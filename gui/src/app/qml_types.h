@@ -39,6 +39,22 @@ struct SessionListType
 	QML_UNCREATABLE("Owned by Workspace.")
 };
 
+struct StashControllerType
+{
+	Q_GADGET
+	QML_FOREIGN(refgui::workspace::StashController)
+	QML_NAMED_ELEMENT(StashController)
+	QML_UNCREATABLE("Owned by Workspace.")
+};
+
+struct FloatingBallHelperType
+{
+	Q_GADGET
+	QML_FOREIGN(FloatingBallHelper)
+	QML_NAMED_ELEMENT(FloatingBallHelper)
+	QML_UNCREATABLE("Owned by Workspace.")
+};
+
 // The one registry of the window, as the singleton `Commands`.
 struct CommandsType
 {

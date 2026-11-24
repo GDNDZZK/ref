@@ -147,7 +147,11 @@ public:
 		broadcast();
 	}
 
-private:
+	void pushGroups(const QJsonArray& groups)
+	{
+		m_groups = groups;
+		m_fake.send({{u"kind"_s, u"groups_changed"_s}, {u"groups"_s, m_groups}});
+	}
 	QJsonArray list() const
 	{
 		QJsonArray array;
@@ -381,6 +385,203 @@ private:
 		{
 			m_fake.respond(request, {});
 		}
+		else if(op == u"list_groups"_s)
+		{
+			m_fake.respond(request, {{u"groups"_s, m_groups}});
+		}
+		else if(op == u"stash_all"_s)
+		{
+			QJsonArray members;
+			int pos = 0;
+			for(auto it = m_sessions.begin(); it != m_sessions.end(); ++it)
+			{
+				if(!it->value(u"live"_s).toBool(true))
+				{
+					continue;
+				}
+				(*it)[u"live"_s] = false;
+				(*it)[u"attached"_s] = 0;
+				members.append(QJsonObject{{u"session_id"_s, it.key()}, {u"position"_s, pos++}, {u"info"_s, *it}});
+			}
+			if(members.isEmpty())
+			{
+				m_fake.respond(request, {{u"group"_s, QJsonValue::Null}, {u"groups"_s, m_groups}});
+				return;
+			}
+			const QString gid = u"grp_%1"_s.arg(++m_groupSeq);
+			const QString name = request.value(u"name"_s).toString().isEmpty() ? u"Stash %1"_s.arg(m_groupSeq) : request.value(u"name"_s).toString();
+			const QJsonObject group{{u"id"_s, gid}, {u"name"_s, name}, {u"locked"_s, false}, {u"created_at"_s, 1000}, {u"updated_at"_s, 1000}, {u"members"_s, members}};
+			m_groups.prepend(group);
+			m_fake.respond(request, {{u"group"_s, group}, {u"groups"_s, m_groups}});
+			broadcast();
+		}
+		else if(op == u"create_group"_s)
+		{
+			const QString gid = u"grp_%1"_s.arg(++m_groupSeq);
+			const QString name = request.value(u"name"_s).toString().isEmpty() ? u"Group %1"_s.arg(m_groupSeq) : request.value(u"name"_s).toString();
+			const bool stashLive = request.value(u"stash_live"_s).toBool(true);
+			QJsonArray members;
+			int pos = 0;
+			const QJsonArray sids = request.value(u"session_ids"_s).toArray();
+			for(const QJsonValue& val : sids)
+			{
+				const QString sid = val.toString();
+				if(m_sessions.contains(sid))
+				{
+					if(stashLive)
+					{
+						m_sessions[sid][u"live"_s] = false;
+						m_sessions[sid][u"attached"_s] = 0;
+					}
+					members.append(QJsonObject{{u"session_id"_s, sid}, {u"position"_s, pos++}, {u"info"_s, m_sessions.value(sid)}});
+				}
+			}
+			const QJsonObject group{{u"id"_s, gid}, {u"name"_s, name}, {u"locked"_s, false}, {u"created_at"_s, 1000}, {u"updated_at"_s, 1000}, {u"members"_s, members}};
+			m_groups.prepend(group);
+			m_fake.respond(request, {{u"group"_s, group}, {u"groups"_s, m_groups}});
+			if(stashLive)
+			{
+				broadcast();
+			}
+		}
+		else if(op == u"rename_group"_s)
+		{
+			const QString gid = request.value(u"group_id"_s).toString();
+			const QString name = request.value(u"name"_s).toString();
+			for(int i = 0; i < m_groups.size(); ++i)
+			{
+				QJsonObject g = m_groups.at(i).toObject();
+				if(g.value(u"id"_s).toString() == gid)
+				{
+					g[u"name"_s] = name;
+					m_groups[i] = g;
+				}
+			}
+			m_fake.respond(request, {{u"groups"_s, m_groups}});
+		}
+		else if(op == u"set_group_locked"_s)
+		{
+			const QString gid = request.value(u"group_id"_s).toString();
+			const bool locked = request.value(u"locked"_s).toBool();
+			for(int i = 0; i < m_groups.size(); ++i)
+			{
+				QJsonObject g = m_groups.at(i).toObject();
+				if(g.value(u"id"_s).toString() == gid)
+				{
+					g[u"locked"_s] = locked;
+					m_groups[i] = g;
+				}
+			}
+			m_fake.respond(request, {{u"groups"_s, m_groups}});
+		}
+		else if(op == u"delete_group"_s)
+		{
+			const QString gid = request.value(u"group_id"_s).toString();
+			QJsonArray next;
+			for(const QJsonValue& val : m_groups)
+			{
+				if(val.toObject().value(u"id"_s).toString() != gid)
+				{
+					next.append(val);
+				}
+			}
+			m_groups = next;
+			m_fake.respond(request, {{u"groups"_s, m_groups}});
+		}
+		else if(op == u"add_to_group"_s)
+		{
+			const QString gid = request.value(u"group_id"_s).toString();
+			const QString sid = request.value(u"session_id"_s).toString();
+			const bool stashLive = request.value(u"stash_live"_s).toBool(true);
+			if(stashLive && m_sessions.contains(sid))
+			{
+				m_sessions[sid][u"live"_s] = false;
+				m_sessions[sid][u"attached"_s] = 0;
+			}
+			for(int i = 0; i < m_groups.size(); ++i)
+			{
+				QJsonObject g = m_groups.at(i).toObject();
+				if(g.value(u"id"_s).toString() == gid)
+				{
+					QJsonArray members = g.value(u"members"_s).toArray();
+					members.append(QJsonObject{{u"session_id"_s, sid}, {u"position"_s, int(members.size())}, {u"info"_s, m_sessions.value(sid)}});
+					g[u"members"_s] = members;
+					m_groups[i] = g;
+				}
+			}
+			m_fake.respond(request, {{u"groups"_s, m_groups}});
+			if(stashLive)
+			{
+				broadcast();
+			}
+		}
+		else if(op == u"remove_from_group"_s)
+		{
+			const QString gid = request.value(u"group_id"_s).toString();
+			const QString sid = request.value(u"session_id"_s).toString();
+			for(int i = 0; i < m_groups.size(); ++i)
+			{
+				QJsonObject g = m_groups.at(i).toObject();
+				if(g.value(u"id"_s).toString() == gid)
+				{
+					QJsonArray nextMembers;
+					int pos = 0;
+					for(const QJsonValue& mv : g.value(u"members"_s).toArray())
+					{
+						QJsonObject m = mv.toObject();
+						if(m.value(u"session_id"_s).toString() != sid)
+						{
+							m[u"position"_s] = pos++;
+							nextMembers.append(m);
+						}
+					}
+					g[u"members"_s] = nextMembers;
+					m_groups[i] = g;
+				}
+			}
+			m_fake.respond(request, {{u"groups"_s, m_groups}});
+		}
+		else if(op == u"restore_group"_s)
+		{
+			const QString gid = request.value(u"group_id"_s).toString();
+			QJsonArray restoredIds;
+			for(int i = 0; i < m_groups.size(); ++i)
+			{
+				QJsonObject g = m_groups.at(i).toObject();
+				if(g.value(u"id"_s).toString() == gid)
+				{
+					QJsonArray members = g.value(u"members"_s).toArray();
+					for(int j = 0; j < members.size(); ++j)
+					{
+						QJsonObject m = members.at(j).toObject();
+						const QString sid = m.value(u"session_id"_s).toString();
+						if(m_sessions.contains(sid) && !m_sessions[sid].value(u"live"_s).toBool(true))
+						{
+							m_sessions[sid][u"live"_s] = true;
+							restoredIds.append(sid);
+						}
+						m[u"info"_s] = m_sessions.value(sid);
+						members[j] = m;
+					}
+					g[u"members"_s] = members;
+					m_groups[i] = g;
+				}
+			}
+			m_fake.respond(request, {{u"restored_ids"_s, restoredIds}, {u"groups"_s, m_groups}});
+			broadcast();
+		}
+		else if(op == u"restore_group_member"_s)
+		{
+			const QString sid = request.value(u"session_id"_s).toString();
+			bool restored = false;
+			if(m_sessions.contains(sid) && !m_sessions[sid].value(u"live"_s).toBool(true))
+			{
+				m_sessions[sid][u"live"_s] = true;
+				restored = true;
+			}
+			m_fake.respond(request, {{u"restored"_s, restored}, {u"groups"_s, m_groups}});
+			broadcast();
+		}
 		else
 		{
 			m_fake.respond(request, {});
@@ -411,6 +612,8 @@ private:
 	std::optional<QJsonObject> m_heldDetach;
 	QJsonArray m_models;
 	QJsonArray m_configWarnings;
+	QJsonArray m_groups;
+	int m_groupSeq = 0;
 };
 
 // An assistant message whose only tool call waits for the user's permission.
@@ -553,6 +756,9 @@ private slots:
 	void closingOrRemovingZoomedTileClearsZoomAndShowsRemainingTiles();
 	void zoomingTileRemovedBeforeAttachFinishesLeavesNoDanglingZoom();
 	void historyFiltersPersistAndCreatorFilterIsEphemeralAndAllImagesCollectsOrder();
+	void stashControllerGroupLifecycleAndRealtimeSync();
+	void splitFilterFiltersByDirectParentAndUserCreated();
+	void switchBackendResetsWorkspaceAndConnectsToNewEndpoint();
 };
 
 void TestWorkspace::opensTheSessionFromTheCommandLine()
@@ -1918,5 +2124,95 @@ void TestWorkspace::historyFiltersPersistAndCreatorFilterIsEphemeralAndAllImages
 	QTRY_COMPARE(f.workspace->history()->rowCount(), 1);
 	QCOMPARE(f.workspace->sessionChoices()->rowCount(), 4);
 }
+
+void TestWorkspace::stashControllerGroupLifecycleAndRealtimeSync()
+{
+	Fixture f(refgui::proto::ProtocolVersion, true);
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
+
+	f.workspace->stash()->stashAll(u"sprint-1"_s);
+	QTRY_COMPARE(f.workspace->stash()->groupCount(), 1);
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 0);
+	QTRY_VERIFY(f.workspace->current() == nullptr);
+
+	const QVariantMap group = f.workspace->stash()->groupsVariant().first().toMap();
+	const QString gid = group.value(u"id"_s).toString();
+	QCOMPARE(group.value(u"name"_s).toString(), u"sprint-1"_s);
+	QCOMPARE(group.value(u"members"_s).toList().size(), 2);
+
+	f.workspace->stash()->renameGroup(gid, u"sprint-renamed"_s);
+	QTRY_COMPARE(f.workspace->stash()->groupsVariant().first().toMap().value(u"name"_s).toString(), u"sprint-renamed"_s);
+
+	f.workspace->stash()->setGroupLocked(gid, true);
+	QTRY_VERIFY(f.workspace->stash()->groupsVariant().first().toMap().value(u"locked"_s).toBool());
+
+	f.workspace->stash()->restoreGroupMember(gid, u"ses_a"_s);
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 1);
+
+	f.workspace->stash()->restoreGroup(gid);
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
+
+	f.workspace->stash()->removeFromGroup(gid, u"ses_a"_s);
+	QTRY_COMPARE(f.workspace->stash()->groupsVariant().first().toMap().value(u"members"_s).toList().size(), 1);
+
+	f.workspace->stash()->setGroupLocked(gid, false);
+	f.workspace->stash()->deleteGroup(gid);
+	QTRY_COMPARE(f.workspace->stash()->groupCount(), 0);
+
+	// Server-pushed GroupsChangedFrame updates groups reactively.
+	f.stub.pushGroups({QJsonObject{{u"id"_s, u"grp_push"_s}, {u"name"_s, u"Pushed"_s}, {u"locked"_s, false}, {u"created_at"_s, 1}, {u"updated_at"_s, 2}, {u"members"_s, QJsonArray()}}});
+	QTRY_COMPARE(f.workspace->stash()->groupCount(), 1);
+	QCOMPARE(f.workspace->stash()->groupsVariant().first().toMap().value(u"name"_s).toString(), u"Pushed"_s);
+}
+
+void TestWorkspace::splitFilterFiltersByDirectParentAndUserCreated()
+{
+	Fixture f(refgui::proto::ProtocolVersion, false, {}, [](StubServer& stub) {
+		stub.add(u"ses_parent"_s, 2);
+		stub.add(u"ses_child"_s, 3, u"/work"_s, u"ses_parent"_s);
+		stub.add(u"ses_grandchild"_s, 4, u"/work"_s, u"ses_child"_s);
+	});
+	f.workspace->toggleSplit();
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 3);
+	QCOMPARE(f.workspace->splitCreators().size(), 2);
+
+	// User-created shows only sessions without a parent.
+	f.workspace->setSplitFilter(u"user"_s);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
+	QCOMPARE(f.workspace->visibleSessionIds(), (QStringList{u"ses_parent"_s}));
+
+	// Direct-parent filter matches only direct children of ses_parent (not ses_grandchild).
+	f.workspace->setSplitFilter(u"ses_parent"_s);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
+	QCOMPARE(f.workspace->visibleSessionIds(), (QStringList{u"ses_child"_s}));
+	QCOMPARE(f.workspace->splitFilterLabel(), u"Title ses_parent"_s);
+
+	f.workspace->setSplitFilter(u"all"_s);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 3);
+}
+
+void TestWorkspace::switchBackendResetsWorkspaceAndConnectsToNewEndpoint()
+{
+	Fixture f(refgui::proto::ProtocolVersion, true);
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
+	QVERIFY(!f.workspace->isValidBackendUrl(u"http://invalid"_s));
+	QVERIFY(f.workspace->isValidBackendUrl(u"ws://127.0.0.1:4000/"_s));
+
+	FakeBackend secondFake;
+	StubServer secondStub(secondFake);
+	secondStub.add(u"ses_remote"_s, 10);
+
+	QVERIFY(f.workspace->switchBackend(secondFake.url().toString(), u"new_tok"_s, true));
+	QCOMPARE(f.workspace->backendSource(), u"saved"_s);
+	QCOMPARE(f.workspace->settings()->backendUrl(), secondFake.url().toString());
+	QCOMPARE(f.workspace->settings()->backendToken(), u"new_tok"_s);
+	QCOMPARE(f.workspace->maskedBackendToken(), u"••••_tok"_s);
+	QTRY_COMPARE(f.workspace->connectionState(), u"connected"_s);
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 1);
+	QVERIFY(f.workspace->sessions()->indexOf(u"ses_remote"_s) >= 0);
+	QVERIFY(f.workspace->sessions()->indexOf(u"ses_a"_s) < 0);
+	QVERIFY(f.workspace->current() == nullptr);
+}
+
 QTEST_MAIN(TestWorkspace)
 #include "tst_workspace.moc"

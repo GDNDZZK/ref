@@ -338,6 +338,8 @@ void Workspace::registerCommands()
 			}
 		}
 	});
+	on(u"stash"_s, [this](const QString& args, const QString&) { m_stash.stashAll(args); });
+	on(u"stashed"_s, openDialogCommand(u"stash"_s));
 
 	const auto peers = [this](const QString& command, const QString& tab) {
 		return [this, command, tab](const QString& args, const QString& sessionId) {
@@ -376,6 +378,7 @@ void Workspace::registerCommands()
 	on(u"ui-zoom-in"_s, [this](const QString&, const QString&) { m_settings.setUiScale(m_settings.uiScale() + refgui::workspace::Settings::UiScaleStep); });
 	on(u"ui-zoom-out"_s, [this](const QString&, const QString&) { m_settings.setUiScale(m_settings.uiScale() - refgui::workspace::Settings::UiScaleStep); });
 	on(u"ui-zoom-reset"_s, [this](const QString&, const QString&) { m_settings.setUiScale(refgui::workspace::Settings::DefaultUiScale); });
+	on(u"floating"_s, [this](const QString&, const QString&) { setFloatingMode(!m_floatingMode); });
 	on(u"mcp"_s, [this](const QString&, const QString&) {
 		refreshMcp();
 		openDialog(u"mcp"_s);
@@ -384,6 +387,33 @@ void Workspace::registerCommands()
 	on(u"config"_s, openDialogCommand(u"config"_s));
 	on(u"help"_s, openDialogCommand(u"help"_s));
 	on(u"settings"_s, openDialogCommand(u"settings"_s));
+	on(u"backend"_s, [this](const QString& args, const QString&) {
+		const QString trimmed = args.trimmed();
+		if(trimmed.isEmpty())
+		{
+			openDialog(u"backend"_s);
+			return;
+		}
+		const QStringList parts = splitArguments(trimmed);
+		if(parts.isEmpty())
+		{
+			openDialog(u"backend"_s);
+			return;
+		}
+		if(parts.first().compare(u"auto"_s, Qt::CaseInsensitive) == 0
+		   || parts.first().compare(u"default"_s, Qt::CaseInsensitive) == 0
+		   || parts.first().compare(u"local"_s, Qt::CaseInsensitive) == 0)
+		{
+			restoreDefaultBackend();
+			return;
+		}
+		const QString url = parts.first();
+		const QString token = parts.size() >= 2 ? parts.at(1) : QString();
+		if(!switchBackend(url, token, false))
+		{
+			toast(refgui::workspace::ToastLevel::Warn, tr("Invalid backend URL \"%1\". Expected ws:// or wss://.").arg(url));
+		}
+	});
 	on(u"palette"_s, openDialogCommand(u"palette"_s));
 
 	m_commands.setCustomRunner([this](const QString& name, const QString& args, const QString& sessionId) { runCustomCommand(name, args, sessionId); });

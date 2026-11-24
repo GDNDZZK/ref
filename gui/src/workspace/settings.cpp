@@ -8,6 +8,7 @@
 #include <QJsonDocument>
 #include <QSaveFile>
 #include <QtMath>
+#include \u003cQUrl\u003e
 #include <algorithm>
 #include <QJsonArray>
 #include <QSet>
@@ -46,6 +47,12 @@ const QString WindowKey = u"window"_s;
 const QString WidthKey = u"width"_s;
 const QString HeightKey = u"height"_s;
 const QString UiScaleKey = u"uiScale"_s;
+const QString BackendUrlKey = u\"backendUrl\"_s;
+const QString BackendTokenKey = u\"backendToken\"_s;
+const QString FloatingBallKey = u\"floatingBall\"_s;
+const QString ScreenNameKey = u\"screenName\"_s;
+const QString XKey = u\"x\"_s;
+const QString YKey = u\"y\"_s;
 
 using NotifyKind = proto::NotifyFrame::Kind;
 
@@ -250,6 +257,93 @@ void readUiScale(const QJsonObject& root, const QString& key, double& value, Pro
 	}
 	value = normalizeUiScale(read);
 }
+
+bool isValidBackendUrl(const QString\u0026 rawUrl)
+{
+\tconst QUrl parsed(rawUrl);
+\treturn parsed.isValid() \u0026\u0026 (parsed.scheme() == u\"ws\"_s || parsed.scheme() == u\"wss\"_s) \u0026\u0026 !parsed.host().isEmpty();
+}
+
+void readBackendSettings(const QJsonObject\u0026 root, QString\u0026 backendUrl, QString\u0026 backendToken, Problems\u0026 problems)
+{
+\tif(root.contains(BackendUrlKey))
+\t{
+\t\tconst QJsonValue rawUrl = root.value(BackendUrlKey);
+\t\tif(!rawUrl.isString())
+\t\t{
+\t\t\tproblems.add(u\"%1: expected a WebSocket URL\"_s.arg(BackendUrlKey));
+\t\t}
+\t\telse
+\t\t{
+\t\t\tconst QString trimmed = rawUrl.toString().trimmed();
+\t\t\tif(!trimmed.isEmpty() \u0026\u0026 !isValidBackendUrl(trimmed))
+\t\t\t{
+\t\t\t\tproblems.add(u\"%1: expected ws:// or wss:// URL\"_s.arg(BackendUrlKey));
+\t\t\t}
+\t\t\telse
+\t\t\t{
+\t\t\t\tbackendUrl = trimmed;
+\t\t\t}
+\t\t}
+\t}
+\tif(root.contains(BackendTokenKey))
+\t{
+\t\tconst QJsonValue rawToken = root.value(BackendTokenKey);
+\t\tif(!rawToken.isString())
+\t\t{
+\t\t\tproblems.add(u\"%1: expected a string\"_s.arg(BackendTokenKey));
+\t\t}
+\t\telse if(!backendUrl.isEmpty())
+\t\t{
+\t\t\tbackendToken = rawToken.toString();
+\t\t}
+\t}
+}
+
+void readFloatingBall(const QJsonObject\u0026 root, QString\u0026 screenName, int\u0026 x, int\u0026 y, bool\u0026 hasPos, Problems\u0026 problems)
+{
+\tif(!root.contains(FloatingBallKey))
+\t{
+\t\treturn;
+\t}
+\tconst QJsonValue raw = root.value(FloatingBallKey);
+\tif(!raw.isObject())
+\t{
+\t\tproblems.add(u\"%1: expected an object\"_s.arg(FloatingBallKey));
+\t\treturn;
+\t}
+\tconst QJsonObject obj = raw.toObject();
+\tQString parsedScreen;
+\tif(obj.contains(ScreenNameKey))
+\t{
+\t\tif(!obj.value(ScreenNameKey).isString())
+\t\t{
+\t\t\tproblems.add(u\"%1: expected a string\"_s.arg(fieldPath(FloatingBallKey, ScreenNameKey)));
+\t\t}
+\t\telse
+\t\t{
+\t\t\tparsedScreen = obj.value(ScreenNameKey).toString();
+\t\t}
+\t}
+\tconst QJsonValue rawX = obj.value(XKey);
+\tconst QJsonValue rawY = obj.value(YKey);
+\tif(obj.contains(XKey) || obj.contains(YKey))
+\t{
+\t\tif(!rawX.isDouble() || !rawY.isDouble() || !std::isfinite(rawX.toDouble()) || !std::isfinite(rawY.toDouble()))
+\t\t{
+\t\t\tproblems.add(u\"%1: expected numeric x and y\"_s.arg(FloatingBallKey));
+\t\t\treturn;
+\t\t}
+\t\tscreenName = parsedScreen;
+\t\tx = qRound(rawX.toDouble());
+\t\ty = qRound(rawY.toDouble());
+\t\thasPos = true;
+\t}
+\telse if(!parsedScreen.isEmpty())
+\t{
+\t\tscreenName = parsedScreen;
+\t}
+}
 } // namespace
 
 const QString Settings::System = u"system"_s;
@@ -446,6 +540,35 @@ void Settings::setUiScale(double scale)
 	emit uiScaleChanged();
 }
 
+void Settings::setBackend(const QString\u0026 url, const QString\u0026 token)
+{
+\tconst QString trimmedUrl = url.trimmed();
+\tconst QString effectiveToken = trimmedUrl.isEmpty() ? QString() : token;
+\tif(m_backendUrl == trimmedUrl \u0026\u0026 m_backendToken == effectiveToken)
+\t{
+\t\treturn;
+\t}
+\tm_backendUrl = trimmedUrl;
+\tm_backendToken = effectiveToken;
+\tm_dirty = true;
+\tsave();
+\temit backendChanged();
+}
+
+void Settings::setFloatingBallPosition(const QString\u0026 screenName, int x, int y)
+{
+\tif(m_hasFloatingBallPosition \u0026\u0026 m_floatingBallScreen == screenName \u0026\u0026 m_floatingBallX == x \u0026\u0026 m_floatingBallY == y)
+\t{
+\t\treturn;
+\t}
+\tm_floatingBallScreen = screenName;
+\tm_floatingBallX = x;
+\tm_floatingBallY = y;
+\tm_hasFloatingBallPosition = true;
+\tscheduleSave();
+\temit floatingBallChanged();
+}
+
 void Settings::scheduleSave()
 {
 	m_dirty = true;
@@ -507,6 +630,8 @@ void Settings::readFields(const QJsonObject& root)
 	readEdge(root, WindowKey, WidthKey, m_windowWidth, problems);
 	readEdge(root, WindowKey, HeightKey, m_windowHeight, problems);
 	readUiScale(root, UiScaleKey, m_uiScale, problems);
+\treadBackendSettings(root, m_backendUrl, m_backendToken, problems);
+\treadFloatingBall(root, m_floatingBallScreen, m_floatingBallX, m_floatingBallY, m_hasFloatingBallPosition, problems);
 	if(problems.any())
 	{
 		m_loadProblem = tr("Some settings in %1 were ignored: %2").arg(m_path, problems.text());
@@ -544,6 +669,31 @@ QJsonObject Settings::toJson() const
 	window.insert(HeightKey, m_windowHeight);
 	root.insert(WindowKey, window);
 	root.insert(UiScaleKey, m_uiScale);
+\tif(!m_backendUrl.isEmpty())
+\t{
+\t\troot.insert(BackendUrlKey, m_backendUrl);
+\t\tif(!m_backendToken.isEmpty())
+\t\t{
+\t\t\troot.insert(BackendTokenKey, m_backendToken);
+\t\t}
+\t\telse
+\t\t{
+\t\t\troot.remove(BackendTokenKey);
+\t\t}
+\t}
+\telse
+\t{
+\t\troot.remove(BackendUrlKey);
+\t\troot.remove(BackendTokenKey);
+\t}
+\tif(m_hasFloatingBallPosition)
+\t{
+\t\tQJsonObject floatingBall = section(root, FloatingBallKey);
+\t\tfloatingBall.insert(ScreenNameKey, m_floatingBallScreen);
+\t\tfloatingBall.insert(XKey, m_floatingBallX);
+\t\tfloatingBall.insert(YKey, m_floatingBallY);
+\t\troot.insert(FloatingBallKey, floatingBall);
+\t}
 	return root;
 }
 
@@ -568,11 +718,18 @@ void Settings::save()
 		emit saveFailed(tr("Could not save %1: %2").arg(m_path, file.errorString()));
 		return;
 	}
-	file.write(QJsonDocument(toJson()).toJson(QJsonDocument::Indented));
-	if(!file.commit())
-	{
-		emit saveFailed(tr("Could not save %1: %2").arg(m_path, file.errorString()));
-	}
+#ifndef Q_OS_WIN
+\tfile.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+#endif
+\tfile.write(QJsonDocument(toJson()).toJson(QJsonDocument::Indented));
+\tif(!file.commit())
+\t{
+\t\temit saveFailed(tr(\"Could not save %1: %2\").arg(m_path, file.errorString()));
+\t\treturn;
+\t}
+#ifndef Q_OS_WIN
+\tQFile::setPermissions(m_path, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+#endif
 }
 
 } // namespace refgui::workspace

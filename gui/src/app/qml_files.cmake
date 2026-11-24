@@ -107,6 +107,9 @@ set(REFGUI_APP_QML_NAMES
 	CloseDialog.qml
 	RenameDialog.qml
 	DeleteHistoryDialog.qml
+	StashDialog.qml
+	BackendDialog.qml
+	FloatingBallWindow.qml
 	Icon.qml
 	Theme.qml
 	Motion.qml

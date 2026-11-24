@@ -113,7 +113,9 @@ Item {
 			[DialogId.newIn]: newIn,
 			[DialogId.closeSession]: closeDialog,
 			[DialogId.rename]: rename,
-			[DialogId.deleteHistory]: deleteHistory
+			[DialogId.deleteHistory]: deleteHistory,
+			[DialogId.stash]: stashDialog,
+			[DialogId.backend]: backendDialog
 		}
 		if (!Fields.has(components, id)) {
 			console.error("No dialog for id", id)
@@ -138,4 +140,6 @@ Item {
 	Component { id: closeDialog; CloseDialog {} }
 	Component { id: rename; RenameDialog {} }
 	Component { id: deleteHistory; DeleteHistoryDialog {} }
+	Component { id: stashDialog; StashDialog {} }
+	Component { id: backendDialog; BackendDialog {} }
 }

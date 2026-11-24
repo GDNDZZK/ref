@@ -516,6 +516,21 @@ QVariantMap SessionListModel::get(const QString& sessionId) const
 	return map;
 }
 
+QVariantMap SessionListModel::rowAt(int row) const
+{
+	if(row < 0 || row >= m_rows.size())
+	{
+		return {};
+	}
+	const Row& item = m_rows[row];
+	QVariantMap map;
+	const QHash<int, QByteArray> names = roleNames();
+	for(auto it = names.cbegin(); it != names.cend(); ++it)
+	{
+		map.insert(QString::fromLatin1(it.value()), roleData(item, it.key()));
+	}
+	return map;
+}
 QVariant SessionListModel::roleData(const Row& row, int role) const
 {
 	switch(role)

@@ -19,6 +19,8 @@ QtObject {
 	readonly property string closeSession: "close"
 	readonly property string rename: "rename"
 	readonly property string deleteHistory: "delete-history"
+	readonly property string stash: "stash"
+	readonly property string backend: "backend"
 
 	readonly property string closeMode: "close" // `mode` argument of the sessions dialog: a click closes a live session
 }

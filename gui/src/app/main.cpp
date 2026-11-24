@@ -107,7 +107,7 @@ void connectNotifications(Workspace& workspace, refgui::notify::NotificationCent
 	QObject::connect(workspace.settings(), &refgui::workspace::Settings::notifyKindsChanged, &notifications, reportKinds);
 	reportKinds();
 
-	QObject::connect(&notifications, &refgui::notify::NotificationCenter::sessionRequested, &workspace, &Workspace::openSession);
+	QObject::connect(&notifications, &refgui::notify::NotificationCenter::sessionRequested, &workspace, &Workspace::activateFromNotification);
 }
 
 } // namespace

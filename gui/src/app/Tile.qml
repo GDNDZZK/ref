@@ -332,6 +332,37 @@ Item {
 						Workspace.zoomTile(tile.sessionId)
 				}
 			}
+			TapHandler {
+				acceptedButtons: Qt.RightButton
+				onTapped: point => {
+					const items = []
+					const parentId = tile.facts.parentId ?? ""
+					if (parentId !== "") {
+						const creatorName = tile.facts.creatorName || parentId
+						items.push({text: qsTr("Filter tiles by %1").arg(creatorName), action: "filterCreator", targetId: parentId})
+					}
+					items.push({text: qsTr("Filter tiles spawned by %1").arg(tile.facts.displayTitle || tile.sessionId), action: "filterSpawned", targetId: tile.sessionId})
+					items.push({text: qsTr("Filter spawned history"), action: "filterHistory", targetId: tile.sessionId})
+					if (Workspace.splitFilter !== "all")
+						items.push({text: qsTr("Show all tiles"), action: "showAll", targetId: ""})
+					headerMenu.entries = items
+					headerMenu.openAt(point.position)
+				}
+			}
+			ContextMenu {
+				id: headerMenu
+				onTriggered: index => {
+					const entry = headerMenu.entries[index]
+					if (!entry)
+						return
+					if (entry.action === "filterCreator" || entry.action === "filterSpawned")
+						Workspace.setSplitFilter(entry.targetId)
+					else if (entry.action === "filterHistory")
+						Workspace.filterHistoryByCreator(entry.targetId)
+					else if (entry.action === "showAll")
+						Workspace.setSplitFilter("all")
+				}
+			}
 		}
 		SessionPane {
 			id: pane

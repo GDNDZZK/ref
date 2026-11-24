@@ -113,6 +113,8 @@ refgui_add_test(tst_workspace SOURCES fake_backend.h
 	${PROJECT_SOURCE_DIR}/src/app/tile_model.h
 	${PROJECT_SOURCE_DIR}/src/app/tile_stage.cpp
 	${PROJECT_SOURCE_DIR}/src/app/tile_stage.h
+	${PROJECT_SOURCE_DIR}/src/app/floating_ball_helper.cpp
+	${PROJECT_SOURCE_DIR}/src/app/floating_ball_helper.h
 	LIBS refgui_workspace refgui_session refgui_composer refgui_cli Qt6::Gui Qt6::Qml
 )
 
@@ -144,6 +146,12 @@ refgui_add_test(tst_system_fonts
 target_include_directories(tst_system_fonts PRIVATE ${PROJECT_SOURCE_DIR}/src)
 set_tests_properties(tst_system_fonts PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+refgui_add_test(tst_floating_ball_helper
+	SOURCES ${PROJECT_SOURCE_DIR}/src/app/floating_ball_helper.cpp ${PROJECT_SOURCE_DIR}/src/app/floating_ball_helper.h
+	LIBS Qt6::Gui
+)
+target_include_directories(tst_floating_ball_helper PRIVATE ${PROJECT_SOURCE_DIR}/src)
+set_tests_properties(tst_floating_ball_helper PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 # Text from the model must not reach the network. Compiles the program's network policy.
 refgui_add_test(tst_network_policy
 	SOURCES ${PROJECT_SOURCE_DIR}/src/app/local_only_network.cpp ${PROJECT_SOURCE_DIR}/src/app/local_only_network.h
