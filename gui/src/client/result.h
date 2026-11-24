@@ -5,7 +5,7 @@
 #include <expected>
 
 // The outcome of a request, as plain data. Every layer above client may use this header;
-// it does no I/O (see docs/ARCHITECTURE.md, section 1).
+// it does no I/O.
 namespace refgui::client
 {
 

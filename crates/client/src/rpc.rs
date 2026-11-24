@@ -21,7 +21,7 @@ const RECONNECT_DELAY: Duration = Duration::from_secs(1);
 const HELLO_ID: u64 = u64::MAX;
 
 /// A page of messages returned by `Request::Messages` (Protocol v6).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessagesPage {
     pub messages: Vec<Message>,
     #[serde(default)]

@@ -1133,7 +1133,8 @@ fn fail(c: Cmd, msg: &str) {
         Cmd::CountExcluding { reply, .. } => answer(reply, Err(m)),
         Cmd::PageExcluding { reply, .. } | Cmd::List { reply, .. } => answer(reply, Err(m)),
         Cmd::Infos(_, r) => answer(r, Err(m)),
-        Cmd::DeleteSession(_, r) | Cmd::Flush(r) => answer(r, Err(m)),
+        Cmd::DeleteSession(_, r) => answer(r, Err(m)),
+        Cmd::Flush(r) => answer(r, Err(m)),
         Cmd::SetStashedResume(_, _, r) => answer(r, Err(m)),
         Cmd::TakeStashedResume(_, r) => answer(r, Err(m)),
         Cmd::ListGroups(r)
