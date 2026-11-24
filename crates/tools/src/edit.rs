@@ -1072,7 +1072,40 @@ fn try_remap(
             return None;
         }
     }
-    let map = LineMap::build(&old_lines, cur_lines);
+    if let Some(res) = try_remap_with(
+        &old_lines,
+        cur_lines,
+        ops,
+        seen,
+        &LineMap::build(&old_lines, cur_lines),
+    ) {
+        return Some(res);
+    }
+    // Match `hashline::file_hash`: trailing spaces and tabs are insignificant when remapping.
+    let trim_end = |lines: &[&str]| -> Vec<&str> {
+        lines
+            .iter()
+            .map(|l| l.trim_end_matches([' ', '\t', '\r']))
+            .collect()
+    };
+    let old_trimmed = trim_end(&old_lines);
+    let cur_trimmed = trim_end(cur_lines);
+    try_remap_with(
+        &old_lines,
+        cur_lines,
+        ops,
+        seen,
+        &LineMap::build(&old_trimmed, &cur_trimmed),
+    )
+}
+
+fn try_remap_with(
+    old_lines: &[&str],
+    cur_lines: &[&str],
+    ops: &[Op],
+    seen: &Seen,
+    map: &LineMap,
+) -> Option<(Vec<Op>, Seen)> {
     let remapped: Vec<Op> = ops
         .iter()
         .map(|o| map.remap_op(o, old_lines.len()))
@@ -1330,6 +1363,22 @@ mod tests {
                 "Recovered: file changed since read; line numbers remapped."
             ]))
         );
+        assert_eq!(file(&d), "zero\none\ntwo\nTHREE\nfour\n");
+    }
+
+    #[tokio::test]
+    async fn stale_tag_remap_tolerates_trailing_spaces_and_tabs() {
+        let (d, c) = setup("one\ntwo  \nthree\t \nfour\n");
+        let tag = read_tag(&c, "f.txt").await;
+        // Unrelated line added above and trailing spaces/tabs stripped from target line.
+        std::fs::write(d.join("f.txt"), "zero\none\ntwo\nthree\nfour\n").unwrap();
+        let o = edit(
+            &c,
+            &tag,
+            json!([{"op": "replace", "start": 3, "lines": ["THREE"]}]),
+        )
+        .await;
+        assert!(!o.is_error, "{}", o.text);
         assert_eq!(file(&d), "zero\none\ntwo\nTHREE\nfour\n");
     }
 

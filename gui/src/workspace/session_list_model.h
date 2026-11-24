@@ -94,6 +94,7 @@ public:
 	// All roles of the session (also when filtered out) as a map with the role names as keys; empty when unknown.
 	Q_INVOKABLE QVariantMap get(const QString& sessionId) const;
 	Q_INVOKABLE QVariantMap rowAt(int row) const;
+	int rowCount(const QModelIndex& parent = {}) const override;
 	QVariant data(const QModelIndex& index, int role) const override;
 	QHash<int, QByteArray> roleNames() const override;
 

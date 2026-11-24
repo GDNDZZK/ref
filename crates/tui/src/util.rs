@@ -2,7 +2,6 @@
 
 use ref_proto::{Delta, ModelRef, Part, SessionInfo, SessionStatus, ToolState};
 
-pub use ref_proto::compute_layout_meta;
 /// Error text a message carries when its turn was aborted (matched case-insensitively).
 pub const ABORTED_ERROR: &str = "Aborted";
 

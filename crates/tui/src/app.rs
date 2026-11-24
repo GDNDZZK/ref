@@ -682,6 +682,7 @@ impl App {
             dialog: None,
             perm: None,
             question: None,
+            details: false,
             toasts,
             thinking: false,
             start: Instant::now(),
@@ -1061,6 +1062,7 @@ impl App {
                 self.mcp_inflight = false;
                 self.mcp_poll_at = None;
             }
+            NetEvent::Frame(f) => self.on_frame(f),
         }
     }
 
