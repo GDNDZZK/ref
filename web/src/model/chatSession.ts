@@ -273,10 +273,13 @@ export class ChatSession {
     if (!this.state.loaded) return // before the snapshot: the snapshot already has it
     if (event.type === 'message') this.recordMessageImages([event.message])
     else if (event.type === 'reset') {
+      this.cancelPendingRange()
       this.messageImages.clear()
       this.recordMessageImages(event.messages)
     } else if (event.type === 'part') {
       this.recordPartImages(event.message_id, event.part)
+    } else if (event.type === 'removed') {
+      this.cancelPendingRange()
     }
     this.transcript.apply(event, performance.now())
     this.publish()
@@ -328,6 +331,11 @@ export class ChatSession {
       this.pendingRange = undefined
       return
     }
+    const unchanged =
+      this.rangeTimer !== undefined &&
+      this.pendingRange?.startSeq === missing.startSeq &&
+      this.pendingRange?.endSeq === missing.endSeq
+    if (unchanged) return
     this.pendingRange = missing
     this.clearRangeTimer()
     this.rangeTimer = setTimeout(() => {
@@ -349,6 +357,7 @@ export class ChatSession {
     if (generation !== this.state.generation || serial !== this.rangeSerial) return
     this.recordMessageImages(page.messages)
     this.transcript.insertRange(page.start_seq, page.end_seq, page.messages)
+    if (page.start_seq === 0 && !page.more_before) this.transcript.moreBefore = false
     this.publish()
   }
 
@@ -373,6 +382,7 @@ export class ChatSession {
 
   // Takes back the message (default: the last prompt) and everything after it.
   async undo(messageId = ''): Promise<void> {
+    this.cancelPendingRange()
     const taken = await this.deps.api().undo(this.id, messageId === '' ? undefined : messageId)
     this.deps.draftRestored(this.id, taken.text, taken.images)
   }
@@ -504,10 +514,6 @@ export class ChatSession {
       if (ids) {
         for (const imageId of ids) this.images.delete(imageId)
         this.messageImages.delete(messageId)
-      }
-      const prefix = `${messageId}:`
-      for (const imageId of [...this.images.keys()]) {
-        if (imageId.startsWith(prefix)) this.images.delete(imageId)
       }
     }
   }

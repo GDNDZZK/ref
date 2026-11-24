@@ -126,6 +126,7 @@ function openHeaderMenu(event: MouseEvent): void {
       @contextmenu.prevent="openHeaderMenu"
     >
       <SessionDot :state="state" :tint="!focused ? rootTint : undefined" />
+      <span class="title">{{ title }}</span>
       <span v-if="rootTask" class="root-chip" :title="rootTask.name">⟲ {{ rootTask.name }}</span>
       <span v-if="needsAttention(state)" class="mark">
         <Icon v-if="state === 'permission'" icon="lock-16" class="lock" />

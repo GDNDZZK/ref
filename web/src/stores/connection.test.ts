@@ -150,4 +150,38 @@ describe('connection store through ref-web', () => {
     expect(localStorage.getItem(BACKEND_STORAGE_KEY)).toBeNull()
     await until(() => connection.state === 'open')
   })
+
+  it('keeps activeBackendUrl reactive and enforces direct > temporary > saved > auto precedence', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ salt: fixture.salt, root: fixture.root }))
+    localStorage.setItem(BACKEND_STORAGE_KEY, JSON.stringify({ url: 'ws://saved/ws', token: 'tok' }))
+    const connection = useConnectionStore()
+    expect(connection.activeBackendUrl).toBe('')
+
+    connection.start('ws://ref-web/ws')
+    expect(connection.backendSource).toBe('saved')
+    expect(connection.activeBackendUrl).toBe('ws://saved/ws')
+    await until(() => connection.state === 'open')
+
+    connection.start('ws://direct-cli/ws', '/work', { direct: true, token: 'direct-tok' })
+    expect(connection.backendSource).toBe('direct')
+    expect(connection.activeBackendUrl).toBe('ws://direct-cli/ws')
+  })
+
+  it('syncs cross-tab storage updates when next is defined', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ salt: fixture.salt, root: fixture.root }))
+    const connection = useConnectionStore()
+    const beforeSwitch = vi.fn()
+    connection.onBeforeSwitch(beforeSwitch)
+    connection.start('ws://ref-web/ws')
+    await until(() => connection.state === 'open')
+    expect(connection.backendSource).toBe('auto')
+
+    const nextPayload = JSON.stringify({ url: 'ws://other-tab:9000/ws', token: 'tab-tok' })
+    localStorage.setItem(BACKEND_STORAGE_KEY, nextPayload)
+    window.dispatchEvent(new StorageEvent('storage', { key: BACKEND_STORAGE_KEY, newValue: nextPayload }))
+    expect(beforeSwitch).toHaveBeenCalledTimes(1)
+    expect(connection.backendSource).toBe('saved')
+    expect(connection.activeBackendUrl).toBe('ws://other-tab:9000/ws')
+    await until(() => connection.state === 'open')
+  })
 })

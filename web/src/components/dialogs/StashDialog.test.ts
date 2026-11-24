@@ -52,7 +52,11 @@ describe('StashDialog', () => {
           name: 'Work',
           members: [
             { session_id: 's1', position: 0, info: info({ id: 's1', name: 'lead', live: true }) },
-            { session_id: 's3', position: 1, info: info({ id: 's3', name: 'archived', parent: 's1', live: false }) },
+            {
+              session_id: 's3',
+              position: 1,
+              info: info({ id: 's3', name: 'archived', parent: 's1', live: false }),
+            },
           ],
         }),
       ],
@@ -148,6 +152,48 @@ describe('StashDialog', () => {
     await wrapper.findAll('.group-card')[1]!.trigger('drop')
     expect(mergeSpy).toHaveBeenCalledWith('g1', 'g2')
 
+    wrapper.unmount()
+  })
+
+  it('handles same-group upward and downward member reordering without off-by-one, and supports move buttons', async () => {
+    const { wrapper, workspace } = mountStashDialog()
+    const moveSpy = vi.spyOn(workspace, 'moveGroupMember').mockResolvedValue(undefined)
+    workspace.onFrame({
+      kind: 'groups_changed',
+      groups: [
+        group('g1', {
+          name: 'Work',
+          members: [
+            { session_id: 's1', position: 0, info: info({ id: 's1', name: 'first', live: false }) },
+            { session_id: 's2', position: 1, info: info({ id: 's2', name: 'second', live: false }) },
+            { session_id: 's3', position: 2, info: info({ id: 's3', name: 'third', live: false }) },
+          ],
+        }),
+      ],
+    })
+    await nextTick()
+
+    const rows = wrapper.findAll('.member-row')
+    // Downward drag: s1 (index 0) dropped before s3 (index 2) -> target position 1.
+    await rows[0]!.trigger('dragstart')
+    await rows[2]!.trigger('drop')
+    expect(moveSpy).toHaveBeenLastCalledWith('g1', 's1', 1, { fromGroupId: 'g1', stashLive: false })
+
+    // Upward drag: s3 (index 2) dropped before s1 (index 0) -> target position 0.
+    await rows[2]!.trigger('dragstart')
+    await rows[0]!.trigger('drop')
+    expect(moveSpy).toHaveBeenLastCalledWith('g1', 's3', 0, { fromGroupId: 'g1', stashLive: false })
+
+    // Keyboard-accessible move up/down buttons.
+    await rows[0]!.get('[aria-label="Move down"]').trigger('click')
+    expect(moveSpy).toHaveBeenLastCalledWith('g1', 's1', 1, { fromGroupId: 'g1', stashLive: false })
+    await rows[2]!.get('[aria-label="Move up"]').trigger('click')
+    expect(moveSpy).toHaveBeenLastCalledWith('g1', 's3', 1, { fromGroupId: 'g1', stashLive: false })
+
+    // Renaming disables group header dragging.
+    await wrapper.get('.group-title').trigger('click')
+    await nextTick()
+    expect(wrapper.get('.group-header').attributes('draggable')).toBe('false')
     wrapper.unmount()
   })
 })

@@ -881,13 +881,13 @@ describe('Sidebar', () => {
   })
 
   describe('stash button', () => {
-    it('shows stash-20 when 0 groups and stash-count-20 with count when >= 1 groups', async () => {
+    it('shows stash-20 when 0 groups and stash-count-20 with clamped count when >= 1 groups', async () => {
       const { workspace, wrapper } = mountSidebar()
       const dialogs = useDialogsStore()
       const stashAllSpy = vi.spyOn(workspace, 'stashAll').mockResolvedValue(null)
       const btn = wrapper.get('button.stash-btn')
       expect(btn.find('.stash-count').exists()).toBe(false)
-      expect(btn.html()).toContain('M5 3h10l2 4v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z')
+      expect(btn.get('.icon').attributes('data-icon')).toBe('stash-20')
 
       // Left-click when live > 0 calls stashAll().
       await btn.trigger('click')
@@ -898,16 +898,32 @@ describe('Sidebar', () => {
       expect(dialogs.current).toEqual({ kind: 'stash' })
       dialogs.close()
 
-      // With >= 1 groups and 0 live sessions, displays count and left-click opens StashDialog.
+      // With >= 1 groups and 0 live sessions, displays stash-count-20 + count and left-click opens StashDialog.
       workspace.onFrame({
         kind: 'groups_changed',
         groups: [{ id: 'g1', name: 'G1', locked: false, created_at: 1, updated_at: 1, members: [] }],
       })
       workspace.onFrame({ kind: 'sessions', sessions: [] })
       await nextTick()
+      expect(btn.get('.icon').attributes('data-icon')).toBe('stash-count-20')
       expect(btn.get('.stash-count').text()).toBe('1')
       await btn.trigger('click')
       expect(dialogs.current).toEqual({ kind: 'stash' })
+
+      // > 9 groups clamps to 9+ so it fits inside the 12px icon cavity.
+      workspace.onFrame({
+        kind: 'groups_changed',
+        groups: Array.from({ length: 12 }, (_, idx) => ({
+          id: `g${idx}`,
+          name: `G${idx}`,
+          locked: false,
+          created_at: 1,
+          updated_at: 1,
+          members: [],
+        })),
+      })
+      await nextTick()
+      expect(btn.get('.stash-count').text()).toBe('9+')
       wrapper.unmount()
     })
   })

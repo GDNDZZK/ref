@@ -23,7 +23,7 @@ import { useConnectionStore } from './connection.ts'
 import { useNoticesStore } from './notices.ts'
 import { useSettingsStore } from './settings.ts'
 export type ViewMode = 'single' | 'split'
-export type SplitFilter = 'all' | 'user' | string
+export type SplitFilter = string // 'all' | 'user' | <creator session id>
 
 export interface NewSessionOptions {
   cwd?: string // default: the workspace's directory
@@ -106,7 +106,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     )
     const filter = splitFilter.value
     if (filter === 'user') return base.filter((session) => !session.parent).map((session) => session.id)
-    if (filter !== 'all') return base.filter((session) => session.parent === filter).map((session) => session.id)
+    if (filter !== 'all')
+      return base.filter((session) => session.parent === filter).map((session) => session.id)
     return base.map((session) => session.id)
   })
   const visibleSessionIds = computed<string[]>(() => {
@@ -584,7 +585,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   async function refreshGroups(): Promise<void> {
     const api = connection.getApi()
-    if (typeof api.listGroups !== 'function') return
     const serial = ++groupsSerial
     const loaded = await api.listGroups()
     if (serial !== groupsSerial) return
@@ -593,16 +593,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   async function syncSessionsAfterStashChange(): Promise<void> {
     const api = connection.getApi()
-    if (mode.value === 'split' && typeof api.watchAll === 'function') {
-      const sessions = await api.watchAll(true)
-      if (Array.isArray(sessions)) setLive(sessions)
-    } else if (typeof api.listSessions === 'function') {
-      const sessions = await api.listSessions()
-      if (Array.isArray(sessions)) setLive(sessions)
-    }
-    if (typeof api.listHistory === 'function') {
-      void refreshAllHistory().catch(notices.pushError)
-    }
+    const sessions = mode.value === 'split' ? await api.watchAll(true) : await api.listSessions()
+    setLive(sessions)
+    void refreshAllHistory().catch(notices.pushError)
   }
 
   async function stashAll(name?: string): Promise<StashGroup | null> {
@@ -700,6 +693,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     historySerial++
     sidebarHistorySerial++
     groupsSerial++
+    notices.clear()
     for (const session of chats.values()) session.dispose()
     chats.clear()
     attachingTiles.clear()

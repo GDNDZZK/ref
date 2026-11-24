@@ -8,7 +8,7 @@ describe('layoutEstimator', () => {
     const msg = assistantMessage('a1', [
       reasoningPart('line1\nline2'),
       textPart('Hello\n```ts\nconst x = 1\nconst y = 2\n```\nDone'),
-      { type: 'image', mime: 'image/png', data: '', id: 'img1', size: 100 },
+      { type: 'image', name: null, mime: 'image/png', data: '', id: 'img1', size: 100 },
       toolPart('c1', 'done'),
     ])
     const meta = layoutMetaFromMessage(4, msg)

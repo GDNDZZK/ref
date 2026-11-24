@@ -48,9 +48,7 @@ interface Hello {
 }
 
 export type UpstreamTarget =
-  | { mode: 'auto' }
-  | { mode: 'cli_default' }
-  | { mode: 'explicit'; url: string; token?: string }
+  { mode: 'auto' } | { mode: 'cli_default' } | { mode: 'explicit'; url: string; token?: string }
 
 type Phase = 'hello' | 'frame0' | 'upstream' | 'open' | 'over'
 
@@ -60,6 +58,8 @@ export function channelTransport(
   random: RandomBytes = cryptoRandom,
   upstream?: UpstreamTarget,
 ): TransportFactory {
+  return (handlers) => {
+    let phase: Phase = 'hello'
     let sealer: Sealer | undefined
     let opener: Opener | undefined
     let info: ServerInfo | undefined
@@ -114,11 +114,16 @@ export function channelTransport(
         }
         info = parsed
         if (parsed.channel_control !== true) {
+          if (upstream && upstream.mode !== 'auto') {
+            end('this ref-web cannot switch the upstream')
+            return
+          }
           phase = 'open'
           handlers.opened()
           return
         }
-        const target: UpstreamTarget = upstream ?? (parsed.cli_server ? { mode: 'cli_default' } : { mode: 'auto' })
+        const target: UpstreamTarget =
+          upstream ?? (parsed.mock || parsed.cli_server ? { mode: 'cli_default' } : { mode: 'auto' })
         const control = buildControlMessage(target)
         phase = 'upstream'
         socket.send(sealer!.seal(KIND_BINARY, utf8(JSON.stringify(control))))

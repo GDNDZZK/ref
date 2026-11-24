@@ -40,7 +40,10 @@ describe('resolveStartup', () => {
 
   it('supports ?server= and ?token= as Direct WS overrides and rejects invalid ?server=', () => {
     expect(
-      resolveStartup(environment({ search: '?server=wss%3A%2F%2Fhost%3A8080%2Fws&token=abc&dir=%2Fproj' }), URL),
+      resolveStartup(
+        environment({ search: '?server=wss%3A%2F%2Fhost%3A8080%2Fws&token=abc&dir=%2Fproj' }),
+        URL,
+      ),
     ).toEqual({
       url: 'wss://host:8080/ws',
       cwd: '/proj',

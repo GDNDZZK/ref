@@ -26,6 +26,7 @@ import { estimateMessageHeight, layoutMetaFromMessage } from '../model/layoutEst
 import { findLeaving, prependedCount, withLeaving } from '../model/rowDiff.ts'
 import type { LeavingRow } from '../model/rowDiff.ts'
 import type { TranscriptSlot } from '../model/transcript.ts'
+import type { MessageLayoutMeta } from '../proto/generated'
 import { scrollArrived, scrollStep } from '../motion/chase.ts'
 import { useFrame } from '../motion/useFrame.ts'
 import { metrics } from '../theme/generated/theme.ts'
@@ -50,21 +51,29 @@ const OVERSCAN_PX = 600
 const OVERSCAN_SLOTS = 6
 const DEFAULT_TAIL_RENDER = 30
 const FADE_DURATION_MS = 140
+const FALLBACK_SLOT_HEIGHT = 48
 const hoveredMessageId = ref('')
 const scroller = useTemplateRef<HTMLElement>('scroller')
 const rows = useTemplateRef<HTMLElement>('rows')
 
 // --- Virtualization geometry (active when `session.slots` has entries).
-const virtualized = computed(() => Array.isArray(slots.value) && slots.value.length > 0)
+const virtualized = computed(() => (slots.value?.length ?? 0) > 0)
 const columnWidth = ref<number>(metrics.contentWidth)
 const viewportTop = ref(0)
 const viewportHeight = ref(0)
 const measuredHeights = shallowRef(new Map<string, number>())
 const materializedFadeIds = shallowRef<ReadonlySet<string>>(new Set())
 let fadeClearTimer: ReturnType<typeof setTimeout> | undefined
+const slotMetaCache = new WeakMap<TranscriptSlot, MessageLayoutMeta>()
 
-function slotMeta(slot: TranscriptSlot) {
-  return slot.kind === 'placeholder' ? slot.meta : layoutMetaFromMessage(slot.seq, slot.message)
+function slotMeta(slot: TranscriptSlot): MessageLayoutMeta {
+  if (slot.kind === 'placeholder') return slot.meta
+  let cached = slotMetaCache.get(slot)
+  if (!cached) {
+    cached = layoutMetaFromMessage(slot.seq, slot.message)
+    slotMetaCache.set(slot, cached)
+  }
+  return cached
 }
 
 function estimateSlot(slot: TranscriptSlot): number {
@@ -87,7 +96,8 @@ const slotLayout = computed(() => {
   let cursor = 0
   for (let i = 0; i < list.length; i++) {
     const slot = list[i]!
-    const height = slot.kind === 'materialized' ? (measured.get(slot.id) ?? estimateSlot(slot)) : estimateSlot(slot)
+    const height =
+      slot.kind === 'materialized' ? (measured.get(slot.id) ?? estimateSlot(slot)) : estimateSlot(slot)
     heights[i] = height
     offsets[i] = cursor
     cursor += height + (i < list.length - 1 ? metrics.blockSpacing : 0)
@@ -168,7 +178,7 @@ const showTailError = computed(() => {
 })
 
 function slotHeight(seq: number): number {
-  return slotLayout.value.heights[seq] ?? 48
+  return slotLayout.value.heights[seq] ?? FALLBACK_SLOT_HEIGHT
 }
 
 function measureRenderedMessages(): void {
@@ -200,14 +210,11 @@ function measureRenderedMessages(): void {
 }
 
 // Recompute estimates synchronously on column width or fold changes with zero network requests.
-watch(
-  [columnWidth, () => props.session.thinkingExpanded, () => props.session.detailsExpanded],
-  () => {
-    if (!virtualized.value) return
-    measuredHeights.value = new Map()
-    void nextTick(measureRenderedMessages)
-  },
-)
+watch([columnWidth, () => props.session.thinkingExpanded, () => props.session.detailsExpanded], () => {
+  if (!virtualized.value) return
+  measuredHeights.value = new Map()
+  void nextTick(measureRenderedMessages)
+})
 
 // --- Rows that appeared after the history was loaded play their entrance; rows that went away
 // play their exit and are kept until it is over.
@@ -225,7 +232,10 @@ function onGone(key: string): void {
   leaving.value = leaving.value.filter((row) => row.block.key !== key)
 }
 
-function markMaterializedFade(previousSlots: readonly TranscriptSlot[], currentSlots: readonly TranscriptSlot[]): void {
+function markMaterializedFade(
+  previousSlots: readonly TranscriptSlot[],
+  currentSlots: readonly TranscriptSlot[],
+): void {
   const prevPlaceholders = new Set(
     previousSlots.filter((slot) => slot.kind === 'placeholder').map((slot) => slot.id),
   )
@@ -319,7 +329,7 @@ function keepAnchor(): void {
 
 // --- Older messages & debounced range loading.
 function requestVisibleRange(): void {
-  if (!virtualized.value || typeof props.session.requestRange !== 'function') return
+  if (!virtualized.value) return
   const { start, end } = visibleRange.value
   if (end < start) return
   props.session.requestRange(start, end + 1)
@@ -343,7 +353,9 @@ watch(
   () => void nextTick(loadOlderIfNear),
 )
 
-watch([visibleRange, virtualized], () => requestVisibleRange())
+watch([() => visibleRange.value.start, () => visibleRange.value.end, virtualized], () =>
+  requestVisibleRange(),
+)
 
 function syncViewportMetrics(): void {
   const view = scroller.value
@@ -376,11 +388,11 @@ let settleEvictTimer: ReturnType<typeof setTimeout> | undefined
 function runEvictionOnSettle(): void {
   if (!virtualized.value) return
   if (following.value) {
-    props.session.evictAtBottom?.()
+    props.session.evictAtBottom()
     return
   }
   const { start, end } = visibleRange.value
-  if (end >= start) props.session.evictAround?.(start, end)
+  if (end >= start) props.session.evictAround(start, end)
 }
 
 function scheduleSettleEviction(): void {
@@ -546,7 +558,7 @@ const lightboxItems = computed<LightboxItem[]>(() =>
 )
 
 function ensureImageUrl(imageId: string | null | undefined): void {
-  if (!imageId || resolvedUrls.value[imageId] || typeof props.session.imageUrl !== 'function') return
+  if (!imageId || resolvedUrls.value[imageId]) return
   props.session.imageUrl(imageId).then(
     (url) => {
       resolvedUrls.value = { ...resolvedUrls.value, [imageId]: url }
@@ -652,7 +664,7 @@ onBeforeUnmount(() => {
           :key="row.block.key"
           :block="row.block"
           :fresh="false"
-          :leaving="row.leaving"
+          :leaving="true"
           :data-message="row.block.messageId"
           @gone="onGone(row.block.key)"
         />
@@ -703,9 +715,9 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-:deep(.skeleton-frame) + :deep(.skeleton-frame),
-:deep(.frame) + :deep(.skeleton-frame),
-:deep(.skeleton-frame) + :deep(.frame) {
+.rows :deep(.skeleton-frame + .skeleton-frame),
+.rows :deep(.frame + .skeleton-frame),
+.rows :deep(.skeleton-frame + .frame) {
   margin-top: var(--block-spacing);
 }
 

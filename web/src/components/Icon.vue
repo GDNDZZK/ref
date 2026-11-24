@@ -12,6 +12,7 @@ defineProps<{ icon: IconKey }>()
   <span
     class="icon"
     :class="icon.endsWith('-20') ? 'size-20' : 'size-16'"
+    :data-icon="icon"
     aria-hidden="true"
     v-html="icons[icon]"
   />
