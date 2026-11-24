@@ -241,6 +241,7 @@ pub struct Hub {
     pub(crate) files_cache: Mutex<HashMap<String, FileList>>,
     pub(crate) binaries_cache: Mutex<BinariesCache>,
     pub(crate) config_files_lock: tokio::sync::Mutex<()>,
+    pub(crate) stash_lock: tokio::sync::Mutex<()>,
     /// Serializes queries to the lazy persistent shell completion coprocess.
     pub(crate) shell_completer: tokio::sync::Mutex<crate::shell_complete::ShellCompleter>,
     pub instance: Mutex<Option<InstanceInfo>>,
@@ -267,6 +268,7 @@ impl Hub {
             files_cache: Mutex::new(HashMap::new()),
             binaries_cache: Mutex::new(None),
             config_files_lock: tokio::sync::Mutex::new(()),
+            stash_lock: tokio::sync::Mutex::new(()),
             shell_completer: tokio::sync::Mutex::new(
                 crate::shell_complete::ShellCompleter::default(),
             ),
@@ -425,6 +427,15 @@ impl Hub {
         }
     }
 
+    pub(crate) fn broadcast_groups_changed(&self, groups: Vec<ref_proto::StashGroup>) {
+        for c in self.conns() {
+            if c.lock().hello {
+                c.send(ServerFrame::GroupsChanged {
+                    groups: groups.clone(),
+                });
+            }
+        }
+    }
     // ----- connections -----
 
     pub(crate) fn conns(&self) -> Vec<Arc<Conn>> {

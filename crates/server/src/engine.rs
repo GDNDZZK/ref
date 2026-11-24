@@ -18,6 +18,7 @@ use ref_proto::{
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
 pub(crate) const CANCELLED_OUTPUT: &str = "Cancelled by user.";
@@ -152,16 +153,18 @@ fn start_run_locked(hub: &Arc<Hub>, s: &Arc<Session>, st: &mut SessionState) {
         return;
     }
     let cancel = CancellationToken::new();
+    let retry_now = Arc::new(Notify::new());
     let id = hub.next_run_id();
     st.run = Some(RunHandle {
         cancel: cancel.clone(),
+        retry_now: retry_now.clone(),
         id,
     });
     st.user_aborted = false;
     st.info.last_error = None;
     st.info.busy_since = Some(now_ms());
     hub.set_status(st, SessionStatus::Busy);
-    tokio::spawn(run_task(hub.clone(), s.clone(), cancel, id));
+    tokio::spawn(run_task(hub.clone(), s.clone(), cancel, retry_now, id));
 }
 
 /// Start an arbitrary task as the session's run (used for manual compaction).
@@ -175,9 +178,11 @@ where
         return Err("Session is busy.".into());
     }
     let cancel = CancellationToken::new();
+    let retry_now = Arc::new(Notify::new());
     let id = hub.next_run_id();
     st.run = Some(RunHandle {
         cancel: cancel.clone(),
+        retry_now,
         id,
     });
     st.user_aborted = false;
@@ -193,6 +198,18 @@ where
     Ok(())
 }
 
+/// Immediately wake a session sleeping in `SessionStatus::Retrying` backoff.
+pub fn retry_now(s: &Session) -> bool {
+    let st = s.lock();
+    if !matches!(st.info.status, SessionStatus::Retrying { .. }) {
+        return false;
+    }
+    let Some(r) = &st.run else {
+        return false;
+    };
+    r.retry_now.notify_one();
+    true
+}
 /// Abort the current run (Esc). Pending permissions resolve as denied.
 pub fn abort(hub: &Arc<Hub>, s: &Arc<Session>, by_user: bool) {
     let mut st = s.lock();
@@ -233,8 +250,14 @@ pub(crate) async fn wait_idle(s: &Arc<Session>, timeout: Duration) -> bool {
     true
 }
 
-async fn run_task(hub: Arc<Hub>, s: Arc<Session>, cancel: CancellationToken, id: u64) {
-    let outcome = run_loop(&hub, &s, &cancel).await;
+async fn run_task(
+    hub: Arc<Hub>,
+    s: Arc<Session>,
+    cancel: CancellationToken,
+    retry_now: Arc<Notify>,
+    id: u64,
+) {
+    let outcome = run_loop(&hub, &s, &cancel, &retry_now).await;
     if let Outcome::Aborted = &outcome {
         let mut st = s.lock();
         cancel_unfinished(&mut st.messages, CANCELLED_OUTPUT);
@@ -335,7 +358,12 @@ fn finish_run(hub: &Arc<Hub>, s: &Arc<Session>, id: u64, completed: bool) {
 // Main loop
 // ---------------------------------------------------------------------------
 
-async fn run_loop(hub: &Arc<Hub>, s: &Arc<Session>, cancel: &CancellationToken) -> Outcome {
+async fn run_loop(
+    hub: &Arc<Hub>,
+    s: &Arc<Session>,
+    cancel: &CancellationToken,
+    retry_now: &Notify,
+) -> Outcome {
     loop {
         if cancel.is_cancelled() {
             return Outcome::Aborted;
@@ -383,7 +411,7 @@ async fn run_loop(hub: &Arc<Hub>, s: &Arc<Session>, cancel: &CancellationToken) 
         } else {
             prep
         };
-        let msg_id = match stream_with_retry(hub, s, &prep, cancel).await {
+        let msg_id = match stream_with_retry(hub, s, &prep, cancel, retry_now).await {
             Ok(id) => id,
             Err(o) => return o,
         };
@@ -640,6 +668,7 @@ async fn stream_with_retry(
     s: &Arc<Session>,
     prep: &Prep,
     cancel: &CancellationToken,
+    retry_now: &Notify,
 ) -> Result<String, Outcome> {
     let mut attempt: u32 = 0;
     let mut overflow_compacted = false;
@@ -706,6 +735,7 @@ async fn stream_with_retry(
                 }
                 tokio::select! {
                     _ = tokio::time::sleep(delay) => {}
+                    _ = retry_now.notified() => {}
                     _ = cancel.cancelled() => return Err(Outcome::Aborted),
                 }
             }

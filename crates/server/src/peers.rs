@@ -225,49 +225,8 @@ pub fn resolve(hub: &Hub, q: &str, exclude: Option<&str>) -> Result<Arc<Session>
 }
 
 fn resolve_history_id(store: &crate::store::Store, q: &str) -> Result<String, String> {
-    let q = q.trim();
-    let infos = store.list();
-    if let Some(i) = infos.iter().find(|i| i.id == q) {
-        return Ok(i.id.clone());
-    }
-    let exact: Vec<&ref_proto::SessionInfo> = infos.iter().filter(|i| i.name == q).collect();
-    match exact.len() {
-        1 => return Ok(exact[0].id.clone()),
-        n if n > 1 => {
-            let c: Vec<String> = exact
-                .iter()
-                .map(|i| format!("\"{}\" (id {})", i.name, i.id))
-                .collect();
-            return Err(format!(
-                "Error: \"{q}\" matches multiple history sessions. Candidates: {}. Use the id.",
-                c.join(", ")
-            ));
-        }
-        _ => {}
-    }
-    let lower = q.to_lowercase();
-    let ci: Vec<&ref_proto::SessionInfo> = infos
-        .iter()
-        .filter(|i| i.name.to_lowercase() == lower)
-        .collect();
-    match ci.len() {
-        1 => Ok(ci[0].id.clone()),
-        0 => Err(format!(
-            "Error: no live or history session matching \"{q}\"."
-        )),
-        _ => {
-            let c: Vec<String> = ci
-                .iter()
-                .map(|i| format!("\"{}\" (id {})", i.name, i.id))
-                .collect();
-            Err(format!(
-                "Error: \"{q}\" is ambiguous in history. Candidates: {}. Use the id.",
-                c.join(", ")
-            ))
-        }
-    }
+    store.resolve_id(q)
 }
-
 pub async fn run(hub: &Arc<Hub>, s: &Arc<Session>, name: &str, input: &Value) -> ToolOutput {
     let r = match name {
         LIST_SESSIONS => list_sessions(hub, s, input).await,
@@ -332,60 +291,111 @@ async fn list_sessions(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Resul
     };
 
     let live_infos = hub.infos();
-    let live_ids: std::collections::HashSet<String> =
-        live_infos.iter().map(|i| i.id.clone()).collect();
-    let need_store =
-        include_history || creator.is_some() || live_infos.iter().any(|i| i.parent.is_some());
-    let hist_infos = if need_store {
+    let live_ids: Vec<String> = live_infos.iter().map(|i| i.id.clone()).collect();
+    let creator_ids = if let Some(c) = creator.filter(|&c| c != "user") {
+        let c_lower = c.to_lowercase();
+        let mut ids: Vec<String> = live_infos
+            .iter()
+            .filter(|i| i.id == c || i.name == c || i.name.to_lowercase() == c_lower)
+            .map(|i| i.id.clone())
+            .collect();
         let store = hub.store.clone();
-        tokio::task::spawn_blocking(move || store.list())
+        let c_owned = c.to_string();
+        let db_ids = tokio::task::spawn_blocking(move || store.ids_by_name(&c_owned))
             .await
-            .map_err(|e| format!("listing history failed: {e}"))?
+            .map_err(|e| format!("resolving creator failed: {e}"))?;
+        for id in db_ids {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+        if !ids.iter().any(|id| id == c) {
+            ids.push(c.to_string());
+        }
+        ids
     } else {
         Vec::new()
     };
-    let mut names: std::collections::HashMap<String, String> = hist_infos
-        .iter()
-        .map(|i| (i.id.clone(), i.name.clone()))
-        .collect();
-    for i in &live_infos {
-        names.insert(i.id.clone(), i.name.clone());
-    }
-    let mut combined: Vec<(ref_proto::SessionInfo, bool)> =
-        live_infos.into_iter().map(|i| (i, true)).collect();
-    if include_history {
-        for mut i in hist_infos {
-            if !live_ids.contains(&i.id) {
-                i.live = false;
-                combined.push((i, false));
-            }
-        }
-    }
-    if let Some(c) = creator {
-        if c == "user" {
-            combined.retain(|(i, _)| i.parent.is_none());
-        } else {
-            let c_lower = c.to_lowercase();
-            combined.retain(|(i, _)| {
-                i.parent.as_deref().is_some_and(|p| {
-                    p == c
-                        || names
-                            .get(p)
-                            .is_some_and(|n| n == c || n.to_lowercase() == c_lower)
-                })
-            });
-        }
-    }
 
-    let total = combined.len();
-    let live_count = combined.iter().filter(|(_, live)| *live).count();
-    let hist_count = total - live_count;
+    let live_filtered: Vec<ref_proto::SessionInfo> = live_infos
+        .iter()
+        .filter(|i| match creator {
+            None => true,
+            Some("user") => i.parent.as_deref().is_none_or(str::is_empty),
+            Some(_) => i
+                .parent
+                .as_deref()
+                .is_some_and(|p| creator_ids.contains(&p.to_string())),
+        })
+        .cloned()
+        .collect();
+
+    let live_count = live_filtered.len();
+    let hist_count = if include_history {
+        let store = hub.store.clone();
+        let creator_q = creator.map(str::to_string);
+        let creator_ids_q = creator_ids.clone();
+        let live_ids_q = live_ids.clone();
+        tokio::task::spawn_blocking(move || {
+            store.count_excluding(creator_q, creator_ids_q, live_ids_q)
+        })
+        .await
+        .map_err(|e| format!("counting history failed: {e}"))?
+    } else {
+        0
+    };
+
+    let total = live_count + hist_count;
     let pages = total.div_ceil(page_size).max(1);
     if page > pages {
         return Err(format!("Error: page {page} is out of range (1–{pages})."));
     }
     let start = (page - 1) * page_size;
     let end = (start + page_size).min(total);
+
+    let mut page_items: Vec<(ref_proto::SessionInfo, bool)> = Vec::new();
+    if start < live_count {
+        let live_end = end.min(live_count);
+        for i in &live_filtered[start..live_end] {
+            page_items.push((i.clone(), true));
+        }
+    }
+    if include_history && end > live_count {
+        let hist_offset = start.saturating_sub(live_count);
+        let hist_limit = end - start.max(live_count);
+        let store = hub.store.clone();
+        let creator_q = creator.map(str::to_string);
+        let hist_page = tokio::task::spawn_blocking(move || {
+            store.page_excluding(creator_q, creator_ids, live_ids, hist_limit, hist_offset)
+        })
+        .await
+        .map_err(|e| format!("listing history failed: {e}"))?;
+        for mut i in hist_page {
+            i.live = false;
+            page_items.push((i, false));
+        }
+    }
+
+    let mut names: std::collections::HashMap<String, String> =
+        live_infos.into_iter().map(|i| (i.id, i.name)).collect();
+    let missing_parents: Vec<String> = page_items
+        .iter()
+        .filter_map(|(i, _)| i.parent.as_deref())
+        .filter(|pid| !pid.is_empty() && !names.contains_key(*pid))
+        .map(str::to_string)
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    if !missing_parents.is_empty() {
+        let store = hub.store.clone();
+        let parent_infos = tokio::task::spawn_blocking(move || store.infos(missing_parents))
+            .await
+            .map_err(|e| format!("loading parent names failed: {e}"))?;
+        for p in parent_infos {
+            names.entry(p.id).or_insert(p.name);
+        }
+    }
+
     let mut out = if pages == 1 {
         if include_history {
             format!("{total} session(s) ({live_count} live, {hist_count} history):\n")
@@ -409,7 +419,7 @@ async fn list_sessions(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Resul
             end
         )
     };
-    for (i, is_live) in &combined[start..end] {
+    for (i, is_live) in &page_items {
         let title = preview(&i.title, LIST_TITLE_CHARS);
         if *is_live {
             out.push_str(&format!(
@@ -445,7 +455,6 @@ async fn list_sessions(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Resul
     out.push_str(&format!("You are \"{me}\" (id {}).", s.id));
     Ok(out)
 }
-
 /// Deliver a peer message from `from` to `target`. Returns (message id, queued).
 pub fn deliver(
     hub: &Arc<Hub>,
@@ -581,8 +590,28 @@ async fn read_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Result
         resolve_live(hub, q, None)?
     };
     if let Some(target) = live_target {
-        let st = target.lock();
-        return format_session_messages(&st.info.name, &st.messages, page, size);
+        let (name, window_start, mem_msgs) = {
+            let st = target.lock();
+            (
+                st.info.name.clone(),
+                st.window_start_seq,
+                st.messages.clone(),
+            )
+        };
+        let all = if window_start > 0 {
+            let store = hub.store.clone();
+            let tid = target.id.clone();
+            let mut prefix = tokio::task::spawn_blocking(move || {
+                store.load_messages_range(&tid, 0, window_start)
+            })
+            .await
+            .map_err(|e| format!("reading session failed: {e}"))??;
+            prefix.extend(mem_msgs);
+            prefix
+        } else {
+            mem_msgs
+        };
+        return format_session_messages(&name, &all, page, size);
     }
     let store = hub.store.clone();
     let q = q.to_string();

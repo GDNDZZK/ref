@@ -93,7 +93,7 @@ pub(crate) fn insert_summary(
     if at == len {
         hub.emit_message(&s.id, &msg);
     } else {
-        hub.emit(&s.id, st.reset_event());
+        hub.emit(&s.id, st.reset_event(&hub.store));
     }
     // Estimated from the new effective context until the next real usage arrives.
     let chat = crate::convert::to_chat(&st.messages, prep.model.images);

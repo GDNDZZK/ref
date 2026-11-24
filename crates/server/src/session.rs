@@ -4,17 +4,18 @@ use crate::store::Persisted;
 use crate::util::lock;
 use ref_config::Config;
 use ref_proto::{
-    Message, MessageSource, Part, PermissionRequest, QuestionRequest, Role, SessionEvent,
-    SessionInfo, SessionStatus, ToolState,
+    Message, MessageLayoutMeta, MessageSource, Part, PermissionRequest, QuestionRequest, Role,
+    SessionEvent, SessionInfo, SessionStatus, ToolState,
 };
 use ref_tools::HashStore;
 use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard};
-use tokio::sync::oneshot;
+use tokio::sync::{Notify, oneshot};
 use tokio_util::sync::CancellationToken;
 
 pub struct RunHandle {
     pub cancel: CancellationToken,
+    pub retry_now: Arc<Notify>,
     pub id: u64,
 }
 
@@ -72,8 +73,11 @@ pub struct SessionState {
     pub agent_switch: Option<crate::agent_switch::AgentSwitch>,
     /// Whether the session's model was explicitly chosen rather than inherited from agent/config default.
     pub model_explicit: bool,
+    /// 0-based sequence index of `messages[0]` in the persisted transcript.
+    pub window_start_seq: u64,
+    /// Persist the session row even when `messages` is empty (used when stashing empty sessions).
+    pub force_persist: bool,
 }
-
 pub struct Session {
     pub id: String,
     pub state: Mutex<SessionState>,
@@ -112,6 +116,8 @@ impl Session {
                 closed: false,
                 agent_switch: None,
                 model_explicit: false,
+                window_start_seq: 0,
+                force_persist: false,
             }),
         })
     }
@@ -140,6 +146,8 @@ impl Session {
             reported: st.reported,
             context_notice: st.context_notice,
             model_explicit: st.model_explicit,
+            window_start_seq: st.window_start_seq,
+            force_persist: st.force_persist,
         }
     }
 }
@@ -177,21 +185,54 @@ impl SessionState {
         self.messages.iter().rposition(|m| m.id == id)
     }
 
-    /// `Reset` event with the newest page of messages.
-    pub(crate) fn reset_event(&self) -> SessionEvent {
-        let (messages, more_before) = page(&self.messages, self.messages.len(), None);
+    /// `Reset` event with the newest page of messages and `layout_metas` for `0..start_seq`.
+    pub(crate) fn reset_event(&self, store: &crate::store::Store) -> SessionEvent {
+        let total_messages = self.window_start_seq + self.messages.len() as u64;
+        let (messages, _) = page(&self.messages, self.messages.len(), None);
+        let start_seq = total_messages.saturating_sub(messages.len() as u64);
+        let more_before = start_seq > 0;
+        let layout_metas = self.layout_metas_before(store, start_seq);
         SessionEvent::Reset {
             messages,
             more_before,
+            total_messages,
+            start_seq,
+            layout_metas,
         }
+    }
+
+    pub(crate) fn layout_metas_before(
+        &self,
+        store: &crate::store::Store,
+        end_seq: u64,
+    ) -> Vec<MessageLayoutMeta> {
+        if end_seq == 0 {
+            return Vec::new();
+        }
+        let mut metas = Vec::new();
+        let disk_end = end_seq.min(self.window_start_seq);
+        if disk_end > 0 {
+            match store.load_layout_metas(&self.info.id, 0, disk_end) {
+                Ok(loaded) => metas.extend(loaded),
+                Err(e) => {
+                    tracing::warn!(session = %self.info.id, "loading layout_metas failed: {e}")
+                }
+            }
+        }
+        let mem_count = end_seq.saturating_sub(self.window_start_seq) as usize;
+        for (idx, m) in self.messages.iter().take(mem_count).enumerate() {
+            let seq = self.window_start_seq + idx as u64;
+            metas.push(crate::store::compute_layout_meta(seq, m));
+        }
+        metas
     }
 }
 
 /// Messages per page when the client does not say (`Attach`, `Messages`, `Reset`).
-const PAGE_DEFAULT: usize = 100;
-const PAGE_MAX: usize = 1000;
+pub(crate) const PAGE_DEFAULT: usize = 100;
+pub(crate) const PAGE_MAX: usize = 1000;
 /// A page stops growing once its serialized size (images as stubs) reaches this.
-const PAGE_BYTES: usize = 1 << 20;
+pub(crate) const PAGE_BYTES: usize = 1 << 20;
 
 /// The newest messages of `messages[..end]` that fit one page, with images as stubs, and
 /// whether older messages remain. At least one message unless `end` is 0.
@@ -214,6 +255,33 @@ pub(crate) fn page(messages: &[Message], end: usize, limit: Option<u32>) -> (Vec
     (out, more)
 }
 
+/// Forward slice of `messages[start..end]` capped at `limit` and `PAGE_BYTES` (at least one
+/// message if `start < end`), with images replaced by stubs.
+pub(crate) fn page_forward(
+    messages: &[Message],
+    start: usize,
+    end: usize,
+    limit: Option<u32>,
+) -> Vec<Message> {
+    let limit = limit.map_or(PAGE_DEFAULT, |l| (l as usize).clamp(1, PAGE_MAX));
+    let start = start.min(messages.len());
+    let end = end.min(messages.len());
+    let mut out = Vec::new();
+    let mut bytes = 0;
+    for m in messages.get(start..end).into_iter().flatten() {
+        if out.len() >= limit || (!out.is_empty() && bytes >= PAGE_BYTES) {
+            break;
+        }
+        let mut m = m.clone();
+        m.strip_image_data();
+        bytes += serde_json::to_string(&m).expect("Message serializes").len();
+        out.push(m);
+        if bytes >= PAGE_BYTES {
+            break;
+        }
+    }
+    out
+}
 /// Marks unfinished tool parts as cancelled (used after loading from disk / abort).
 pub(crate) fn cancel_unfinished(messages: &mut [Message], output: &str) -> bool {
     let mut changed = false;
