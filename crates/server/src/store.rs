@@ -1484,6 +1484,7 @@ fn last_human_seq_before(
                         THEN json_extract(layout_meta, '$.source_kind')
                    END = 'human'
              ORDER BY seq DESC LIMIT 1",
+            params![session_id, before_seq as i64],
             |r| r.get(0),
         )
         .optional()?;
@@ -1499,6 +1500,7 @@ fn compaction_seq_before(db: &Connection, session_id: &str, before_seq: u64) -> 
                         THEN json_extract(layout_meta, '$.source_kind')
                    END = 'compaction'
              ORDER BY seq DESC LIMIT 1",
+            params![session_id, before_seq as i64],
             |r| r.get(0),
         )
         .optional()?;
@@ -2198,6 +2200,7 @@ fn import_json(db: &mut Connection, data_dir: &Path) -> DbResult<()> {
                 params![p.info.id, seq as i64, m.id, m.time, data, meta],
             )?;
         }
+        imported += 1;
     }
     tx.commit()?;
     let mut target = data_dir.join("sessions.imported");

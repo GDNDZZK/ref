@@ -3,7 +3,16 @@
 
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { KIND_TEXT, Opener, Sealer, authMac, channelKeys, fromHex, utf8 } from '../net/channelCrypto.ts'
+import {
+  KIND_BINARY,
+  KIND_TEXT,
+  Opener,
+  Sealer,
+  authMac,
+  channelKeys,
+  fromHex,
+  utf8,
+} from '../net/channelCrypto.ts'
 import { BACKEND_STORAGE_KEY } from '../net/backend.ts'
 import { STORAGE_KEY, keys } from '../net/keystore.ts'
 import { PROTOCOL_VERSION } from '../proto/generated'
@@ -37,7 +46,12 @@ class FakeRefWeb {
 
   send(data: string | Uint8Array): void {
     if (typeof data === 'string') return this.auth(data)
-    const request = JSON.parse(new TextDecoder().decode(this.opener!.open(data).plaintext)) as { id: number }
+    const opened = this.opener!.open(data)
+    if (opened.kind === KIND_BINARY) {
+      this.sendSealed({ op: 'upstream_ready', cwd: CWD }, KIND_BINARY)
+      return
+    }
+    const request = JSON.parse(new TextDecoder().decode(opened.plaintext)) as { id: number }
     const result = { server_version: '0.2.1', protocol: PROTOCOL_VERSION, cwd: CWD }
     this.sendSealed({ kind: 'response', id: request.id, ok: true, result })
   }
@@ -55,11 +69,11 @@ class FakeRefWeb {
     const { toServer, toPage } = channelKeys(ROOT, SN, cnBytes)
     this.sealer = new Sealer(toPage)
     this.opener = new Opener(toServer)
-    this.sendSealed({ version: '0.2.1', cwd: CWD, mock: false })
+    this.sendSealed({ version: '0.2.1', cwd: CWD, mock: false, channel_control: true })
   }
 
-  private sendSealed(value: unknown): void {
-    const wire = this.sealer!.seal(KIND_TEXT, utf8(JSON.stringify(value)))
+  private sendSealed(value: unknown, kind: typeof KIND_TEXT | typeof KIND_BINARY = KIND_TEXT): void {
+    const wire = this.sealer!.seal(kind, utf8(JSON.stringify(value)))
     setTimeout(() =>
       this.onmessage?.({ data: wire.buffer.slice(wire.byteOffset, wire.byteOffset + wire.length) }),
     )
@@ -155,7 +169,8 @@ describe('connection store through ref-web', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ salt: fixture.salt, root: fixture.root }))
     localStorage.setItem(BACKEND_STORAGE_KEY, JSON.stringify({ url: 'ws://saved/ws', token: 'tok' }))
     const connection = useConnectionStore()
-    expect(connection.activeBackendUrl).toBe('')
+    expect(connection.backendSource).toBe('saved')
+    expect(connection.activeBackendUrl).toBe('ws://saved/ws')
 
     connection.start('ws://ref-web/ws')
     expect(connection.backendSource).toBe('saved')

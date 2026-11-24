@@ -126,6 +126,10 @@ function onDragOverGroup(event: DragEvent, group: StashGroup): void {
   dropMemberKey.value = undefined
 }
 
+function onDragLeaveGroup(groupId: string): void {
+  if (dropGroupId.value === groupId) dropGroupId.value = undefined
+}
+
 function onDropGroup(event: DragEvent, targetGroup: StashGroup): void {
   event.preventDefault()
   const payload = dragState.value
@@ -208,6 +212,7 @@ function onDropOutside(event: DragEvent): void {
   if (payload?.kind !== 'member') return
   report(workspace.removeFromGroup(payload.groupId, payload.sessionId))
 }
+
 function moveMemberBy(group: StashGroup, index: number, delta: -1 | 1): void {
   if (group.locked) return
   const targetIndex = index + delta
@@ -368,7 +373,7 @@ function createEmptyGroup(): void {
             class="group-card"
             :class="{ locked: group.locked, 'drop-target': dropGroupId === group.id }"
             @dragover="onDragOverGroup($event, group)"
-            @dragleave="if (dropGroupId === group.id) dropGroupId = undefined"
+            @dragleave="onDragLeaveGroup(group.id)"
             @drop="onDropGroup($event, group)"
           >
             <header
