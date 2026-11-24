@@ -205,3 +205,118 @@ fn complete_shell_optional_fields_and_roundtrip() {
     let bare_json = serde_json::to_value(&bare_item).unwrap();
     assert_eq!(bare_json, json!({"value": "status"}));
 }
+
+#[test]
+fn messages_before_and_range_roundtrip() {
+    let before_req: ClientFrame = serde_json::from_value(json!({
+        "id": 7,
+        "op": "messages",
+        "session_id": "ses_1",
+        "before": "msg_1",
+        "limit": 50
+    }))
+    .unwrap();
+    match &before_req.req {
+        Request::Messages {
+            session_id,
+            before,
+            start_seq,
+            end_seq,
+            limit,
+        } => {
+            assert_eq!(session_id, "ses_1");
+            assert_eq!(before.as_deref(), Some("msg_1"));
+            assert_eq!(*start_seq, None);
+            assert_eq!(*end_seq, None);
+            assert_eq!(*limit, Some(50));
+        }
+        other => panic!("not messages: {other:?}"),
+    }
+
+    let range_req: ClientFrame = serde_json::from_value(json!({
+        "id": 8,
+        "op": "messages",
+        "session_id": "ses_1",
+        "start_seq": 10,
+        "end_seq": 60
+    }))
+    .unwrap();
+    match &range_req.req {
+        Request::Messages {
+            before,
+            start_seq,
+            end_seq,
+            limit,
+            ..
+        } => {
+            assert_eq!(*before, None);
+            assert_eq!(*start_seq, Some(10));
+            assert_eq!(*end_seq, Some(60));
+            assert_eq!(*limit, None);
+        }
+        other => panic!("not messages: {other:?}"),
+    }
+}
+
+#[test]
+fn snapshot_and_reset_without_layout_metas_still_parse() {
+    let mut value = serde_json::to_value(super::samples::snapshot()).unwrap();
+    let obj = value.as_object_mut().unwrap();
+    obj.remove("total_messages");
+    obj.remove("start_seq");
+    obj.remove("layout_metas");
+    let snapshot: SessionSnapshot = serde_json::from_value(value).unwrap();
+    assert_eq!(snapshot.total_messages, 0);
+    assert_eq!(snapshot.start_seq, 0);
+    assert!(snapshot.layout_metas.is_empty());
+
+    let reset: SessionEvent = serde_json::from_value(json!({
+        "type": "reset",
+        "messages": [],
+        "more_before": false
+    }))
+    .unwrap();
+    match reset {
+        SessionEvent::Reset {
+            total_messages,
+            start_seq,
+            layout_metas,
+            ..
+        } => {
+            assert_eq!(total_messages, 0);
+            assert_eq!(start_seq, 0);
+            assert!(layout_metas.is_empty());
+        }
+        other => panic!("not reset: {other:?}"),
+    }
+}
+
+#[test]
+fn retry_now_and_stash_defaults_roundtrip() {
+    let retry: ClientFrame = serde_json::from_value(json!({
+        "id": 46,
+        "op": "retry_now",
+        "session_id": "ses_1"
+    }))
+    .unwrap();
+    assert!(matches!(retry.req, Request::RetryNow { .. }));
+
+    let add: ClientFrame = serde_json::from_value(json!({
+        "id": 53,
+        "op": "add_to_group",
+        "group_id": "grp_1",
+        "session_id": "ses_1"
+    }))
+    .unwrap();
+    match add.req {
+        Request::AddToGroup {
+            position,
+            stash_live,
+            ..
+        } => {
+            assert_eq!(position, None);
+            assert!(stash_live);
+        }
+        other => panic!("not add_to_group: {other:?}"),
+    }
+}

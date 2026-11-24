@@ -1,0 +1,6 @@
+{
+  "id": 50,
+  "op": "rename_group",
+  "group_id": "grp_a1b2c3d4",
+  "name": "Parser fix"
+}

@@ -1,0 +1,9 @@
+{
+  "id": 54,
+  "op": "move_group_member",
+  "from_group_id": "grp_a1b2c3d4",
+  "to_group_id": "grp_e5f6a7b8",
+  "session_id": "ses_a1b2c3d4",
+  "position": 0,
+  "stash_live": true
+}

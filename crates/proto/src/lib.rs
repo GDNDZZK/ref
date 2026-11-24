@@ -16,9 +16,10 @@ use ts_rs::TS;
 /// frames to an older client's version: a client built for another version cannot rely on
 /// matching semantics. Version 3 added questions; version 4 added structured error codes,
 /// edit/write permission previews, structured edit warnings, and strict version negotiation;
-/// version 5 adds config profile management, hot reload, binary completions, and `ListDirs` files.
+/// version 5 adds config profile management, hot reload, binary completions, and `ListDirs` files;
+/// version 6 adds lightweight layout metadata, sequence range paging, `RetryNow`, and Stash groups.
 /// Run all clients from the version of the server.
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// The error of a `QuestionReply` for a question that is not pending (answered elsewhere
 /// already). Clients compare with `ERR_NO_PENDING_QUESTION` first, falling back to this text.
@@ -798,6 +799,64 @@ pub struct ConfigFilesInfo {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PartLayoutMeta {
+    /// "text" | "reasoning" | "image" | "tool"
+    pub kind: String,
+    #[serde(default)]
+    pub chars: u32,
+    #[serde(default)]
+    pub lines: u32,
+    #[serde(default)]
+    pub code_blocks: u16,
+    #[serde(default)]
+    pub code_lines: u32,
+    #[serde(default)]
+    pub tables: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub tool: Option<String>,
+    #[serde(default)]
+    pub tool_lines: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub width: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub height: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct MessageLayoutMeta {
+    pub seq: u64,
+    pub id: String,
+    pub role: Role,
+    /// "human" | "peer" | "spawn" | "reminder" | "compaction" | "shell"
+    #[serde(default)]
+    pub source_kind: String,
+    #[serde(default)]
+    pub has_error: bool,
+    #[serde(default)]
+    pub parts: Vec<PartLayoutMeta>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct StashMember {
+    pub session_id: String,
+    pub position: u32,
+    pub info: SessionInfo,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct StashGroup {
+    pub id: String,
+    pub name: String,
+    pub locked: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub members: Vec<StashMember>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct SessionSnapshot {
     pub info: SessionInfo,
@@ -806,6 +865,13 @@ pub struct SessionSnapshot {
     /// Older messages exist before `messages[0]`.
     #[serde(default)]
     pub more_before: bool,
+    #[serde(default)]
+    pub total_messages: u64,
+    #[serde(default)]
+    pub start_seq: u64,
+    /// Metadata for messages in `0..start_seq` (older than `messages[0]`), ordered by `seq`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layout_metas: Vec<MessageLayoutMeta>,
     pub pending_permissions: Vec<PermissionRequest>,
     #[serde(default)]
     pub pending_questions: Vec<QuestionRequest>,
@@ -891,12 +957,22 @@ pub enum Request {
         #[serde(default)]
         limit: Option<u32>,
     },
-    /// A page of older messages: up to `limit` (default 100, max 1000; fewer once the page
-    /// exceeds about 1 MiB) ending right before message `before`.
-    /// -> `{messages: [Message], more_before}`
+    /// A page of older messages (via `before`) or a `[start_seq, end_seq)` sequence range:
+    /// up to `limit` (default 100, max 1000; fewer once the page exceeds about 1 MiB).
+    /// -> `{messages: [Message], more_before, start_seq, end_seq}`
     Messages {
         session_id: String,
-        before: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        before: Option<String>,
+        /// Optional 0-based inclusive start sequence for range/jump queries.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        start_seq: Option<u64>,
+        /// Optional 0-based exclusive end sequence for range/jump queries.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        end_seq: Option<u64>,
         #[serde(default)]
         limit: Option<u32>,
     },
@@ -1123,6 +1199,82 @@ pub enum Request {
         #[ts(optional = nullable)]
         limit: Option<usize>,
     },
+    /// Immediately end the current retry backoff wait and start the next attempt. -> `{retried: bool}`
+    RetryNow {
+        session_id: String,
+    },
+    /// List all stash groups ordered by recency. -> `{groups: [StashGroup]}`
+    ListGroups,
+    /// Stash every currently live session into a new group. -> `{group: Option<StashGroup>, groups: [StashGroup]}`
+    StashAll {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        name: Option<String>,
+    },
+    /// Create a stash group with optional initial members. -> `{group: StashGroup, groups: [StashGroup]}`
+    CreateGroup {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        name: Option<String>,
+        #[serde(default)]
+        session_ids: Vec<String>,
+        #[serde(default)]
+        stash_live: bool,
+    },
+    /// Rename an existing stash group. -> `{groups: [StashGroup]}`
+    RenameGroup {
+        group_id: String,
+        name: String,
+    },
+    /// Toggle lock state of a stash group. -> `{groups: [StashGroup]}`
+    SetGroupLocked {
+        group_id: String,
+        locked: bool,
+    },
+    /// Delete a stash group (sessions remain in history). -> `{groups: [StashGroup]}`
+    DeleteGroup {
+        group_id: String,
+    },
+    /// Add a session to a stash group at an optional 0-based position. -> `{groups: [StashGroup]}`
+    AddToGroup {
+        group_id: String,
+        session_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        position: Option<u32>,
+        #[serde(default = "default_true")]
+        stash_live: bool,
+    },
+    /// Move a session within or between stash groups. -> `{groups: [StashGroup]}`
+    MoveGroupMember {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        from_group_id: Option<String>,
+        to_group_id: String,
+        session_id: String,
+        position: u32,
+        #[serde(default = "default_true")]
+        stash_live: bool,
+    },
+    /// Remove a member from a stash group (auto-deletes unlocked empty groups). -> `{groups: [StashGroup]}`
+    RemoveFromGroup {
+        group_id: String,
+        session_id: String,
+    },
+    /// Merge `source_group_id` members into `target_group_id` and delete source. -> `{groups: [StashGroup]}`
+    MergeGroups {
+        source_group_id: String,
+        target_group_id: String,
+    },
+    /// Restore all members of a stash group to background live sessions. -> `{restored_ids: [String], groups: [StashGroup]}`
+    RestoreGroup {
+        group_id: String,
+    },
+    /// Restore one member of a stash group to a background live session. -> `{restored: bool, groups: [StashGroup]}`
+    RestoreGroupMember {
+        group_id: String,
+        session_id: String,
+    },
     Shutdown,
     Ping,
 }
@@ -1173,6 +1325,8 @@ pub enum ServerFrame {
         #[serde(default)]
         warnings: Vec<String>,
     },
+    /// Stash groups changed (sent to every client).
+    GroupsChanged { groups: Vec<StashGroup> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1215,6 +1369,12 @@ pub enum SessionEvent {
         messages: Vec<Message>,
         #[serde(default)]
         more_before: bool,
+        #[serde(default)]
+        total_messages: u64,
+        #[serde(default)]
+        start_seq: u64,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        layout_metas: Vec<MessageLayoutMeta>,
     },
     Permission {
         request: PermissionRequest,

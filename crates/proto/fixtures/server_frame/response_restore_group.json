@@ -1,0 +1,12 @@
+{
+  "kind": "response",
+  "id": 57,
+  "ok": true,
+  "result": {
+    "restored_ids": [
+      "ses_a1b2c3d4"
+    ],
+    "groups": []
+  },
+  "error": null
+}

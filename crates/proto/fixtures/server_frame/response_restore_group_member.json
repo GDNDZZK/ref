@@ -1,0 +1,10 @@
+{
+  "kind": "response",
+  "id": 58,
+  "ok": true,
+  "result": {
+    "restored": true,
+    "groups": []
+  },
+  "error": null
+}

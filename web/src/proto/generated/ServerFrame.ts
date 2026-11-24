@@ -2,6 +2,7 @@
 import type { NotifyKind } from "./NotifyKind";
 import type { SessionEvent } from "./SessionEvent";
 import type { SessionInfo } from "./SessionInfo";
+import type { StashGroup } from "./StashGroup";
 import type { ToastLevel } from "./ToastLevel";
 import type { JsonValue } from "./serde_json/JsonValue";
 
@@ -14,4 +15,4 @@ code?: string | null, } | { "kind": "event", session_id: string, event: SessionE
 /**
  * Not called `kind`: that is the tag of `ServerFrame`.
  */
-notify_kind: NotifyKind, session_title: string, detail: string | null, } | { "kind": "config_changed", warnings: Array<string>, };
+notify_kind: NotifyKind, session_title: string, detail: string | null, } | { "kind": "config_changed", warnings: Array<string>, } | { "kind": "groups_changed", groups: Array<StashGroup>, };

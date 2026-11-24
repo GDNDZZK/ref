@@ -1,0 +1,6 @@
+{
+  "id": 58,
+  "op": "restore_group_member",
+  "group_id": "grp_a1b2c3d4",
+  "session_id": "ses_a1b2c3d4"
+}

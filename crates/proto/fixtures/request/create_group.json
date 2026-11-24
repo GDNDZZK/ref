@@ -1,0 +1,9 @@
+{
+  "id": 49,
+  "op": "create_group",
+  "name": "Parser investigation",
+  "session_ids": [
+    "ses_a1b2c3d4"
+  ],
+  "stash_live": true
+}
