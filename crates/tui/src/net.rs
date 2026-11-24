@@ -10,7 +10,9 @@ use ref_proto::{ClientFrame, PROTOCOL_VERSION, Request, ServerFrame};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message as WsMsg;
 
-use ref_client::{BackendTarget, ConnectedBackend, Target, Ws};
+#[cfg(test)]
+use ref_client::Target;
+use ref_client::{BackendTarget, ConnectedBackend, Ws};
 
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]

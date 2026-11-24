@@ -349,6 +349,11 @@ private:
 	QStringList wantedTileIds() const;
 	void setFocusedTile(const QString& sessionId);
 	void applyBackendSwitch(refgui::client::Backend::Source source);
+
+	// Commands.
+	void registerCommands();
+	void updateCommandContext();
+	void runOnSession(const QString& sessionId, void (ChatSession::*method)());
 	QString currentEditableToken() const;
 	void runCustomCommand(const QString& name, const QString& args, const QString& sessionId);
 

@@ -9,7 +9,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
 use ref_proto::{SessionInfo, StashGroup};
 
-use super::dialog::{OPEN_SETTLE, clear_wide_edges, frame, open_progress};
+use super::dialog::{clear_wide_edges, frame, open_progress};
 use super::editor::Editor;
 use super::theme;
 use crate::input::edit_key;

@@ -786,7 +786,7 @@ async fn mock_slash_command_via_autocomplete_toggles_details() {
     let mut m = MockApp::start_finished().await;
 
     // /details toggles tool expansion.
-    type_text(&mut m.app, "/deta");
+    type_text(&mut m.app, "/detai");
     assert!(m.app.ac.is_some(), "slash autocomplete");
     press(&mut m.app, KeyCode::Enter);
     assert!(m.app.details);
@@ -983,6 +983,8 @@ async fn dialogs_open_and_render() {
     let mut app = App::new(Client::new(out_tx), TEST_CWD.into(), InitPlan::default());
     pump(&mut app, &mut ev_rx, PUMP_CONNECT_MS).await;
     assert!(app.config.is_some());
+    app.create_session(None);
+    pump(&mut app, &mut ev_rx, PUMP_ROUNDTRIP_MS).await;
     press_with(&mut app, KeyCode::Char('x'), KeyModifiers::CONTROL);
     press(&mut app, KeyCode::Char('m'));
     assert!(app.dialog.is_some(), "models dialog");
@@ -1071,7 +1073,7 @@ fn retry_status_and_reconnect() {
     v.apply(SessionEvent::Info { info: i });
     let (_, s) = render(&mut app, 100, 30);
     assert!(
-        s.contains("Retrying in 12s (attempt 3): rate limited (429)"),
+        s.contains("Retrying in 12s (attempt 3)") && s.contains("rate limited (429)"),
         "{s}"
     );
     assert!(s.contains("retrying in 12s (#3)"));
@@ -3826,7 +3828,10 @@ fn split_view_no_default_focus_and_esc_unfocus() {
     app.sync_watch();
     let (term, s) = render(&mut app, 120, 30);
     assert!(app.watch.focus.is_none(), "no focus by default");
-    assert!(s.contains("click or tab to focus a session"), "{s}");
+    assert!(
+        s.contains("click or tab to focus · f filter · wheel scrolls"),
+        "{s}"
+    );
     // No tile border in the focus colour.
     let buf = term.backend().buffer();
     let r = tile_rect(&app, "ses_w1");

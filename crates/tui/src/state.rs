@@ -578,12 +578,16 @@ impl SessionView {
         let keep_start = vs.saturating_sub(EVICT_MARGIN);
         let keep_end = (ve + EVICT_MARGIN).min(len);
         let mut evicted_any = false;
-        for seq in 0..len {
+        let center = (vs + ve) / 2;
+        let mut outer_candidates: Vec<usize> = (0..len)
+            .filter(|&seq| {
+                (seq < keep_start || seq >= keep_end) && self.slots[seq].is_materialized()
+            })
+            .collect();
+        outer_candidates.sort_by_key(|&seq| std::cmp::Reverse(seq.abs_diff(center)));
+        for seq in outer_candidates {
             if resident <= MAX_RESIDENT_MESSAGES {
                 break;
-            }
-            if seq >= keep_start && seq < keep_end {
-                continue;
             }
             if self.evict_slot(seq) {
                 resident -= 1;

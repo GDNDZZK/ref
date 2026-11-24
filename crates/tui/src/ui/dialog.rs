@@ -1117,7 +1117,7 @@ pub enum BackendAction {
 const BACKEND_DIALOG_W: u16 = 74;
 const BACKEND_DIALOG_H: u16 = 15;
 const BACKEND_MIN_W: u16 = 24;
-const BACKEND_MIN_H: u16 = 12;
+const BACKEND_MIN_H: u16 = 14;
 const BACKEND_INNER_MIN_W: u16 = 10;
 const BACKEND_INNER_MIN_H: u16 = 10;
 
@@ -1310,15 +1310,15 @@ impl BackendDialog {
             .min(screen.height);
         let r = frame(buf, screen, w, h, "Backend connection", t);
         self.rect = r;
-        if r.width < BACKEND_INNER_MIN_W || r.height < BACKEND_INNER_MIN_H {
-            return;
-        }
         let inner = Rect::new(
             r.x + 2,
             r.y + 1,
             r.width.saturating_sub(4),
             r.height.saturating_sub(2),
         );
+        if inner.width < BACKEND_INNER_MIN_W || inner.height < BACKEND_INNER_MIN_H {
+            return;
+        }
         let bg = theme::PANEL;
         let fade = |c: Color| theme::blend(bg, c, t);
         let iw = inner.width as usize;
@@ -1486,7 +1486,7 @@ mod tests {
 
     #[test]
     fn backend_dialog_error_never_overlaps_token_buttons_or_hint_at_min_height() {
-        for height in [BACKEND_MIN_H, 13, 14, 20] {
+        for height in [BACKEND_MIN_H, 15, 16, 20] {
             let area = Rect::new(0, 0, 80, height);
             let mut buf = Buffer::empty(area);
             let mut dlg = BackendDialog::new(Some("http://bad"), None, "local".into());

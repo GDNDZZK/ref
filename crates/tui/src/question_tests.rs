@@ -577,6 +577,7 @@ fn a_question_is_shown_once_and_restored_from_a_snapshot() {
         pending_questions: vec![request(vec![loop_bound(), checks()])],
         queued: vec![],
     };
+    v.load_snapshot(snap.clone());
     assert_eq!(v.questions.len(), 1);
     render(&mut app, 100, 30);
     assert!(screen(&mut app).contains("? Questions"));
@@ -878,6 +879,8 @@ fn collapsed_question_tool_shows_answers_after_submit() {
         layout_metas: vec![],
     });
     v.chat.invalidate();
+    let s = screen(&mut app);
+    assert!(s.contains("Loop bound = (not answered)"), "{s}");
     assert!(s.contains("Checks = Clippy"), "{s}");
 }
 
