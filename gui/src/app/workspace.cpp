@@ -6,7 +6,6 @@
 #include <QJSEngine>
 #include <QLoggingCategory>
 #include <QScopedValueRollback>
-
 #include <QUrl>
 
 #include <algorithm>
@@ -529,9 +528,14 @@ QCoro::Task<> Workspace::openFirstSession()
 	}
 }
 
+ChatSession* Workspace::findSession(const QString& sessionId) const
+{
+	return sessionId.isEmpty() ? nullptr : m_chats.value(sessionId, nullptr);
+}
+
 ChatSession* Workspace::session(const QString& sessionId)
 {
-	return m_chats.value(sessionId, nullptr); // never creates one: a closed session must not come back
+	return findSession(sessionId); // never creates one: a closed session must not come back
 }
 
 ChatSession& Workspace::chat(const QString& sessionId)

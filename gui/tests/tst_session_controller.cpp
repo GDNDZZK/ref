@@ -172,6 +172,7 @@ private slots:
 	void loadOlderAnsweredAfterTheControllerIsGone();
 	void tracksActivelyWorkingAcrossStates();
 	void debouncedRangeFetchDiscardsStaleAndEvictsOnDetach();
+	void rangeFetchSurfacesErrorAndRetries();
 	void retryNowRequestsBackend();
 };
 
@@ -617,16 +618,22 @@ void TestSessionController::debouncedRangeFetchDiscardsStaleAndEvictsOnDetach()
 		f.answer(request);
 	};
 
+	QSignalSpy evictedSpy(&f.controller, &SessionController::messagesEvicted);
 	f.controller.setFollowing(false);
 	// Rapidly scrub twice inside 80ms debounce window: only one request fires.
+	// setVisibleSeqRange(10, 20) immediately evicts slots outside [0, 170], leaving 150..170 (21 messages).
 	f.controller.setVisibleSeqRange(10, 20);
+	QCOMPARE(evictedSpy.count(), 1);
+	QCOMPARE(f.controller.model().residentCount(), 21);
 	QTest::qWait(20);
 	f.controller.setVisibleSeqRange(30, 40);
 	QTRY_COMPARE(heldMessages.size(), 1);
 	const QJsonObject firstReq = heldMessages.takeFirst();
 
-	// Scrub again after first request is in-flight so generation increments and discards firstReq response.
+	// Scrub to [0, 5] after first request is in-flight: evicts 156..170 (leaving 150..155 = 6) and increments generation.
 	f.controller.setVisibleSeqRange(0, 5);
+	QCOMPARE(evictedSpy.count(), 2);
+	QCOMPARE(f.controller.model().residentCount(), 6);
 	QTRY_COMPARE(heldMessages.size(), 1);
 	const QJsonObject secondReq = heldMessages.takeFirst();
 
@@ -634,10 +641,10 @@ void TestSessionController::debouncedRangeFetchDiscardsStaleAndEvictsOnDetach()
 	QJsonArray stalePayload{messageJson(u"u_stale"_s, u"user"_s, u"stale"_s, true)};
 	f.fake.respond(firstReq, {{u"messages"_s, stalePayload}, {u"more_before"_s, false}, {u"start_seq"_s, static_cast<qint64>(firstStart)}, {u"end_seq"_s, static_cast<qint64>(firstStart + 1)}});
 	QTest::qWait(SettleMs);
-	// Stale response must be ignored: slot at firstStart stays placeholder (unless 0..100 overlapped, u_stale must not appear).
+	// Stale response must be ignored: u_stale must not appear.
 	QVERIFY(!render(f.controller.model()).contains(u"user:stale"_s));
 
-	// Respond to the current (second) request -> materializes!
+	// Respond to the current (second) request (0..100) -> materializes 100 messages (+ 6 in 150..155 = 106).
 	const quint64 secondStart = static_cast<quint64>(secondReq.value(u"start_seq"_s).toInteger());
 	const quint64 secondEnd = static_cast<quint64>(secondReq.value(u"end_seq"_s).toInteger());
 	QJsonArray validPayload;
@@ -647,10 +654,80 @@ void TestSessionController::debouncedRangeFetchDiscardsStaleAndEvictsOnDetach()
 	}
 	f.fake.respond(secondReq, {{u"messages"_s, validPayload}, {u"more_before"_s, false}, {u"start_seq"_s, static_cast<qint64>(secondStart)}, {u"end_seq"_s, static_cast<qint64>(secondEnd)}});
 	QTRY_VERIFY(render(f.controller.model()).contains(u"user:loaded_0"_s));
+	QCOMPARE(f.controller.model().residentCount(), 106);
 
-	// Detach evicts back to newest 100.
+	// Detach calls evictOldTail(100), evicting slots 0..149 (the 100 loaded messages) and emitting messagesEvicted.
 	QVERIFY(await(f.controller.detach()));
-	QCOMPARE(f.controller.model().residentCount(), ConversationModel::TailKeepMessages);
+	QCOMPARE(evictedSpy.count(), 3);
+	QCOMPARE(evictedSpy.last().at(0).toStringList().size(), 100);
+	QCOMPARE(f.controller.model().residentCount(), 6);
+	QCOMPARE(f.controller.model().index(0).data(ConversationModel::KindRole).toString(), u"skeleton"_s);
+}
+
+void TestSessionController::rangeFetchSurfacesErrorAndRetries()
+{
+	Fixture f;
+	constexpr int Total = 220;
+	constexpr int StartSeq = 120;
+	QJsonArray metas;
+	for(int i = 0; i < StartSeq; ++i)
+	{
+		metas.append(QJsonObject{{u"seq"_s, i},
+		                         {u"id"_s, u"u_%1"_s.arg(i)},
+		                         {u"role"_s, u"user"_s},
+		                         {u"source_kind"_s, u"human"_s},
+		                         {u"has_error"_s, false},
+		                         {u"parts"_s, QJsonArray{QJsonObject{{u"kind"_s, u"text"_s}, {u"chars"_s, 20}, {u"lines"_s, 1}}}}});
+	}
+	QJsonArray msgs;
+	for(int i = StartSeq; i < Total; ++i)
+	{
+		msgs.append(messageJson(u"u_%1"_s.arg(i), u"user"_s, u"msg"_s, true));
+	}
+	f.snapshot = {{u"snapshot"_s,
+	               QJsonObject{{u"info"_s, infoJson(u"ses_1"_s, u"idle"_s)},
+	                           {u"messages"_s, msgs},
+	                           {u"more_before"_s, true},
+	                           {u"total_messages"_s, Total},
+	                           {u"start_seq"_s, StartSeq},
+	                           {u"layout_metas"_s, metas}}}};
+
+	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
+	QSignalSpy errorSpy(&f.controller, &SessionController::errorReported);
+	QSignalSpy rangeErrSpy(&f.controller, &SessionController::rangeErrorChanged);
+
+	int rangeAttempts = 0;
+	f.fake.onRequest = [&](const QJsonObject& request) {
+		if(request.value(u"op"_s).toString() == u"messages"_s)
+		{
+			++rangeAttempts;
+			if(rangeAttempts == 1)
+			{
+				f.fake.fail(request, u"internal"_s, u"range read failed"_s);
+				return;
+			}
+			const quint64 s = static_cast<quint64>(request.value(u"start_seq"_s).toInteger());
+			const quint64 e = static_cast<quint64>(request.value(u"end_seq"_s).toInteger());
+			QJsonArray payload;
+			for(quint64 k = s; k < e; ++k)
+			{
+				payload.append(messageJson(u"u_%1"_s.arg(k), u"user"_s, u"retried_%1"_s.arg(k), true));
+			}
+			f.fake.respond(request, {{u"messages"_s, payload}, {u"more_before"_s, false}, {u"start_seq"_s, static_cast<qint64>(s)}, {u"end_seq"_s, static_cast<qint64>(e)}});
+			return;
+		}
+		f.answer(request);
+	};
+
+	f.controller.setFollowing(false);
+	f.controller.setVisibleSeqRange(0, 5);
+	QTRY_COMPARE(f.controller.rangeError(), u"range read failed"_s);
+	QCOMPARE(errorSpy.count(), 1);
+	QCOMPARE(rangeErrSpy.count(), 1);
+
+	f.controller.retryRangeFetch();
+	QTRY_VERIFY(f.controller.rangeError().isEmpty());
+	QTRY_VERIFY(render(f.controller.model()).contains(u"user:retried_0"_s));
 }
 
 void TestSessionController::retryNowRequestsBackend()

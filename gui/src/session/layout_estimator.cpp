@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 using namespace Qt::StringLiterals;
 
@@ -16,11 +17,21 @@ namespace refgui::session
 namespace
 {
 
-constexpr double DefaultColumnWidth = 760.0;
+constexpr double MinValidColumnWidth = 1.0;
+constexpr double MinProseCharsPerLine = 16.0;
+constexpr double MinUserCharsPerLine = 12.0;
+constexpr double MinTextLines = 1.0;
+constexpr double MinReasoningLines = 1.0;
+constexpr double MaxReasoningLines = 16.0;
+constexpr double MinToolLines = 2.0;
+constexpr double MaxTodoLines = 10.0;
+constexpr double MaxToolOutputLines = 16.0;
 constexpr double BlockSpacing = 14.0;
 constexpr double TurnGap = 18.0;
+constexpr double TurnDividerHeight = 1.0;
 constexpr double MetaLineHeight = 24.0;
 constexpr double SourceLabelHeight = 18.0;
+constexpr double SourceLabelGap = 4.0;
 constexpr double UserBubblePaddingY = 18.0;
 constexpr double UserBubblePaddingX = 28.0;
 constexpr double ProseLineHeight = 22.0;
@@ -29,6 +40,7 @@ constexpr double CharWidthUser = 8.5;
 constexpr double ReasoningHeaderHeight = 32.0;
 constexpr double ReasoningLineHeight = 20.0;
 constexpr double ReasoningBodyPad = 16.0;
+constexpr double ReasoningBodyPadX = 24.0;
 constexpr double CodeHeaderHeight = 36.0;
 constexpr double CodeLineHeight = 19.0;
 constexpr double TableOverhead = 48.0;
@@ -41,13 +53,18 @@ constexpr double MaxInlineImageWidth = 320.0;
 constexpr double MaxInlineImageHeight = 360.0;
 constexpr double ErrorCardHeight = 48.0;
 
-quint32 countNewlines(const QString& text)
+quint32 countLines(QStringView text)
 {
 	if(text.isEmpty())
 	{
 		return 0;
 	}
-	return static_cast<quint32>(text.count(u'\n')) + 1;
+	const QStringView trimmed = text.endsWith(u'\n') ? text.chopped(1) : text;
+	if(trimmed.isEmpty())
+	{
+		return 1;
+	}
+	return static_cast<quint32>(trimmed.count(u'\n')) + 1;
 }
 
 proto::PartLayoutMeta summarizeTextPart(const QString& text)
@@ -55,7 +72,7 @@ proto::PartLayoutMeta summarizeTextPart(const QString& text)
 	proto::PartLayoutMeta meta;
 	meta.kind = u"text"_s;
 	meta.chars = static_cast<quint32>(text.size());
-	meta.lines = countNewlines(text);
+	meta.lines = countLines(text);
 
 	FenceSplitter fence(false);
 	TableSplitter table;
@@ -76,7 +93,7 @@ proto::PartLayoutMeta summarizeTextPart(const QString& text)
 			{
 				if(inCode)
 				{
-					meta.codeLines += countNewlines(appended->text);
+					meta.codeLines += countLines(appended->text);
 				}
 				else
 				{
@@ -113,9 +130,9 @@ double estimatePartHeight(const proto::PartLayoutMeta& part, double width, bool 
 		{
 			return ReasoningHeaderHeight;
 		}
-		const double charsPerLine = std::max(16.0, std::floor((width - 24.0) / CharWidthProse));
+		const double charsPerLine = std::max(MinProseCharsPerLine, std::floor((width - ReasoningBodyPadX) / CharWidthProse));
 		const double wrapped = std::ceil(static_cast<double>(part.chars) / charsPerLine);
-		const double lineCount = std::clamp(std::max<double>(part.lines, wrapped), 1.0, 16.0);
+		const double lineCount = std::clamp(std::max<double>(part.lines, wrapped), MinReasoningLines, MaxReasoningLines);
 		return ReasoningHeaderHeight + lineCount * ReasoningLineHeight + ReasoningBodyPad;
 	}
 	if(part.kind == "tool"_L1)
@@ -125,7 +142,7 @@ double estimatePartHeight(const proto::PartLayoutMeta& part, double width, bool 
 		{
 			return ToolPillHeight;
 		}
-		const double rows = std::clamp(static_cast<double>(part.toolLines), 2.0, isTodo ? 10.0 : 16.0);
+		const double rows = std::clamp(static_cast<double>(part.toolLines), MinToolLines, isTodo ? MaxTodoLines : MaxToolOutputLines);
 		const double rowHeight = isTodo ? TodoRowHeight : ToolOutputLineHeight;
 		return ToolPillHeight + ToolBodyPadding + rows * rowHeight;
 	}
@@ -142,18 +159,13 @@ double estimatePartHeight(const proto::PartLayoutMeta& part, double width, bool 
 	}
 
 	// Text part
-	const double charsPerLine = std::max(16.0, std::floor(width / CharWidthProse));
+	const double charsPerLine = std::max(MinProseCharsPerLine, std::floor(width / CharWidthProse));
 	const double nonCodeChars = static_cast<double>(part.chars);
 	const double wrapped = std::ceil(nonCodeChars / charsPerLine);
-	const double textLines = std::max<double>(1.0, std::max<double>(part.lines, wrapped));
+	const double textLines = std::max<double>(MinTextLines, std::max<double>(part.lines, wrapped));
 	const double codeHeight = static_cast<double>(part.codeBlocks) * CodeHeaderHeight + static_cast<double>(part.codeLines) * CodeLineHeight;
 	const double tableHeight = static_cast<double>(part.tables) * TableOverhead;
 	return std::max(ProseLineHeight, textLines * ProseLineHeight + codeHeight + tableHeight);
-}
-
-bool isTurnSourceKind(const QString& sourceKind)
-{
-	return sourceKind.isEmpty() || sourceKind == "human"_L1 || sourceKind == "peer"_L1 || sourceKind == "spawn"_L1;
 }
 
 } // namespace
@@ -178,7 +190,7 @@ proto::MessageLayoutMeta LayoutEstimator::computeMeta(quint64 seq, const proto::
 			proto::PartLayoutMeta p;
 			p.kind = u"reasoning"_s;
 			p.chars = static_cast<quint32>(reasoning->text.size());
-			p.lines = std::max<quint32>(1, countNewlines(reasoning->text));
+			p.lines = std::max<quint32>(1, countLines(reasoning->text));
 			meta.parts.append(std::move(p));
 		}
 		else if(std::holds_alternative<proto::ImagePart>(part))
@@ -194,7 +206,7 @@ proto::MessageLayoutMeta LayoutEstimator::computeMeta(quint64 seq, const proto::
 			p.tool = tool->name;
 			if(tool->output)
 			{
-				p.toolLines = static_cast<quint16>(std::min<quint32>(65535, countNewlines(*tool->output)));
+				p.toolLines = static_cast<quint16>(std::min<quint32>(std::numeric_limits<quint16>::max(), countLines(*tool->output)));
 			}
 			meta.parts.append(std::move(p));
 		}
@@ -207,19 +219,19 @@ double LayoutEstimator::estimateMessageHeight(const proto::MessageLayoutMeta& me
                                             bool thinkingExpanded,
                                             bool detailsExpanded)
 {
-	const double width = columnWidth > 1.0 ? std::max(MinColumnWidth, columnWidth) : DefaultColumnWidth;
+	const double width = columnWidth > MinValidColumnWidth ? std::max(MinColumnWidth, columnWidth) : DefaultColumnWidth;
 	double total = 0.0;
 	int blocks = 0;
 
 	if(meta.role == proto::Role::User)
 	{
-		if(meta.seq > 0 && isTurnSourceKind(meta.sourceKind))
+		if(meta.seq > 0 && isTurnSourceKindName(meta.sourceKind))
 		{
-			total += TurnGap + 1.0;
+			total += TurnGap + TurnDividerHeight;
 		}
 		if(!meta.sourceKind.isEmpty() && meta.sourceKind != "human"_L1)
 		{
-			total += SourceLabelHeight + 4.0;
+			total += SourceLabelHeight + SourceLabelGap;
 		}
 		quint32 textChars = 0;
 		quint32 textLines = 0;
@@ -236,8 +248,8 @@ double LayoutEstimator::estimateMessageHeight(const proto::MessageLayoutMeta& me
 				textLines += part.lines;
 			}
 		}
-		const double charsPerLine = std::max(12.0, std::floor((width - UserBubblePaddingX) / CharWidthUser));
-		const double lines = std::max<double>(1.0, std::max<double>(textLines, std::ceil(static_cast<double>(textChars) / charsPerLine)));
+		const double charsPerLine = std::max(MinUserCharsPerLine, std::floor((width - UserBubblePaddingX) / CharWidthUser));
+		const double lines = std::max<double>(MinTextLines, std::max<double>(textLines, std::ceil(static_cast<double>(textChars) / charsPerLine)));
 		total += UserBubblePaddingY + lines * ProseLineHeight;
 		++blocks;
 		if(hasImage)

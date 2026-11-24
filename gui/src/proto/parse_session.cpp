@@ -165,6 +165,7 @@ StashMember readStashMember(const Fields& fields)
 }
 
 } // namespace
+
 ImageData readImageData(const Fields& fields)
 {
 	ImageData image{.mime = fields.string("mime"_L1), .data = fields.string("data"_L1), .id = fields.optionalString("id"_L1)};

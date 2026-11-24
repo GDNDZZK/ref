@@ -69,6 +69,7 @@ private slots:
 	void attachesAndClearsPermissionPreview();
 	void splitsMarkdownTablesAndStreamsRows();
 	void virtualizedPlaceholdersMaterializeAndEvict();
+	void evictOutsideCapsResidentInsideKeepWindow();
 };
 
 void TestConversationModel::splitsAssistantTextIntoBlocks()
@@ -447,6 +448,9 @@ void TestConversationModel::everyMessageEndsWithAMetaLine()
 	QCOMPARE(model.index(replyMeta).data(ConversationModel::VariantRole).toString(), u"high"_s);
 	QCOMPARE(model.index(replyMeta).data(ConversationModel::TokensInRole).toULongLong(), 111ULL);
 	QCOMPARE(model.index(replyMeta).data(ConversationModel::TokensOutRole).toULongLong(), 5ULL);
+	QCOMPARE(model.index(0).data(ConversationModel::TimeRole).toLongLong(), StartTime);
+	QCOMPARE(model.index(userMeta).data(ConversationModel::TimeRole).toLongLong(), StartTime);
+	QCOMPARE(model.index(replyMeta).data(ConversationModel::TimeRole).toLongLong(), StartTime);
 	QCOMPARE(model.index(replyMeta).data(ConversationModel::TimeEndRole).toLongLong(), 2LL);
 
 	refgui::proto::Message stopped = assistant(u"a2"_s, {}, false);
@@ -753,7 +757,7 @@ void TestConversationModel::virtualizedPlaceholdersMaterializeAndEvict()
 	const double hWide = model.index(0).data(ConversationModel::EstimatedHeightRole).toDouble();
 	QSignalSpy heightChanged(&model, &QAbstractItemModel::dataChanged);
 	model.setColumnWidth(260.0);
-	QVERIFY(!heightChanged.isEmpty());
+	QCOMPARE(heightChanged.count(), 1);
 	const double hNarrow = model.index(0).data(ConversationModel::EstimatedHeightRole).toDouble();
 	QVERIFY(hNarrow >= hWide);
 
@@ -786,6 +790,50 @@ void TestConversationModel::virtualizedPlaceholdersMaterializeAndEvict()
 	model.evictOldTail(ConversationModel::TailKeepMessages);
 	QCOMPARE(model.residentCount(), ConversationModel::TailKeepMessages);
 	QCOMPARE(model.index(0).data(ConversationModel::KindRole).toString(), u"skeleton"_s);
+}
+
+void TestConversationModel::evictOutsideCapsResidentInsideKeepWindow()
+{
+	ConversationModel model;
+	QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
+
+	constexpr int Total = 420;
+	QList<refgui::proto::MessageLayoutMeta> metas;
+	metas.reserve(Total);
+	for(int i = 0; i < Total; ++i)
+	{
+		metas.append(refgui::proto::MessageLayoutMeta{
+			.seq = static_cast<quint64>(i),
+			.id = u"m_%1"_s.arg(i),
+			.role = (i % 2 == 0) ? refgui::proto::Role::User : refgui::proto::Role::Assistant,
+			.sourceKind = u"human"_s,
+			.parts = {refgui::proto::PartLayoutMeta{.kind = u"text"_s, .chars = 80, .lines = 2}},
+		});
+	}
+	model.reset({}, Total, Total, metas);
+	QCOMPARE(model.residentCount(), 0);
+
+	// Materialize 311 messages inside [200 - 150, 210 + 150] = [50, 360].
+	constexpr int KeepStart = 50;
+	constexpr int KeepEnd = 360;
+	QList<refgui::proto::Message> windowMsgs;
+	windowMsgs.reserve(KeepEnd - KeepStart + 1);
+	for(int i = KeepStart; i <= KeepEnd; ++i)
+	{
+		const QString id = u"m_%1"_s.arg(i);
+		windowMsgs.append(i % 2 == 0 ? user(id, u"hello"_s) : assistant(id, {text(u"reply"_s)}));
+	}
+	model.materializeRange(KeepStart, windowMsgs);
+	QCOMPARE(model.residentCount(), 311);
+
+	QSignalSpy evictedSpy(&model, &ConversationModel::messagesEvicted);
+	const QStringList evicted = model.evictOutside(200, 210);
+	QCOMPARE(evicted.size(), 11);
+	QCOMPARE(model.residentCount(), ConversationModel::MaxResidentMessages);
+	QCOMPARE(evictedSpy.count(), 1);
+	QCOMPARE(model.index(model.firstRowForSeq(50)).data(ConversationModel::KindRole).toString(), u"skeleton"_s);
+	QCOMPARE(model.index(model.firstRowForSeq(360)).data(ConversationModel::KindRole).toString(), u"skeleton"_s);
+	QVERIFY(model.index(model.firstRowForSeq(205)).data(ConversationModel::KindRole).toString() != u"skeleton"_s);
 }
 
 QTEST_GUILESS_MAIN(TestConversationModel)

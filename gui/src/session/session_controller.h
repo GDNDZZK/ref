@@ -29,6 +29,7 @@ class SessionController : public QObject
 	Q_PROPERTY(bool activelyWorking READ isActivelyWorking NOTIFY activelyWorkingChanged)
 	Q_PROPERTY(bool moreBefore READ hasMoreBefore NOTIFY moreBeforeChanged)
 	Q_PROPERTY(bool loadingOlder READ isLoadingOlder NOTIFY loadingOlderChanged)
+	Q_PROPERTY(QString rangeError READ rangeError NOTIFY rangeErrorChanged)
 
 public:
 	template<typename T>
@@ -83,7 +84,9 @@ public:
 	// Adds the page of messages before the oldest one. Does nothing when there are none or a page is on its way.
 	QCoro::Task<Result<void>> loadOlder();
 
+	const QString& rangeError() const { return m_rangeError; }
 	void setVisibleSeqRange(quint64 startSeq, quint64 endSeq);
+	void retryRangeFetch();
 	void setFollowing(bool following);
 	QCoro::Task<Result<proto::PromptResult>> send(QString text, QList<proto::ImageData> images = {});
 	QCoro::Task<Result<void>> abort();
@@ -129,6 +132,7 @@ signals:
 	void aboutToMaterialize();
 	void materialized();
 	void messagesEvicted(const QStringList& messageIds);
+	void rangeErrorChanged();
 	// The backend reported a problem with the session (an Error event).
 	void errorReported(const QString& text);
 	// Attaching again after a reconnect failed, e.g. because the session is gone.
@@ -149,6 +153,7 @@ private:
 	void setQuestions(QList<proto::QuestionRequest> questions);
 	void setMoreBefore(bool moreBefore);
 	void setLoadingOlder(bool loading);
+	void setRangeError(const QString& error);
 
 	client::Backend& m_backend;
 	ConversationModel m_model;
@@ -161,6 +166,7 @@ private:
 	QList<proto::QuestionRequest> m_questions;
 	bool m_moreBefore = false;
 	bool m_loadingOlder = false;
+	QString m_rangeError;
 	bool m_following = true;
 	QTimer m_rangeFetchTimer;
 	quint64 m_pendingFetchStart = 0;

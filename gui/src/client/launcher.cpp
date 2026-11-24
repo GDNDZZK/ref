@@ -213,8 +213,11 @@ QCoro::Task<std::expected<Endpoint, QString>> connectTarget(Target target,
 {
 	if(const auto* explicitTarget = std::get_if<Explicit>(&target))
 	{
+		if(stop.stopped())
+		{
+			co_return stoppedResult();
+		}
 		const ConnectAttempt attempt = co_await tryConnect(explicitTarget->endpoint, ExplicitConnectTimeout);
-		if(attempt)
 		{
 			co_return explicitTarget->endpoint;
 		}

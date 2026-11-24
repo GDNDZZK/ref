@@ -333,6 +333,7 @@ ModalDialog {
 
 		TextEdit {
 			textFormat: TextEdit.PlainText
+			x: Theme.dialogPadding
 			width: parent.width - 2 * Theme.dialogPadding
 			topPadding: 14
 			readOnly: true

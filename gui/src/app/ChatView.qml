@@ -42,6 +42,10 @@ ListView {
 	property bool moreBefore: false // the backend has earlier messages
 	property bool loadingOlder: false
 	property string olderError
+	readonly property string rangeError: session ? (session.rangeError ?? "") : ""
+	readonly property int columnWidthDebounceMs: 16
+	property int lastReportedStart: -1
+	property int lastReportedEnd: -1
 	readonly property bool prepending: loadingOlder // rows added now are earlier history
 	property int permissionCount: 0 // tool calls waiting for the user's answer
 
@@ -268,15 +272,25 @@ ListView {
 		materializing = true
 	}
 
+	function retryRangeFetch() {
+		if (session && typeof session.retryRangeFetch === "function")
+			session.retryRangeFetch()
+	}
+
 	function finishMaterialize() {
-		if (!following && anchorSeq >= 0 && session) {
-			const row = session.firstRowForSeq(anchorSeq)
+		const targetSeq = anchorSeq
+		const targetOffset = anchorOffset
+		anchorSeq = -1
+		if (!following && targetSeq >= 0 && session) {
+			const row = session.firstRowForSeq(targetSeq)
 			if (row >= 0) {
+				forceLayout()
 				positionViewAtIndex(row, ListView.Beginning)
-				contentY = Math.max(minContentY, Math.min(maxContentY, contentY + anchorOffset))
+				const item = itemAtIndex(row)
+				const baseY = item ? item.y : contentY
+				contentY = Math.max(minContentY, Math.min(maxContentY, baseY + targetOffset))
 			}
 		}
-		anchorSeq = -1
 		Qt.callLater(() => { materializing = false })
 	}
 
@@ -290,8 +304,11 @@ ListView {
 			return
 		const s = session.seqForRow(topIdx)
 		const e = session.seqForRow(endIdx)
-		if (s >= 0 && e >= s)
+		if (s >= 0 && e >= s && (s !== lastReportedStart || e !== lastReportedEnd)) {
+			lastReportedStart = s
+			lastReportedEnd = e
 			session.setVisibleSeqRange(s, e)
+		}
 	}
 	clip: true
 	spacing: Theme.blockSpacing
@@ -313,8 +330,18 @@ ListView {
 	// The end stays on the bottom edge when the view changes height (a tile's input box comes or goes);
 	// a non-following view clamps to the new end when growing so no blank gap appears below the messages.
 	onSessionIdChanged: stopScrollMotion()
-	onColumnWidthChanged: if (session) session.setColumnWidth(columnWidth)
+	Timer {
+		id: columnWidthTimer
+		interval: view.columnWidthDebounceMs
+		repeat: false
+		onTriggered: if (view.session) view.session.setColumnWidth(view.columnWidth)
+	}
+
+	onColumnWidthChanged: if (session) columnWidthTimer.restart()
 	onSessionChanged: {
+		columnWidthTimer.stop()
+		lastReportedStart = -1
+		lastReportedEnd = -1
 		if (session) {
 			session.setColumnWidth(columnWidth)
 			session.setFollowing(following)
@@ -323,6 +350,8 @@ ListView {
 	Connections {
 		target: view.model ? view.model : null
 		function onModelReset() {
+			view.lastReportedStart = -1
+			view.lastReportedEnd = -1
 			view.stopScrollMotion()
 		}
 	}

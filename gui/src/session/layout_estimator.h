@@ -11,6 +11,7 @@ namespace refgui::session
 class LayoutEstimator
 {
 public:
+	static constexpr double DefaultColumnWidth = 760.0;
 	static constexpr double MinColumnWidth = 180.0;
 	static constexpr double MinMessageHeight = 40.0;
 

@@ -128,6 +128,8 @@ Item {
 	// sessions, is the window's (Main).
 	StatusPill {
 		text: Workspace.connectionText === "" ? pane.session.statusText : ""
+		actionText: Workspace.connectionText === "" && pane.session.rangeError !== "" ? qsTr("Retry") : ""
+		onActionClicked: pane.session.retryRangeFetch()
 	}
 
 	Text {

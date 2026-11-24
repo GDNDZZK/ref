@@ -55,13 +55,14 @@ SessionController::SessionController(client::Backend& backend, QObject* parent)
 	});
 	connect(&m_feed, &ConversationFeed::pendingChanged, this, &SessionController::turnInProgressChanged);
 	connect(&m_feed, &ConversationFeed::pendingChanged, this, &SessionController::activelyWorkingChanged);
-\tconnect(\u0026backend, \u0026client::Backend::stateChanged, this, [this] {
-\t\tif(!isConnected())
-\t\t{
-\t\t\tcancelPendingRangeFetch();
-\t\t}
-\t\temit connectionChanged();
-\t});
+	connect(&backend, &client::Backend::stateChanged, this, [this] {
+		if(!isConnected())
+		{
+			cancelPendingRangeFetch();
+		}
+		emit connectionChanged();
+	});
+	connect(&m_model, &ConversationModel::messagesEvicted, this, &SessionController::messagesEvicted);
 	m_rangeFetchTimer.setSingleShot(true);
 	m_rangeFetchTimer.setInterval(RangeFetchDebounceMs);
 	connect(&m_rangeFetchTimer, &QTimer::timeout, this, &SessionController::onRangeFetchTimeout);
@@ -131,9 +132,11 @@ QCoro::Task<SessionController::Result<void>> SessionController::detach()
 	Q_ASSERT(m_attached);
 	m_attached = false; // also when the request fails: a lost connection detaches anyway
 	cancelPendingRangeFetch();
+	setRangeError({});
 	m_model.evictOldTail(ConversationModel::TailKeepMessages);
 	co_return co_await m_backend.client().detach(m_sessionId);
 }
+
 QCoro::Task<SessionController::Result<void>> SessionController::background()
 {
 	Q_ASSERT(m_attached);
@@ -176,6 +179,7 @@ void SessionController::cancelPendingRangeFetch()
 {
 	m_rangeFetchTimer.stop();
 	++m_rangeFetchGen;
+	setRangeError({});
 }
 
 void SessionController::setVisibleSeqRange(quint64 startSeq, quint64 endSeq)
@@ -211,12 +215,24 @@ void SessionController::setFollowing(bool following)
 	}
 }
 
+void SessionController::retryRangeFetch()
+{
+	if(!m_attached || !isConnected() || m_pendingFetchEnd <= m_pendingFetchStart)
+	{
+		return;
+	}
+	setRangeError({});
+	const quint64 generation = ++m_rangeFetchGen;
+	fetchRange(m_pendingFetchStart, m_pendingFetchEnd, generation);
+}
+
 void SessionController::onRangeFetchTimeout()
 {
 	if(!m_attached || !isConnected() || m_pendingFetchEnd <= m_pendingFetchStart)
 	{
 		return;
 	}
+	setRangeError({});
 	const quint64 generation = ++m_rangeFetchGen;
 	fetchRange(m_pendingFetchStart, m_pendingFetchEnd, generation);
 }
@@ -232,8 +248,14 @@ QCoro::Task<> SessionController::fetchRange(quint64 startSeq, quint64 endSeq, qu
 	}
 	if(!page)
 	{
+		setRangeError(page.error().message);
+		if(!client::isConnectionLost(page.error()))
+		{
+			emit errorReported(m_rangeError);
+		}
 		co_return;
 	}
+	setRangeError({});
 	emit aboutToMaterialize();
 	m_model.materializeRange(page->startSeq, page->messages);
 	emit materialized();
@@ -261,6 +283,7 @@ QCoro::Task<SessionController::Result<proto::RetryNowResult>> SessionController:
 	Q_ASSERT(hasSession());
 	co_return co_await m_backend.client().retryNow(m_sessionId);
 }
+
 QCoro::Task<SessionController::Result<proto::RemovedPrompt>> SessionController::undo(std::optional<QString> messageId)
 {
 	Q_ASSERT(hasSession());
@@ -361,6 +384,7 @@ QCoro::Task<> SessionController::reattach()
 void SessionController::adopt(const proto::SessionSnapshot& snapshot)
 {
 	cancelPendingRangeFetch();
+	setRangeError({});
 	m_feed.reset(snapshot.messages, snapshot.totalMessages, snapshot.startSeq, snapshot.layoutMetas);
 	m_model.setPendingPermissions(snapshot.pendingPermissions);
 	setQueued(snapshot.queued);
@@ -468,6 +492,15 @@ void SessionController::setLoadingOlder(bool loading)
 	{
 		m_loadingOlder = loading;
 		emit loadingOlderChanged();
+	}
+}
+
+void SessionController::setRangeError(const QString& error)
+{
+	if(error != m_rangeError)
+	{
+		m_rangeError = error;
+		emit rangeErrorChanged();
 	}
 }
 

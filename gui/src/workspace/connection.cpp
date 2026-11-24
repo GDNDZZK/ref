@@ -38,61 +38,48 @@ Connection::Connection(client::Backend::Source source, QString cwd, QObject* par
 
 void Connection::start()
 {
-\tm_backend.start();
+	m_backend.start();
 }
 
 void Connection::switchSource(client::Backend::Source source)
 {
-\tm_local = runsHere(source);
-\tm_backend.switchSource(std::move(source));
-\temit sourceChanged();
+	m_local = runsHere(source);
+	m_backend.switchSource(std::move(source));
 }
 
 void Connection::shutdown()
 {
-\tm_backend.shutdown();
+	m_backend.shutdown();
 }
 
 bool Connection::isProtocolOutdated() const
 {
-\treturn isConnected() \u0026\u0026 protocol() \u003c proto::ProtocolVersion;
+	return isConnected() && protocol() < proto::ProtocolVersion;
 }
 
 QString Connection::backendUrl() const
 {
-\tif(const auto* remote = std::get_if\u003cclient::Backend::Mode::Remote\u003e(\u0026m_backend.source()))
-\t{
-\t\treturn remote-\u003eendpoint.url.toString();
-\t}
-\treturn {};
+	if(const auto* remote = std::get_if<client::Backend::Mode::Remote>(&m_backend.source()))
+	{
+		return remote->endpoint.url.toString();
+	}
+	return {};
 }
 
 QString Connection::backendToken() const
 {
-\tif(const auto* remote = std::get_if\u003cclient::Backend::Mode::Remote\u003e(\u0026m_backend.source()))
-\t{
-\t\treturn remote-\u003eendpoint.token;
-\t}
-\treturn {};
+	if(const auto* remote = std::get_if<client::Backend::Mode::Remote>(&m_backend.source()))
+	{
+		return remote->endpoint.token;
+	}
+	return {};
 }
 
-QString Connection::backendMode() const
+QCoro::Task<client::Result<void>> Connection::stopServer()
 {
-\tif(std::holds_alternative\u003cclient::Backend::Mode::Remote\u003e(m_backend.source()))
-\t{
-\t\treturn u\"remote\"_s;
-\t}
-\tif(std::holds_alternative\u003cclient::Backend::Mode::Mock\u003e(m_backend.source()))
-\t{
-\t\treturn u\"mock\"_s;
-\t}
-\treturn u\"auto\"_s;
+	return m_backend.client().shutdown();
 }
 
-QCoro::Task\u003cclient::Result\u003cvoid\u003e\u003e Connection::stopServer()
-{
-\treturn m_backend.client().shutdown();
-}
 void Connection::onFrame(const proto::ServerFrame& frame)
 {
 	if(const auto* toast = std::get_if<proto::ToastFrame>(&frame))

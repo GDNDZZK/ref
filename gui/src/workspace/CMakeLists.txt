@@ -18,8 +18,8 @@ qt_add_library(refgui_workspace STATIC
 	settings.h
 	state_paths.cpp
 	state_paths.h
-\tstash_controller.cpp
-\tstash_controller.h
+	stash_controller.cpp
+	stash_controller.h
 	toast_text.cpp
 	toast_text.h
 )

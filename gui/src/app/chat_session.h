@@ -61,6 +61,7 @@ class ChatSession : public QObject
 	Q_PROPERTY(bool moreBefore READ hasMoreBefore NOTIFY moreBeforeChanged)
 	Q_PROPERTY(bool loadingOlder READ isLoadingOlder NOTIFY loadingOlderChanged)
 	Q_PROPERTY(QString olderError READ olderError NOTIFY olderErrorChanged) // why the last page did not load
+	Q_PROPERTY(QString rangeError READ rangeError NOTIFY rangeErrorChanged) // why the last range fetch did not load
 	Q_PROPERTY(bool thinkingExpanded READ thinkingExpanded NOTIFY expansionChanged)
 	Q_PROPERTY(bool detailsExpanded READ detailsExpanded NOTIFY expansionChanged)
 	// The newest tool call waits out its start delay; Esc in the input box cancels it.
@@ -124,6 +125,7 @@ public:
 	bool hasMoreBefore() const { return m_controller.hasMoreBefore(); }
 	bool isLoadingOlder() const { return m_controller.isLoadingOlder(); }
 	const QString& olderError() const { return m_olderError; }
+	const QString& rangeError() const { return m_controller.rangeError(); }
 	bool thinkingExpanded() const;
 	bool detailsExpanded() const;
 	bool lastToolDelayed() const;
@@ -164,6 +166,7 @@ public:
 	Q_INVOKABLE void toggleDetails();
 	Q_INVOKABLE void setColumnWidth(double width);
 	Q_INVOKABLE void setVisibleSeqRange(int startSeq, int endSeq);
+	Q_INVOKABLE void retryRangeFetch();
 	Q_INVOKABLE void setFollowing(bool following);
 	Q_INVOKABLE int firstRowForSeq(int seq) const;
 	Q_INVOKABLE int seqForRow(int row) const;
@@ -178,6 +181,7 @@ signals:
 	void moreBeforeChanged();
 	void loadingOlderChanged();
 	void olderErrorChanged();
+	void rangeErrorChanged();
 	void expansionChanged();
 	void toolsChanged();
 	// answerKeysActive may have changed.
@@ -221,6 +225,7 @@ private:
 	refgui::composer::ComposerModel m_composer;
 	QString m_failure; // the last thing that went wrong, until the next action
 	QString m_olderError;
+	QString m_lastRangeError;
 	QSet<QString> m_repliedCalls; // permission requests that have an answer on its way
 	refgui::session::QuestionPrompt m_question;
 	QString m_guardedTarget; // what the guard timer runs for: the question's or the oldest request's call id, tagged

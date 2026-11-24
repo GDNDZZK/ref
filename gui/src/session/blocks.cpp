@@ -247,6 +247,17 @@ QString sourceName(std::optional<proto::MessageSource::Kind> kind)
 	Q_UNREACHABLE_RETURN(QString());
 }
 
+bool isTurnSourceKind(std::optional<proto::MessageSource::Kind> kind)
+{
+	using Kind = proto::MessageSource::Kind;
+	return kind == Kind::Human || kind == Kind::Peer || kind == Kind::Spawn;
+}
+
+bool isTurnSourceKindName(QStringView name)
+{
+	return name.isEmpty() || isTurnSourceKind(sourceKindFromName(name));
+}
+
 std::optional<proto::MessageSource::Kind> sourceKindFromName(QStringView name)
 {
 	using Kind = proto::MessageSource::Kind;
