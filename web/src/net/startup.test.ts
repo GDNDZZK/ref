@@ -37,4 +37,18 @@ describe('resolveStartup', () => {
     expect(attempt).toThrow(StartupError)
     expect(attempt).toThrow(expect.objectContaining({ messageKey: 'connection.noDirectory' }))
   })
+
+  it('supports ?server= and ?token= as Direct WS overrides and rejects invalid ?server=', () => {
+    expect(
+      resolveStartup(environment({ search: '?server=wss%3A%2F%2Fhost%3A8080%2Fws&token=abc&dir=%2Fproj' }), URL),
+    ).toEqual({
+      url: 'wss://host:8080/ws',
+      cwd: '/proj',
+      sessionId: undefined,
+      split: false,
+      direct: true,
+      token: 'abc',
+    })
+    expect(() => resolveStartup(environment({ search: '?server=http://bad' }), URL)).toThrow(StartupError)
+  })
 })

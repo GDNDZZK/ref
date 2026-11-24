@@ -4,6 +4,7 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { KIND_TEXT, Opener, Sealer, authMac, channelKeys, fromHex, utf8 } from '../net/channelCrypto.ts'
+import { BACKEND_STORAGE_KEY } from '../net/backend.ts'
 import { STORAGE_KEY, keys } from '../net/keystore.ts'
 import { PROTOCOL_VERSION } from '../proto/generated'
 import fixture from '../../../crates/web/fixtures/channel.json'
@@ -118,6 +119,35 @@ describe('connection store through ref-web', () => {
     const connection = useConnectionStore()
     connection.start('ws://ref-web/ws')
     expect(connection.keyRequired).toBe(false)
+    await until(() => connection.state === 'open')
+  })
+
+  it('hot-switches backend temporarily, saves default, and restores local default', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ salt: fixture.salt, root: fixture.root }))
+    const connection = useConnectionStore()
+    const beforeSwitch = vi.fn()
+    connection.onBeforeSwitch(beforeSwitch)
+    connection.start('ws://ref-web/ws')
+    await until(() => connection.state === 'open')
+
+    connection.switchBackend({ mode: 'temporary', url: 'ws://temp-host:9000/ws', token: 'secret-99' })
+    expect(beforeSwitch).toHaveBeenCalledTimes(1)
+    expect(connection.backendSource).toBe('temporary')
+    expect(connection.maskedBackendToken).toBe('••••t-99')
+    expect(localStorage.getItem(BACKEND_STORAGE_KEY)).toBeNull()
+    await until(() => connection.state === 'open')
+
+    connection.switchBackend({ mode: 'saveDefault', url: 'wss://saved-host:9443/ws', token: 'tok-saved' })
+    expect(connection.backendSource).toBe('saved')
+    expect(JSON.parse(localStorage.getItem(BACKEND_STORAGE_KEY)!)).toEqual({
+      url: 'wss://saved-host:9443/ws',
+      token: 'tok-saved',
+    })
+    await until(() => connection.state === 'open')
+
+    connection.switchBackend({ mode: 'restoreDefault' })
+    expect(connection.backendSource).toBe('auto')
+    expect(localStorage.getItem(BACKEND_STORAGE_KEY)).toBeNull()
     await until(() => connection.state === 'open')
   })
 })

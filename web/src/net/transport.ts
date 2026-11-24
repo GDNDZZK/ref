@@ -5,8 +5,9 @@ export interface ServerInfo {
   version: string
   cwd: string
   mock: boolean
+  cli_server?: boolean
+  channel_control?: boolean
 }
-
 export interface TransportHandlers {
   opened(): void
   message(text: string): void
