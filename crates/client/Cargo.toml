@@ -13,3 +13,4 @@ serde_json.workspace = true
 thiserror.workspace = true
 rand.workspace = true
 tracing.workspace = true
+futures-util.workspace = true

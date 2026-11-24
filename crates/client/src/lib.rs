@@ -9,6 +9,7 @@
 
 mod instance;
 mod mock;
+mod rpc;
 mod spawn;
 
 use std::time::Duration;
@@ -16,7 +17,8 @@ use std::time::Duration;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 
 pub use mock::MockBackend;
-
+pub use ref_proto::PROTOCOL_VERSION;
+pub use rpc::{ClientError, ClientEvent, MessagesPage, RefClient};
 /// Timeout for connecting to an instance found through its instance file.
 const DISCOVERED_CONNECT_TIMEOUT: Duration = Duration::from_millis(1500);
 /// Timeout for connecting to an explicit `--url`.
@@ -35,7 +37,7 @@ pub type Ws =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 /// Where to connect.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Target {
     /// Discover a running backend or spawn one.
     Auto,
@@ -43,13 +45,49 @@ pub enum Target {
     Explicit { url: String, token: Option<String> },
 }
 
+/// High-level backend target, including a private `ref-server --mock` child.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BackendTarget {
+    /// Discover a running local backend or spawn one on demand.
+    Auto,
+    /// Explicit `ws://` / `wss://` URL (+ optional token); never scans instances or spawns.
+    Explicit { url: String, token: Option<String> },
+    /// Spawn a private `ref-server --mock` child process.
+    Mock,
+}
+
+impl BackendTarget {
+    pub fn is_explicit(&self) -> bool {
+        matches!(self, BackendTarget::Explicit { .. })
+    }
+
+    pub fn is_local(&self) -> bool {
+        !self.is_explicit()
+    }
+}
+
+impl From<Target> for BackendTarget {
+    fn from(target: Target) -> Self {
+        match target {
+            Target::Auto => BackendTarget::Auto,
+            Target::Explicit { url, token } => BackendTarget::Explicit { url, token },
+        }
+    }
+}
+
 /// A resolved backend address.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Endpoint {
     pub url: String,
     pub token: Option<String>,
 }
 
+/// Result of [`discover_or_connect`], carrying an optional private mock backend handle.
+pub struct ConnectedBackend {
+    pub ws: Ws,
+    pub endpoint: Endpoint,
+    pub mock: Option<MockBackend>,
+}
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectError {
     #[error("no free port")]
@@ -69,8 +107,9 @@ pub enum ConnectError {
     MockStartFailed(String),
     #[error("{0}")]
     StateDir(String),
+    #[error("invalid backend URL {url:?}: {reason}")]
+    InvalidUrl { url: String, reason: String },
 }
-
 impl Endpoint {
     /// The URL with the token as query parameter (how `ref-server` authenticates the upgrade).
     fn url_with_token(&self) -> String {
@@ -127,6 +166,44 @@ pub async fn connect(endpoint: &Endpoint, timeout: Duration) -> Result<Ws, Conne
     })
 }
 
+/// Validates that `url` is a well-formed `ws://` or `wss://` WebSocket URL with a host.
+pub fn validate_explicit_url(url: &str) -> Result<(), ConnectError> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Err(ConnectError::InvalidUrl {
+            url: url.to_string(),
+            reason: "URL is empty".into(),
+        });
+    }
+    let rest = if trimmed.len() >= 5 && trimmed[..5].eq_ignore_ascii_case("ws://") {
+        &trimmed[5..]
+    } else if trimmed.len() >= 6 && trimmed[..6].eq_ignore_ascii_case("wss://") {
+        &trimmed[6..]
+    } else {
+        return Err(ConnectError::InvalidUrl {
+            url: url.to_string(),
+            reason: "URL must start with ws:// or wss://".into(),
+        });
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host_part = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    let has_host = if let Some(after_open) = host_part.strip_prefix('[') {
+        after_open
+            .split_once(']')
+            .is_some_and(|(inside, _)| !inside.is_empty())
+    } else {
+        let host = host_part.split(':').next().unwrap_or("");
+        !host.is_empty()
+    };
+    if !has_host {
+        return Err(ConnectError::InvalidUrl {
+            url: url.to_string(),
+            reason: "URL is missing a host".into(),
+        });
+    }
+    Ok(())
+}
+
 /// Connects to `target`. `on_starting_backend` is called every 300ms while a spawned backend
 /// is starting.
 pub async fn connect_target(
@@ -136,12 +213,61 @@ pub async fn connect_target(
     match target {
         Target::Auto => discover(on_starting_backend).await,
         Target::Explicit { url, token } => {
+            let trimmed = url.trim().to_string();
+            validate_explicit_url(&trimmed)?;
             let endpoint = Endpoint {
-                url: url.clone(),
+                url: trimmed,
                 token: token.clone(),
             };
             let ws = connect(&endpoint, EXPLICIT_CONNECT_TIMEOUT).await?;
             Ok((ws, endpoint))
+        }
+    }
+}
+
+/// Connects to `target`, skipping local `instances` discovery and spawning whenever
+/// `target` is [`BackendTarget::Explicit`].
+pub async fn discover_or_connect(
+    target: &BackendTarget,
+    on_starting_backend: impl FnMut(),
+) -> Result<ConnectedBackend, ConnectError> {
+    match target {
+        BackendTarget::Auto => {
+            let (ws, endpoint) = discover(on_starting_backend).await?;
+            Ok(ConnectedBackend {
+                ws,
+                endpoint,
+                mock: None,
+            })
+        }
+        BackendTarget::Explicit { url, token } => {
+            let trimmed = url.trim().to_string();
+            validate_explicit_url(&trimmed)?;
+            let endpoint = Endpoint {
+                url: trimmed,
+                token: token.clone(),
+            };
+            let ws = connect(&endpoint, EXPLICIT_CONNECT_TIMEOUT).await?;
+            Ok(ConnectedBackend {
+                ws,
+                endpoint,
+                mock: None,
+            })
+        }
+        BackendTarget::Mock => {
+            let mock = MockBackend::spawn().await?;
+            let endpoint = mock.endpoint().clone();
+            match connect(&endpoint, EXPLICIT_CONNECT_TIMEOUT).await {
+                Ok(ws) => Ok(ConnectedBackend {
+                    ws,
+                    endpoint,
+                    mock: Some(mock),
+                }),
+                Err(e) => {
+                    let _ = mock.shutdown().await;
+                    Err(e)
+                }
+            }
         }
     }
 }
@@ -263,5 +389,43 @@ mod tests {
             !text.contains("secret"),
             "the token stays out of messages: {text}"
         );
+    }
+
+    #[test]
+    fn explicit_url_validation_accepts_valid_and_rejects_invalid() {
+        assert!(validate_explicit_url("ws://127.0.0.1:8080").is_ok());
+        assert!(validate_explicit_url("wss://example.com/ws").is_ok());
+        assert!(validate_explicit_url("ws://[::1]:9000/").is_ok());
+        assert!(validate_explicit_url("").is_err());
+        assert!(validate_explicit_url("http://127.0.0.1:8080").is_err());
+        assert!(validate_explicit_url("ws://").is_err());
+        assert!(validate_explicit_url("ws:///path").is_err());
+        assert!(validate_explicit_url("ws://:8080").is_err());
+        assert!(validate_explicit_url("ws://[]").is_err());
+    }
+
+    #[tokio::test]
+    async fn discover_or_connect_explicit_skips_instances_and_never_spawns() {
+        let free_port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let target = BackendTarget::Explicit {
+            url: format!("ws://127.0.0.1:{free_port}/"),
+            token: None,
+        };
+        let mut starting_called = false;
+        let err = discover_or_connect(&target, || {
+            starting_called = true;
+        })
+        .await
+        .err()
+        .unwrap();
+        assert!(
+            !starting_called,
+            "explicit target must never spawn local backend"
+        );
+        assert!(matches!(err, ConnectError::CannotConnect { .. }));
     }
 }
