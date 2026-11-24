@@ -5,16 +5,16 @@ mod clipboard;
 mod input;
 mod mock;
 mod net;
+mod prefs;
+#[cfg(test)]
+mod question_tests;
 mod render;
 mod state;
+#[cfg(test)]
+mod tests;
 mod text;
 mod ui;
 mod util;
-
-#[cfg(test)]
-mod question_tests;
-#[cfg(test)]
-mod tests;
 
 use std::io::Write;
 use std::time::Duration;
@@ -37,7 +37,8 @@ use tokio::sync::mpsc;
 
 use crate::app::{App, InitPlan};
 use crate::net::Client;
-use ref_client::Target;
+use crate::prefs::BackendSource;
+use ref_client::BackendTarget;
 
 #[derive(Parser, Debug)]
 #[command(name = "ref", version, about = "ref — coding agent TUI")]
@@ -212,12 +213,22 @@ fn main() -> anyhow::Result<()> {
         model,
         prompt: cli.prompt.clone(),
     };
-    let target = match cli.server.clone() {
-        Some(url) => Target::Explicit {
-            url,
-            token: cli.token.clone(),
-        },
-        None => Target::Auto,
+    let (target, source, prefs_warn) = if cli.mock {
+        (BackendTarget::Mock, BackendSource::Auto, None)
+    } else {
+        let (prefs, warn) = match prefs::load_prefs() {
+            Ok(p) => (p, None),
+            Err(e) => (prefs::TuiPrefs::default(), Some(e)),
+        };
+        match prefs::resolve_target(cli.server.as_deref(), cli.token.as_deref(), &prefs) {
+            Ok((t, s)) => (t, s, warn),
+            Err(e) if cli.server.is_some() => anyhow::bail!("{e}"),
+            Err(e) => (
+                BackendTarget::Auto,
+                BackendSource::Auto,
+                Some(warn.unwrap_or(e)),
+            ),
+        }
     };
 
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -232,7 +243,7 @@ fn main() -> anyhow::Result<()> {
         default_hook(info);
     }));
     setup_terminal()?;
-    let res = rt.block_on(run(cli.mock, target, cwd, plan));
+    let res = rt.block_on(run(cli.mock, target, source, prefs_warn, cwd, plan));
     let restored = restore_terminal();
     rt.shutdown_timeout(RUNTIME_SHUTDOWN_TIMEOUT);
     let exit_text = res?;
@@ -271,19 +282,33 @@ fn drain_net_events(
 /// Runs the TUI; returns the exit-screen text to print after the terminal is restored.
 async fn run(
     mock: bool,
-    target: Target,
+    target: BackendTarget,
+    source: BackendSource,
+    prefs_warn: Option<String>,
     cwd: String,
     plan: InitPlan,
 ) -> anyhow::Result<Option<String>> {
     let (out_tx, out_rx) = mpsc::unbounded_channel();
     let (ev_tx, mut ev_rx) = mpsc::unbounded_channel();
-    if mock {
+    let client = if mock {
         tokio::spawn(mock::run(cwd.clone(), out_rx, ev_tx));
+        Client::new(out_tx)
     } else {
-        tokio::spawn(net::run(target, cwd.clone(), out_rx, ev_tx));
-    }
+        let (ctrl_tx, ctrl_rx) = mpsc::unbounded_channel();
+        tokio::spawn(net::run_with_control(
+            target.clone(),
+            cwd.clone(),
+            out_rx,
+            ctrl_rx,
+            ev_tx,
+        ));
+        Client::with_control(out_tx, ctrl_tx)
+    };
 
-    let mut app = App::new(Client::new(out_tx), cwd, plan);
+    let mut app = App::new(client, cwd, plan).with_backend(target, source);
+    if let Some(w) = prefs_warn {
+        app.toasts.warn(w);
+    }
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
     full_clear(&mut terminal)?;
     let mut events = EventStream::new();
@@ -333,7 +358,7 @@ async fn run(
                 terminal.draw(|f| render::draw(f, &mut app))?;
                 last_draw = std::time::Instant::now();
                 app.dirty = false;
-                app.load_older();
+                app.schedule_history_window();
                 let title = app.terminal_title();
                 if app.last_title.as_deref() != Some(title.as_str()) {
                     execute!(std::io::stdout(), crossterm::terminal::SetTitle(&title))?;

@@ -63,6 +63,23 @@ pub fn root_task(
     Some((cur.to_string(), name))
 }
 
+/// Resolves the immediate direct parent `(parent_id, display_name)` of `info` (never walking to root).
+pub fn direct_parent(
+    info: &SessionInfo,
+    live: &[SessionInfo],
+    history: &[SessionInfo],
+) -> Option<(String, String)> {
+    let pid = info.parent.as_deref().filter(|p| !p.is_empty())?;
+    let name = live
+        .iter()
+        .chain(history.iter())
+        .find(|s| s.id == pid)
+        .map(|s| s.name.as_str())
+        .filter(|n| !n.is_empty())
+        .unwrap_or(pid)
+        .to_string();
+    Some((pid.to_string(), name))
+}
 /// Picks (cols, rows) for `n` tiles in a `w`×`h` cell area: target tile aspect ≈1.6 in pixel terms
 /// (cells are ~2:1), with a penalty for empty grid cells.
 pub fn grid(n: usize, w: u16, h: u16) -> (usize, usize) {
@@ -383,5 +400,25 @@ mod tests {
         );
         assert!(root_task(&live[4], &live, &hist).is_some());
         assert!(root_task(&live[6], &live, &hist).is_some());
+    }
+
+    #[test]
+    fn direct_parent_returns_immediate_parent_not_root() {
+        let mk = |id: &str, name: &str, parent: Option<&str>| SessionInfo {
+            id: id.into(),
+            name: name.into(),
+            parent: parent.map(String::from),
+            ..crate::util::placeholder_info(id, "/tmp")
+        };
+        let live = vec![
+            mk("root", "root-a", None),
+            mk("mid", "mid-b", Some("root")),
+            mk("leaf", "leaf-c", Some("mid")),
+        ];
+        assert_eq!(direct_parent(&live[0], &live, &[]), None);
+        assert_eq!(
+            direct_parent(&live[2], &live, &[]),
+            Some(("mid".into(), "mid-b".into()))
+        );
     }
 }

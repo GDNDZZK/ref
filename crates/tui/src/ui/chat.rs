@@ -6,12 +6,14 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ref_proto::{AgentInfo, ModelInfo, SessionStatus};
+use ref_proto::{AgentInfo, MessageLayoutMeta, ModelInfo, Role, SessionStatus};
 
 use super::message::{self, Ctx};
 use super::selection::{self, Selection};
 use super::{Hit, Row, theme};
-use crate::state::SessionView;
+use crate::state::{
+    MAX_RESIDENT_MESSAGES, MessageSlot, SessionView, TAIL_KEEP_MESSAGES, estimate_lines,
+};
 use crate::text::{self, width};
 
 /// Shared rendering environment.
@@ -30,9 +32,10 @@ const FNV_PRIME: u64 = 0x100000001b3;
 /// Seed and multiplier of the order-sensitive hash of a toggle set.
 const SET_HASH_SEED: u64 = 7;
 const SET_HASH_MUL: u64 = 31;
-/// Distinguish the compact and the full cache keys of the same message.
+/// Distinguish the compact, full, and placeholder cache keys of the same message.
 const COMPACT_KEY_SALT: u64 = 11;
 const FULL_KEY_SALT: u64 = 7;
+const PLACEHOLDER_KEY_SALT: u64 = 17;
 /// A scroll target this close to the end counts as following.
 const FOLLOW_EPSILON: f64 = 0.01;
 /// The scroll animation stops within this many rows of the target.
@@ -47,7 +50,8 @@ const HINT_KEY_W: usize = 10;
 const HINT_DESC_W: usize = 20;
 /// Cache entries beyond the message count that are kept before evicting.
 const CACHE_SLACK: usize = 8;
-
+/// Label of the clickable button on the `Retrying` banner.
+const RETRY_NOW_LABEL: &str = "↻ retry now";
 struct Cached {
     key: u64,
     rows: Vec<Row>,
@@ -95,6 +99,8 @@ pub struct ChatState {
     pub pill: Option<Rect>,
     /// Content width of the last layout (re-wrapping is not "new content").
     last_w: usize,
+    /// Sequence range `[start, end)` overlapping the viewport at the last draw.
+    pub visible_seq_range: Option<(usize, usize)>,
 }
 fn hash_key(parts: &[u64]) -> u64 {
     let mut h: u64 = FNV_OFFSET;
@@ -358,10 +364,8 @@ impl ChatState {
 }
 
 /// Index of the last compaction message: the model's context starts there.
-fn last_compaction(messages: &[ref_proto::Message]) -> Option<usize> {
-    messages.iter().rposition(|m| {
-        m.role == ref_proto::Role::User && m.source == ref_proto::MessageSource::Compaction
-    })
+fn last_compaction(slots: &[MessageSlot]) -> Option<usize> {
+    slots.iter().rposition(MessageSlot::is_compaction)
 }
 
 /// What the cache key of one message depends on besides its content.
@@ -370,7 +374,6 @@ struct Slot {
     version: u64,
     /// The message is still streaming, so its rows change with the tick and the clock.
     live: bool,
-    /// The message lies before the last compaction.
     stale: bool,
     /// The message is the last compaction, where the model's context starts.
     context_start: bool,
@@ -421,68 +424,152 @@ fn cache_key(
     ])
 }
 
-/// Builds (or reuses) cached rows for all messages and the tail, for content width `w`.
+fn placeholder_cache_key(
+    meta: &MessageLayoutMeta,
+    version: u64,
+    w: usize,
+    env: &Env<'_>,
+    stale: bool,
+    compact: bool,
+    first: bool,
+) -> u64 {
+    hash_key(&[
+        version,
+        meta.seq,
+        w as u64,
+        env.details as u64,
+        env.thinking as u64,
+        stale as u64,
+        compact as u64,
+        first as u64,
+        PLACEHOLDER_KEY_SALT,
+    ])
+}
+
+fn render_placeholder(
+    meta: &MessageLayoutMeta,
+    w: usize,
+    env: &Env<'_>,
+    stale: bool,
+    compact: bool,
+) -> Vec<Row> {
+    let est = estimate_lines(meta, w, env.details, env.thinking, compact);
+    let mut rows = Vec::with_capacity(est);
+    let dim = if stale {
+        theme::fg(theme::BORDER_SUBTLE)
+    } else {
+        theme::fg(theme::DIM)
+    };
+    match meta.role {
+        Role::User if meta.source_kind == "compaction" => {
+            rows.push(
+                Row::new(Line::from(Span::styled(
+                    "──── ◇ Context compacted ···",
+                    dim,
+                )))
+                .decor(),
+            );
+        }
+        Role::User => {
+            let bar = Span::styled("┃", theme::fg(theme::BORDER));
+            rows.push(Row::new(Line::from(vec![bar.clone(), Span::styled("  ···", dim)])).decor());
+            for _ in 1..est {
+                rows.push(Row::new(Line::from(bar.clone())).decor());
+            }
+            return rows;
+        }
+        Role::Assistant => {
+            rows.push(Row::new(Line::from(Span::styled("  ···", dim))).decor());
+        }
+    }
+    while rows.len() < est {
+        rows.push(Row::blank().decor());
+    }
+    rows
+}
+
+/// Builds (or reuses) cached rows for all slots and the tail, for content width `w`.
 /// `compact` selects the split-tile rendering (own cache; tools / reasoning one-line).
 fn layout(view: &mut SessionView, env: &Env<'_>, w: usize, compact: bool) {
     let busy = !view.info.status.is_idle();
     let SessionView {
-        messages,
+        slots,
         versions,
         chat,
         info,
         ..
     } = view;
-    let mut offsets = Vec::with_capacity(messages.len() + 1);
-    let mut ids = Vec::with_capacity(messages.len());
+    let mut offsets = Vec::with_capacity(slots.len() + 1);
+    let mut ids = Vec::with_capacity(slots.len());
     let mut total = 0usize;
     let mut animating = false;
-    let last_compaction = last_compaction(messages);
+    let last_comp = last_compaction(slots);
     chat.compact = compact;
-    for (i, m) in messages.iter().enumerate() {
-        // Only the tail of a busy session animates (stale unfinished messages render statically).
-        let live = busy && crate::state::message_live(m);
-        animating |= live;
-        let slot = Slot {
-            index: i,
-            version: versions.get(i).copied().unwrap_or(0),
-            live,
-            stale: last_compaction.is_some_and(|c| i < c),
-            context_start: i > 0 && last_compaction == Some(i),
-        };
-        let key = cache_key(chat, env, &m.id, &slot, w, compact);
-        if !chat.cache(compact).get(&m.id).is_some_and(|c| c.key == key) {
-            let cx = Ctx {
-                agents: env.agents,
-                models: env.models,
-                toggled: chat.toggled.get(&m.id),
-                show_all: chat.show_all.get(&m.id),
-                details: env.details && !compact,
-                thinking: env.thinking && !compact,
-                now: env.now,
-                tick: env.tick,
-                compact,
-                session_agent: &info.agent,
-                stale: slot.stale,
-                context_start: slot.context_start && !compact,
-            };
-            // Blank separator above each message (tiles: not above the first one).
-            let mut rows = if compact && i == 0 {
-                Vec::new()
-            } else {
-                vec![Row::blank()]
-            };
-            rows.extend(message::render(m, &cx, w));
-            #[cfg(test)]
-            {
-                chat.laid_out += 1;
+    for (i, slot_entry) in slots.iter().enumerate() {
+        let stale = last_comp.is_some_and(|c| i < c);
+        let ver = versions.get(i).copied().unwrap_or(0);
+        let id = slot_entry.id().to_string();
+        match slot_entry {
+            MessageSlot::Materialized(m) => {
+                // Only the tail of a busy session animates (stale unfinished messages render statically).
+                let live = busy && crate::state::message_live(m);
+                animating |= live;
+                let slot = Slot {
+                    index: i,
+                    version: ver,
+                    live,
+                    stale,
+                    context_start: i > 0 && last_comp == Some(i),
+                };
+                let key = cache_key(chat, env, &m.id, &slot, w, compact);
+                if !chat.cache(compact).get(&m.id).is_some_and(|c| c.key == key) {
+                    let cx = Ctx {
+                        agents: env.agents,
+                        models: env.models,
+                        toggled: chat.toggled.get(&m.id),
+                        show_all: chat.show_all.get(&m.id),
+                        details: env.details && !compact,
+                        thinking: env.thinking && !compact,
+                        now: env.now,
+                        tick: env.tick,
+                        compact,
+                        session_agent: &info.agent,
+                        stale: slot.stale,
+                        context_start: slot.context_start && !compact,
+                    };
+                    // Blank separator above each message (tiles: not above the first one).
+                    let mut rows = if compact && i == 0 {
+                        Vec::new()
+                    } else {
+                        vec![Row::blank()]
+                    };
+                    rows.extend(message::render(m, &cx, w));
+                    #[cfg(test)]
+                    {
+                        chat.laid_out += 1;
+                    }
+                    chat.cache_mut(compact)
+                        .insert(m.id.clone(), Cached { key, rows });
+                }
             }
-            chat.cache_mut(compact)
-                .insert(m.id.clone(), Cached { key, rows });
+            MessageSlot::Placeholder(meta) => {
+                let key = placeholder_cache_key(meta, ver, w, env, stale, compact, i == 0);
+                if !chat.cache(compact).get(&id).is_some_and(|c| c.key == key) {
+                    let mut rows = if compact && i == 0 {
+                        Vec::new()
+                    } else {
+                        vec![Row::blank()]
+                    };
+                    rows.extend(render_placeholder(meta, w, env, stale, compact));
+                    chat.cache_mut(compact)
+                        .insert(id.clone(), Cached { key, rows });
+                }
+            }
         }
         offsets.push(total);
-        ids.push(m.id.clone());
         // The entry exists: it either matched the key or was inserted above.
-        total += chat.cache(compact)[&m.id].rows.len();
+        total += chat.cache(compact)[&id].rows.len();
+        ids.push(id);
     }
     evict_stale(chat.cache_mut(compact), &ids);
     offsets.push(total);
@@ -492,6 +579,21 @@ fn layout(view: &mut SessionView, env: &Env<'_>, w: usize, compact: bool) {
     chat.animating = animating;
     total += chat.tail.len();
     chat.total = total;
+}
+
+fn compute_visible_seq_range(chat: &ChatState) -> Option<(usize, usize)> {
+    let msg_count = chat.ids.len();
+    let h = chat.area.height as usize;
+    if msg_count == 0 || h == 0 || chat.offsets.len() <= msg_count {
+        return None;
+    }
+    let top = chat.top();
+    let bottom = top.saturating_add(h);
+    let vis_start = chat.offsets[1..=msg_count].partition_point(|&end| end <= top);
+    let vis_end = chat.offsets[..msg_count]
+        .partition_point(|&start| start < bottom)
+        .min(msg_count);
+    (vis_start < vis_end).then_some((vis_start, vis_end))
 }
 
 /// Evicts cache entries for removed messages once enough have piled up.
@@ -653,18 +755,35 @@ fn tail_rows(view: &SessionView, env: &Env<'_>, w: usize) -> Vec<Row> {
     {
         rows.push(Row::blank());
         let secs = text::ceil_secs(next_at - env.now);
-        let msg = format!(
-            "{} Retrying in {secs}s (attempt {attempt}): {}",
-            theme::spinner(env.tick),
-            text::one_line(error)
+        let status_text = format!(
+            "{} Retrying in {secs}s (attempt {attempt})",
+            theme::spinner(env.tick)
         );
-        rows.extend(message::bar_rows(
-            &msg,
-            theme::fg(theme::WARNING),
-            theme::WARNING,
-            w.saturating_sub(4),
-            2,
-        ));
+        let inner = w.saturating_sub(4).max(1);
+        let left = vec![Span::styled(status_text, theme::fg(theme::WARNING))];
+        let right = vec![Span::styled(RETRY_NOW_LABEL, theme::fg(theme::WARNING))];
+        let (line, rx) = message::compose(left, right, inner);
+        let x0 = rx as u16;
+        let rw = width(RETRY_NOW_LABEL) as u16;
+        let lead = vec![
+            Span::raw("  "),
+            Span::styled("┃ ", theme::fg(theme::WARNING)),
+        ];
+        let mut header_row = Row::new(line).decor();
+        if rw > 0 && rx + rw as usize <= inner {
+            header_row = header_row.zone(x0, x0 + rw, Hit::RetryNow);
+        }
+        rows.push(header_row.indent(lead));
+        let err_line = text::one_line(error);
+        if !err_line.is_empty() {
+            rows.extend(message::bar_rows(
+                &err_line,
+                theme::fg(theme::WARNING),
+                theme::WARNING,
+                inner,
+                2,
+            ));
+        }
     }
     if let SessionStatus::Compacting = view.info.status {
         rows.push(Row::blank());
@@ -685,8 +804,7 @@ fn tail_rows(view: &SessionView, env: &Env<'_>, w: usize) -> Vec<Row> {
     }
     if let Some(e) = &view.error
         && !view
-            .messages
-            .last()
+            .last_message()
             .is_some_and(|m| m.error.as_deref() == Some(e.as_str()))
     {
         rows.push(Row::blank());
@@ -801,16 +919,21 @@ pub fn draw(buf: &mut Buffer, area: Rect, view: &mut SessionView, env: &Env<'_>)
     if area.width < 4 || area.height == 0 {
         return;
     }
+    if view.chat.follow && view.slots.len() > TAIL_KEEP_MESSAGES {
+        view.trim_to_tail(TAIL_KEEP_MESSAGES);
+    }
     // 1 col left pad, 1 col right pad + scrollbar column.
     let cw = area.width.saturating_sub(3).max(1) as usize;
     let tail = tail_rows(view, env, cw);
     view.chat.tail = tail;
     let reflow = view.chat.last_w != cw || view.chat.compact;
-    let anchor = if reflow && !view.chat.follow && view.chat.initialized {
+    let restore = reflow || view.needs_anchor_restore;
+    let anchor = if restore && !view.chat.follow && view.chat.initialized {
         capture_anchor(&view.chat)
     } else {
         None
     };
+    view.needs_anchor_restore = false;
     layout(view, env, cw, false);
     view.chat.last_w = cw;
     let loaded = view.loaded;
@@ -820,8 +943,15 @@ pub fn draw(buf: &mut Buffer, area: Rect, view: &mut SessionView, env: &Env<'_>)
     }
     chat.content_x = area.x + 1;
     settle(chat, area, reflow);
+    chat.visible_seq_range = compute_visible_seq_range(chat);
+    if !chat.follow
+        && view.resident_count() > MAX_RESIDENT_MESSAGES
+        && let Some((vs, ve)) = chat.visible_seq_range
+    {
+        view.evict_outside(vs, ve);
+    }
 
-    if view.messages.is_empty() && !view.is_busy() {
+    if view.is_empty() && !view.is_busy() {
         draw_welcome(buf, area, view, loaded);
         return;
     }
@@ -998,12 +1128,17 @@ pub fn draw_tile(buf: &mut Buffer, area: Rect, bar_x: u16, view: &mut SessionVie
             .chain(queued_rows(view, cw))
             .collect()
     };
+    if view.chat.follow && view.slots.len() > TAIL_KEEP_MESSAGES {
+        view.trim_to_tail(TAIL_KEEP_MESSAGES);
+    }
     let reflow = view.chat.last_w != cw || !view.chat.compact;
-    let anchor = if reflow && !view.chat.follow && view.chat.initialized {
+    let restore = reflow || view.needs_anchor_restore;
+    let anchor = if restore && !view.chat.follow && view.chat.initialized {
         capture_anchor(&view.chat)
     } else {
         None
     };
+    view.needs_anchor_restore = false;
     layout(view, env, cw, true);
     view.chat.last_w = cw;
     let chat = &mut view.chat;
@@ -1012,6 +1147,7 @@ pub fn draw_tile(buf: &mut Buffer, area: Rect, bar_x: u16, view: &mut SessionVie
     }
     chat.content_x = area.x;
     settle(chat, area, reflow);
+    chat.visible_seq_range = compute_visible_seq_range(chat);
     chat.pill = None;
     let top = chat.top();
     for dy in 0..area.height {

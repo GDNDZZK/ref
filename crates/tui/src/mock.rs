@@ -35,6 +35,8 @@ struct World {
     mcp_started: i64,
     /// Root workspace directory passed to `run` / `seed`.
     root_cwd: String,
+    /// Stash groups for mock stash RPCs.
+    groups: Vec<StashGroup>,
 }
 
 #[derive(Clone)]
@@ -224,6 +226,10 @@ impl Mock {
         self.send(ServerFrame::Sessions { sessions: list });
     }
 
+    fn broadcast_groups(&self) {
+        let groups = self.world().groups.clone();
+        self.send(ServerFrame::GroupsChanged { groups });
+    }
     /// Applies an event to the world and forwards it if subscribed.
     fn emit(&self, sid: &str, ev: SessionEvent) {
         let deliver = {
@@ -1223,8 +1229,8 @@ impl Mock {
             Request::Attach {
                 session_id,
                 foreground,
-                ..
-            } => self.on_attach(request_id, &session_id, foreground),
+                limit,
+            } => self.on_attach(request_id, &session_id, foreground, limit),
             Request::Detach { session_id } => self.on_detach(request_id, &session_id),
             Request::WatchAll { enabled } => {
                 self.world().watch_all = enabled;
@@ -1365,12 +1371,73 @@ impl Mock {
             }
             Request::ListFiles { query, .. } => self.on_list_files(request_id, &query),
             Request::Export { path, .. } => self.ok(request_id, json!({ "path": path })),
-            // The demo sends whole histories with image bytes.
-            Request::Messages { .. } => {
-                self.ok(request_id, json!({ "messages": [], "more_before": false }))
-            }
+            Request::Messages {
+                session_id,
+                before,
+                start_seq,
+                end_seq,
+                limit,
+            } => self.on_messages(
+                request_id,
+                &session_id,
+                before.as_deref(),
+                start_seq,
+                end_seq,
+                limit,
+            ),
             Request::GetImage { .. } => self.err(request_id, "Image not found"),
             Request::McpStatus { .. } => self.on_mcp_status(request_id),
+            Request::RetryNow { session_id } => self.on_retry_now(request_id, &session_id),
+            Request::ListGroups => {
+                let groups = self.world().groups.clone();
+                self.ok(request_id, json!({ "groups": groups }));
+            }
+            Request::StashAll { name } => self.on_stash_all(request_id, name),
+            Request::CreateGroup {
+                name,
+                session_ids,
+                stash_live,
+            } => self.on_create_group(request_id, name, session_ids, stash_live),
+            Request::RenameGroup { group_id, name } => {
+                self.on_rename_group(request_id, &group_id, name)
+            }
+            Request::SetGroupLocked { group_id, locked } => {
+                self.on_set_group_locked(request_id, &group_id, locked)
+            }
+            Request::DeleteGroup { group_id } => self.on_delete_group(request_id, &group_id),
+            Request::AddToGroup {
+                group_id,
+                session_id,
+                position,
+                stash_live,
+            } => self.on_add_to_group(request_id, &group_id, &session_id, position, stash_live),
+            Request::MoveGroupMember {
+                from_group_id,
+                to_group_id,
+                session_id,
+                position,
+                stash_live,
+            } => self.on_move_group_member(
+                request_id,
+                from_group_id.as_deref(),
+                &to_group_id,
+                &session_id,
+                position,
+                stash_live,
+            ),
+            Request::RemoveFromGroup {
+                group_id,
+                session_id,
+            } => self.on_remove_from_group(request_id, &group_id, &session_id),
+            Request::MergeGroups {
+                source_group_id,
+                target_group_id,
+            } => self.on_merge_groups(request_id, &source_group_id, &target_group_id),
+            Request::RestoreGroup { group_id } => self.on_restore_group(request_id, &group_id),
+            Request::RestoreGroupMember {
+                group_id,
+                session_id,
+            } => self.on_restore_group_member(request_id, &group_id, &session_id),
         }
     }
 
@@ -1554,9 +1621,10 @@ impl Mock {
         );
     }
 
-    fn on_attach(&self, request_id: Option<u64>, sid: &str, foreground: bool) {
+    fn on_attach(&self, request_id: Option<u64>, sid: &str, foreground: bool, limit: Option<u32>) {
         // History-only session → load it live.
         self.revive_from_history(sid);
+        let limit = limit.map_or(100, |l| l as usize).clamp(1, 1000);
         let snap = {
             let mut w = self.world();
             w.subs.insert(sid.to_string());
@@ -1564,10 +1632,18 @@ impl Mock {
                 if foreground {
                     s.info.attached += 1;
                 }
+                let total = s.messages.len();
+                let start_seq = total.saturating_sub(limit);
+                let layout_metas = (0..start_seq)
+                    .map(|i| crate::util::compute_layout_meta(i as u64, &s.messages[i]))
+                    .collect();
                 SessionSnapshot {
                     info: s.info.clone(),
-                    messages: s.messages.clone(),
-                    more_before: false,
+                    messages: s.messages[start_seq..].to_vec(),
+                    more_before: start_seq > 0,
+                    total_messages: total as u64,
+                    start_seq: start_seq as u64,
+                    layout_metas,
                     pending_permissions: s.perms.clone(),
                     pending_questions: Vec::new(),
                     queued: s.queue.clone(),
@@ -1580,6 +1656,54 @@ impl Mock {
         };
         self.ok(request_id, json!({ "snapshot": snap }));
         self.broadcast_sessions();
+    }
+
+    fn on_messages(
+        &self,
+        request_id: Option<u64>,
+        sid: &str,
+        before: Option<&str>,
+        start_seq: Option<u64>,
+        end_seq: Option<u64>,
+        limit: Option<u32>,
+    ) {
+        let lim = limit.map_or(100, |l| l as usize).clamp(1, 1000);
+        let res = {
+            let w = self.world();
+            w.sessions.get(sid).map(|s| {
+                let total = s.messages.len();
+                let (start, end) = if start_seq.is_some() || end_seq.is_some() {
+                    let end = end_seq.map_or(total, |e| (e as usize).min(total));
+                    let start = start_seq
+                        .map_or_else(|| end.saturating_sub(lim), |sq| (sq as usize).min(end));
+                    (start, end.min(start + lim))
+                } else if let Some(mid) = before {
+                    let pos = s.messages.iter().position(|m| m.id == mid).unwrap_or(total);
+                    (pos.saturating_sub(lim), pos)
+                } else {
+                    (total.saturating_sub(lim), total)
+                };
+                (
+                    s.messages[start..end].to_vec(),
+                    start > 0,
+                    start as u64,
+                    end as u64,
+                )
+            })
+        };
+        let Some((messages, more_before, start_seq, end_seq)) = res else {
+            self.err(request_id, "no such session");
+            return;
+        };
+        self.ok(
+            request_id,
+            json!({
+                "messages": messages,
+                "more_before": more_before,
+                "start_seq": start_seq,
+                "end_seq": end_seq,
+            }),
+        );
     }
 
     fn on_prompt(
@@ -1736,11 +1860,15 @@ impl Mock {
             self.err(request_id, "nothing to undo");
             return;
         };
+        let total = messages.len() as u64;
         self.emit(
             sid,
             SessionEvent::Reset {
                 messages,
                 more_before: false,
+                total_messages: total,
+                start_seq: 0,
+                layout_metas: Vec::new(),
             },
         );
         self.ok(request_id, json!({ "text": text }));
@@ -1763,6 +1891,404 @@ impl Mock {
         }
         self.ok(request_id, json!({}));
         self.broadcast_sessions();
+    }
+
+    fn on_retry_now(&self, request_id: Option<u64>, sid: &str) {
+        let retried = {
+            let mut w = self.world();
+            let Some(s) = w.sessions.get_mut(sid) else {
+                drop(w);
+                self.err(request_id, "no such session");
+                return;
+            };
+            matches!(s.info.status, SessionStatus::Retrying { .. })
+        };
+        if retried {
+            self.set_status(sid, SessionStatus::Busy);
+        }
+        self.ok(request_id, json!({ "retried": retried }));
+    }
+
+    fn stash_live_session(&self, sid: &str) -> Option<SessionInfo> {
+        let info = {
+            let mut w = self.world();
+            w.order.retain(|x| x != sid);
+            w.sessions.remove(sid).map(|s| s.info)
+        };
+        if let Some(mut i) = info {
+            i.live = false;
+            i.attached = 0;
+            self.send(ServerFrame::Event {
+                session_id: sid.to_string(),
+                event: SessionEvent::Closed,
+            });
+            let mut w = self.world();
+            if !w.history.iter().any(|h| h.id == i.id) {
+                w.history.push(i.clone());
+            }
+            return Some(i);
+        }
+        let w = self.world();
+        w.history.iter().find(|h| h.id == sid).cloned()
+    }
+
+    fn lookup_session_info(&self, sid: &str) -> Option<SessionInfo> {
+        let w = self.world();
+        w.sessions
+            .get(sid)
+            .map(|s| s.info.clone())
+            .or_else(|| w.history.iter().find(|h| h.id == sid).cloned())
+    }
+
+    fn reindex_group_members(group: &mut StashGroup) {
+        for (i, m) in group.members.iter_mut().enumerate() {
+            m.position = i as u32;
+        }
+        group.updated_at = now_ms();
+    }
+
+    fn on_stash_all(&self, request_id: Option<u64>, name: Option<String>) {
+        let sids: Vec<String> = self.world().order.clone();
+        if sids.is_empty() {
+            let groups = self.world().groups.clone();
+            self.ok(
+                request_id,
+                json!({ "group": Value::Null, "groups": groups }),
+            );
+            return;
+        }
+        let mut members = Vec::new();
+        for sid in sids {
+            if let Some(info) = self.stash_live_session(&sid) {
+                members.push(StashMember {
+                    session_id: sid,
+                    position: members.len() as u32,
+                    info,
+                });
+            }
+        }
+        let now = now_ms();
+        let groups = {
+            let mut w = self.world();
+            let gname = name
+                .filter(|n| !n.trim().is_empty())
+                .unwrap_or_else(|| format!("Stash {}", w.groups.len() + 1));
+            let group = StashGroup {
+                id: id("grp"),
+                name: gname,
+                locked: false,
+                created_at: now,
+                updated_at: now,
+                members,
+            };
+            w.groups.insert(0, group.clone());
+            (group, w.groups.clone())
+        };
+        self.ok(request_id, json!({ "group": groups.0, "groups": groups.1 }));
+        self.broadcast_sessions();
+        self.broadcast_groups();
+    }
+
+    fn on_create_group(
+        &self,
+        request_id: Option<u64>,
+        name: Option<String>,
+        session_ids: Vec<String>,
+        stash_live: bool,
+    ) {
+        let mut members = Vec::new();
+        for sid in session_ids {
+            let info = if stash_live {
+                self.stash_live_session(&sid)
+            } else {
+                self.lookup_session_info(&sid)
+            };
+            if let Some(info) = info {
+                members.push(StashMember {
+                    session_id: sid,
+                    position: members.len() as u32,
+                    info,
+                });
+            }
+        }
+        let now = now_ms();
+        let (group, groups) = {
+            let mut w = self.world();
+            let gname = name
+                .filter(|n| !n.trim().is_empty())
+                .unwrap_or_else(|| format!("Group {}", w.groups.len() + 1));
+            let group = StashGroup {
+                id: id("grp"),
+                name: gname,
+                locked: false,
+                created_at: now,
+                updated_at: now,
+                members,
+            };
+            w.groups.insert(0, group.clone());
+            (group, w.groups.clone())
+        };
+        self.ok(request_id, json!({ "group": group, "groups": groups }));
+        if stash_live {
+            self.broadcast_sessions();
+        }
+        self.broadcast_groups();
+    }
+
+    fn on_rename_group(&self, request_id: Option<u64>, group_id: &str, name: String) {
+        let groups = {
+            let mut w = self.world();
+            let Some(g) = w.groups.iter_mut().find(|g| g.id == group_id) else {
+                drop(w);
+                self.err(request_id, "no such group");
+                return;
+            };
+            g.name = name;
+            g.updated_at = now_ms();
+            w.groups.clone()
+        };
+        self.ok(request_id, json!({ "groups": groups }));
+        self.broadcast_groups();
+    }
+
+    fn on_set_group_locked(&self, request_id: Option<u64>, group_id: &str, locked: bool) {
+        let groups = {
+            let mut w = self.world();
+            let Some(g) = w.groups.iter_mut().find(|g| g.id == group_id) else {
+                drop(w);
+                self.err(request_id, "no such group");
+                return;
+            };
+            g.locked = locked;
+            g.updated_at = now_ms();
+            w.groups.clone()
+        };
+        self.ok(request_id, json!({ "groups": groups }));
+        self.broadcast_groups();
+    }
+
+    fn on_delete_group(&self, request_id: Option<u64>, group_id: &str) {
+        let groups = {
+            let mut w = self.world();
+            w.groups.retain(|g| g.id != group_id);
+            w.groups.clone()
+        };
+        self.ok(request_id, json!({ "groups": groups }));
+        self.broadcast_groups();
+    }
+
+    fn on_add_to_group(
+        &self,
+        request_id: Option<u64>,
+        group_id: &str,
+        sid: &str,
+        position: Option<u32>,
+        stash_live: bool,
+    ) {
+        let info = if stash_live {
+            self.stash_live_session(sid)
+        } else {
+            self.lookup_session_info(sid)
+        };
+        let Some(info) = info else {
+            self.err(request_id, "no such session");
+            return;
+        };
+        let groups = {
+            let mut w = self.world();
+            let Some(g) = w.groups.iter_mut().find(|g| g.id == group_id) else {
+                drop(w);
+                self.err(request_id, "no such group");
+                return;
+            };
+            g.members.retain(|m| m.session_id != sid);
+            let pos = position.map_or(g.members.len(), |p| (p as usize).min(g.members.len()));
+            g.members.insert(
+                pos,
+                StashMember {
+                    session_id: sid.to_string(),
+                    position: pos as u32,
+                    info,
+                },
+            );
+            Self::reindex_group_members(g);
+            w.groups.clone()
+        };
+        self.ok(request_id, json!({ "groups": groups }));
+        if stash_live {
+            self.broadcast_sessions();
+        }
+        self.broadcast_groups();
+    }
+
+    fn on_move_group_member(
+        &self,
+        request_id: Option<u64>,
+        from_group_id: Option<&str>,
+        to_group_id: &str,
+        sid: &str,
+        position: u32,
+        stash_live: bool,
+    ) {
+        let mut info = if let Some(fid) = from_group_id {
+            let mut w = self.world();
+            let removed = w.groups.iter_mut().find(|g| g.id == fid).and_then(|g| {
+                let idx = g.members.iter().position(|m| m.session_id == sid)?;
+                let m = g.members.remove(idx);
+                Self::reindex_group_members(g);
+                Some(m.info)
+            });
+            if let Some(fid_remove) = w.groups.iter().position(|g| {
+                g.id == fid && !g.locked && g.members.is_empty() && fid != to_group_id
+            }) {
+                w.groups.remove(fid_remove);
+            }
+            removed
+        } else {
+            None
+        };
+        if info.is_none() {
+            info = if stash_live {
+                self.stash_live_session(sid)
+            } else {
+                self.lookup_session_info(sid)
+            };
+        }
+        let Some(info) = info else {
+            self.err(request_id, "no such session");
+            return;
+        };
+        let groups = {
+            let mut w = self.world();
+            let Some(g) = w.groups.iter_mut().find(|g| g.id == to_group_id) else {
+                drop(w);
+                self.err(request_id, "no such group");
+                return;
+            };
+            g.members.retain(|m| m.session_id != sid);
+            let pos = (position as usize).min(g.members.len());
+            g.members.insert(
+                pos,
+                StashMember {
+                    session_id: sid.to_string(),
+                    position: pos as u32,
+                    info,
+                },
+            );
+            Self::reindex_group_members(g);
+            w.groups.clone()
+        };
+        self.ok(request_id, json!({ "groups": groups }));
+        if stash_live {
+            self.broadcast_sessions();
+        }
+        self.broadcast_groups();
+    }
+
+    fn on_remove_from_group(&self, request_id: Option<u64>, group_id: &str, sid: &str) {
+        let groups = {
+            let mut w = self.world();
+            if let Some(g) = w.groups.iter_mut().find(|g| g.id == group_id) {
+                g.members.retain(|m| m.session_id != sid);
+                Self::reindex_group_members(g);
+            }
+            w.groups
+                .retain(|g| !(g.id == group_id && !g.locked && g.members.is_empty()));
+            w.groups.clone()
+        };
+        self.ok(request_id, json!({ "groups": groups }));
+        self.broadcast_groups();
+    }
+
+    fn on_merge_groups(
+        &self,
+        request_id: Option<u64>,
+        source_group_id: &str,
+        target_group_id: &str,
+    ) {
+        let groups = {
+            let mut w = self.world();
+            let Some(src_idx) = w.groups.iter().position(|g| g.id == source_group_id) else {
+                drop(w);
+                self.err(request_id, "no such group");
+                return;
+            };
+            let src = w.groups.remove(src_idx);
+            let Some(dst) = w.groups.iter_mut().find(|g| g.id == target_group_id) else {
+                w.groups.insert(src_idx, src);
+                drop(w);
+                self.err(request_id, "no such group");
+                return;
+            };
+            for m in src.members {
+                if !dst.members.iter().any(|e| e.session_id == m.session_id) {
+                    dst.members.push(m);
+                }
+            }
+            Self::reindex_group_members(dst);
+            w.groups.clone()
+        };
+        self.ok(request_id, json!({ "groups": groups }));
+        self.broadcast_groups();
+    }
+
+    fn on_restore_group(&self, request_id: Option<u64>, group_id: &str) {
+        let member_ids: Vec<String> = {
+            let w = self.world();
+            let Some(g) = w.groups.iter().find(|g| g.id == group_id) else {
+                drop(w);
+                self.err(request_id, "no such group");
+                return;
+            };
+            g.members.iter().map(|m| m.session_id.clone()).collect()
+        };
+        let mut restored_ids = Vec::new();
+        for sid in member_ids {
+            let already_live = self.world().sessions.contains_key(&sid);
+            if !already_live {
+                self.revive_from_history(&sid);
+                if self.world().sessions.contains_key(&sid) {
+                    restored_ids.push(sid);
+                }
+            }
+        }
+        let groups = {
+            let mut w = self.world();
+            if let Some(pos) = w.groups.iter().position(|g| g.id == group_id && !g.locked) {
+                w.groups.remove(pos);
+            }
+            w.groups.clone()
+        };
+        self.ok(
+            request_id,
+            json!({ "restored_ids": restored_ids, "groups": groups }),
+        );
+        self.broadcast_sessions();
+        self.broadcast_groups();
+    }
+
+    fn on_restore_group_member(&self, request_id: Option<u64>, group_id: &str, sid: &str) {
+        let already_live = self.world().sessions.contains_key(sid);
+        if !already_live {
+            self.revive_from_history(sid);
+        }
+        let restored = !already_live && self.world().sessions.contains_key(sid);
+        let groups = {
+            let mut w = self.world();
+            if let Some(g) = w.groups.iter_mut().find(|g| g.id == group_id && !g.locked) {
+                g.members.retain(|m| m.session_id != sid);
+                Self::reindex_group_members(g);
+            }
+            w.groups
+                .retain(|g| !(g.id == group_id && !g.locked && g.members.is_empty()));
+            w.groups.clone()
+        };
+        self.ok(
+            request_id,
+            json!({ "restored": restored, "groups": groups }),
+        );
+        self.broadcast_sessions();
+        self.broadcast_groups();
     }
 
     fn on_list_files(&self, request_id: Option<u64>, query: &str) {

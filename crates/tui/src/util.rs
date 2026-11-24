@@ -1,7 +1,9 @@
 //! Names and pure helpers shared by the client layers and the in-process mock backend.
 
-use ref_proto::{Delta, ModelRef, Part, SessionInfo, SessionStatus, ToolState};
-
+use ref_proto::{
+    Delta, Message, MessageLayoutMeta, MessageSource, ModelRef, Part, PartLayoutMeta, SessionInfo,
+    SessionStatus, ToolState,
+};
 /// Error text a message carries when its turn was aborted (matched case-insensitively).
 pub const ABORTED_ERROR: &str = "Aborted";
 
@@ -41,6 +43,11 @@ pub mod cmd {
     pub const HELP: &str = "help";
     pub const EXIT: &str = "exit";
     pub const RELOAD: &str = "reload";
+    pub const BACKEND: &str = "backend";
+    pub const DETACH: &str = "detach";
+    pub const RETRY: &str = "retry";
+    pub const STASH: &str = "stash";
+    pub const STASHED: &str = "stashed";
 }
 
 /// Session info for a session the client has not heard about yet.
@@ -161,6 +168,167 @@ fn partial_purpose(raw: &str) -> Option<String> {
     (!out.is_empty()).then_some(out)
 }
 
+fn source_kind_str(source: &MessageSource) -> &'static str {
+    match source {
+        MessageSource::Human => "human",
+        MessageSource::Peer { .. } => "peer",
+        MessageSource::Spawn { .. } => "spawn",
+        MessageSource::Reminder => "reminder",
+        MessageSource::Compaction => "compaction",
+        MessageSource::Shell => "shell",
+    }
+}
+
+fn count_lines_u32(s: &str) -> u32 {
+    if s.is_empty() {
+        return 0;
+    }
+    s.lines().count().max(1).min(u32::MAX as usize) as u32
+}
+
+fn is_table_separator(line: &str) -> bool {
+    let t = line.trim();
+    t.contains('|')
+        && t.contains('-')
+        && t.chars()
+            .all(|c| c == '|' || c == '-' || c == ':' || c.is_whitespace())
+}
+
+fn analyze_markdown(text: &str) -> (u16, u32, u16) {
+    let mut code_blocks: u16 = 0;
+    let mut code_lines: u32 = 0;
+    let mut tables: u16 = 0;
+    let mut in_fence = false;
+    let mut in_table = false;
+    let mut prev_has_pipe = false;
+
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            if in_fence {
+                in_fence = false;
+            } else {
+                in_fence = true;
+                code_blocks = code_blocks.saturating_add(1);
+            }
+            in_table = false;
+            prev_has_pipe = false;
+            continue;
+        }
+        if in_fence {
+            code_lines = code_lines.saturating_add(1);
+            continue;
+        }
+        let has_pipe = line.contains('|');
+        if prev_has_pipe && is_table_separator(line) {
+            if !in_table {
+                tables = tables.saturating_add(1);
+                in_table = true;
+            }
+        } else if !(in_table && has_pipe) {
+            in_table = false;
+        }
+        prev_has_pipe = has_pipe;
+    }
+    (code_blocks, code_lines, tables)
+}
+
+/// Computes lightweight [`MessageLayoutMeta`] from an in-memory [`Message`].
+pub fn compute_layout_meta(seq: u64, msg: &Message) -> MessageLayoutMeta {
+    let parts = msg
+        .parts
+        .iter()
+        .map(|p| match p {
+            Part::Text { text, .. } => {
+                let (code_blocks, code_lines, tables) = analyze_markdown(text);
+                PartLayoutMeta {
+                    kind: "text".into(),
+                    chars: text.chars().count().min(u32::MAX as usize) as u32,
+                    lines: count_lines_u32(text),
+                    code_blocks,
+                    code_lines,
+                    tables,
+                    tool: None,
+                    tool_lines: 0,
+                    width: None,
+                    height: None,
+                }
+            }
+            Part::Reasoning { text, .. } => PartLayoutMeta {
+                kind: "reasoning".into(),
+                chars: text.chars().count().min(u32::MAX as usize) as u32,
+                lines: count_lines_u32(text),
+                code_blocks: 0,
+                code_lines: 0,
+                tables: 0,
+                tool: None,
+                tool_lines: 0,
+                width: None,
+                height: None,
+            },
+            Part::Image { .. } => PartLayoutMeta {
+                kind: "image".into(),
+                chars: 0,
+                lines: 0,
+                code_blocks: 0,
+                code_lines: 0,
+                tables: 0,
+                tool: None,
+                tool_lines: 0,
+                width: None,
+                height: None,
+            },
+            Part::Tool {
+                name,
+                purpose,
+                input,
+                output,
+                meta,
+                ..
+            } => {
+                let lines = if name == "todo" {
+                    input
+                        .get("todos")
+                        .and_then(|v| v.as_array())
+                        .map_or(0, Vec::len)
+                } else if let Some(diff) = meta
+                    .as_ref()
+                    .and_then(|m| m.get("diff"))
+                    .and_then(|v| v.as_str())
+                {
+                    diff.lines().count()
+                } else {
+                    output.as_deref().map_or(0, |o| o.lines().count())
+                };
+                let tool_lines = lines.min(u16::MAX as usize) as u16;
+                let chars = (purpose.chars().count()
+                    + output.as_deref().map_or(0, |o| o.chars().count()))
+                .min(u32::MAX as usize) as u32;
+                PartLayoutMeta {
+                    kind: "tool".into(),
+                    chars,
+                    lines: tool_lines as u32,
+                    code_blocks: 0,
+                    code_lines: 0,
+                    tables: 0,
+                    tool: Some(name.clone()),
+                    tool_lines,
+                    width: None,
+                    height: None,
+                }
+            }
+        })
+        .collect();
+
+    MessageLayoutMeta {
+        seq,
+        id: msg.id.clone(),
+        role: msg.role,
+        source_kind: source_kind_str(&msg.source).into(),
+        has_error: msg.error.is_some(),
+        parts,
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
