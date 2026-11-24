@@ -213,8 +213,15 @@ function onBackgroundClick(event: MouseEvent): void {
     </TransitionGroup>
     <Transition name="empty-fade">
       <div v-if="activeTileIds.length === 0" class="empty">
-        <p>{{ t('split.empty') }}</p>
-        <TextButton :label="t('sidebar.newSession')" @click="newSession" />
+        <p>{{ workspace.splitFilter !== 'all' ? t('split.emptyFiltered') : t('split.empty') }}</p>
+        <div class="empty-actions">
+          <TextButton
+            v-if="workspace.splitFilter !== 'all'"
+            :label="t('split.showAll')"
+            @click="workspace.setSplitFilter('all')"
+          />
+          <TextButton :label="t('sidebar.newSession')" @click="newSession" />
+        </div>
       </div>
     </Transition>
   </div>
@@ -274,6 +281,11 @@ function onBackgroundClick(event: MouseEvent): void {
   align-items: center;
   justify-content: center;
   color: var(--text-muted);
+}
+.empty-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .empty-fade-enter-active,

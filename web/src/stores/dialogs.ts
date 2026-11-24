@@ -23,8 +23,9 @@ export type DialogRequest =
   | { kind: 'peers'; sessionId: string; tab: PeersTab; name?: string } // `name`: sets the peer name on open
   | { kind: 'help' }
   | { kind: 'settings' }
+  | { kind: 'backend' }
+  | { kind: 'stash' }
   | { kind: 'config'; section?: ConfigSectionId }
-export const useDialogsStore = defineStore('dialogs', () => {
   const current = shallowRef<DialogRequest>()
   let onClosed: (() => void) | undefined
   let closeGuard: ((source: 'escape' | 'scrim' | 'button') => boolean) | undefined

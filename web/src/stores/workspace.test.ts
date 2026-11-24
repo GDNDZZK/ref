@@ -593,3 +593,42 @@ describe('split view', () => {
     expect(workspace.zoomedId).toBeUndefined()
   })
 })
+
+describe('stash groups and splitFilter', () => {
+  it('updates groups on groups_changed, supports stash RPCs, and filters split tileIds by parent', async () => {
+    const group1 = { id: 'g1', name: 'Batch', locked: false, created_at: 1, updated_at: 1, members: [] }
+    Object.assign(api, {
+      listGroups: vi.fn().mockResolvedValue([group1]),
+      stashAll: vi.fn().mockResolvedValue({ group: group1, groups: [group1] }),
+      restoreGroup: vi.fn().mockResolvedValue({ restored_ids: ['ses_1'], groups: [] }),
+      renameGroup: vi.fn().mockResolvedValue([{ ...group1, name: 'Renamed' }]),
+      setGroupLocked: vi.fn().mockResolvedValue([{ ...group1, locked: true }]),
+      deleteGroup: vi.fn().mockResolvedValue([]),
+    })
+    const workspace = setup([
+      session('ses_1', { attached: 0, parent: null }),
+      session('ses_2', { attached: 0, parent: 'ses_1' }),
+      session('ses_3', { attached: 0, parent: 'ses_other' }),
+    ])
+    expect(workspace.tileIds).toEqual(['ses_1', 'ses_2', 'ses_3'])
+    workspace.setSplitFilter('user')
+    expect(workspace.tileIds).toEqual(['ses_1'])
+    workspace.setSplitFilter('ses_1')
+    expect(workspace.tileIds).toEqual(['ses_2'])
+    workspace.setSplitFilter('all')
+    expect(workspace.tileIds).toEqual(['ses_1', 'ses_2', 'ses_3'])
+
+    workspace.onFrame({ kind: 'groups_changed', groups: [group1] })
+    expect(workspace.groups).toEqual([group1])
+    await workspace.renameGroup('g1', 'Renamed')
+    expect(workspace.groups[0]?.name).toBe('Renamed')
+    await workspace.setGroupLocked('g1', true)
+    expect(workspace.groups[0]?.locked).toBe(true)
+    await workspace.deleteGroup('g1')
+    expect(workspace.groups).toEqual([])
+    await workspace.stashAll('Batch')
+    expect(workspace.groups).toEqual([group1])
+    await workspace.restoreGroup('g1')
+    expect(workspace.groups).toEqual([])
+  })
+})

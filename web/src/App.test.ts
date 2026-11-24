@@ -83,4 +83,20 @@ describe('App empty workspace state', () => {
     expect(wrapper.find('.unzoom-button').exists()).toBe(false)
     wrapper.unmount()
   })
+
+  it('shows the centered split-filter capsule only in split view when not zoomed', async () => {
+    const { wrapper, workspace } = mountApp()
+    expect(wrapper.find('.split-filter').exists()).toBe(false)
+    workspace.mode = 'split'
+    await nextTick()
+    expect(wrapper.find('.split-filter').exists()).toBe(true)
+    const pills = wrapper.findAll('.split-filter-pill')
+    await pills[1]!.trigger('click')
+    expect(workspace.splitFilter).toBe('user')
+
+    workspace.zoomedId = 'ses_2'
+    await nextTick()
+    expect(wrapper.find('.split-filter').exists()).toBe(false)
+    wrapper.unmount()
+  })
 })

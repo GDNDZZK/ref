@@ -18,11 +18,12 @@ import { isWorkingSession } from '../shell/sessionRow.ts'
 import { neighbor } from '../shell/tileLayout.ts'
 import type { Rect } from '../shell/tileLayout.ts'
 import type { Startup } from '../net/startup.ts'
-import type { ModelRef, SessionInfo } from '../proto/generated'
+import type { ModelRef, SessionInfo, StashGroup } from '../proto/generated'
 import { useConnectionStore } from './connection.ts'
 import { useNoticesStore } from './notices.ts'
 import { useSettingsStore } from './settings.ts'
 export type ViewMode = 'single' | 'split'
+export type SplitFilter = 'all' | 'user' | string
 
 export interface NewSessionOptions {
   cwd?: string // default: the workspace's directory
@@ -76,6 +77,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const sidebarHistorySynced = ref(false)
   const historyQuery = ref('')
   const historyCreator = ref<string>()
+  const groups = shallowRef<readonly StashGroup[]>([])
+  const splitFilter = ref<SplitFilter>('all')
   const currentId = ref<string>() // in split view: the session that returns when split view is left
   const cwd = ref('') // where new sessions start
   const mode = ref<ViewMode>('single')
@@ -93,15 +96,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   let historySerial = 0
   let sidebarHistorySerial = 0
   let sidebarHistoryInFlight = 0
+  let groupsSerial = 0
 
   const current = computed(() => (currentId.value ? chat(currentId.value) : undefined))
   // Background sessions get a tile: live ones nobody is attached to, excluding the current foreground session.
-  const tileIds = computed(() =>
-    live.value
-      .filter((session) => session.live && session.id !== currentId.value && session.attached === 0)
-      .map((session) => session.id),
-  )
-  // What the window shows now: one session, the zoomed tile, or all tiles.
+  const tileIds = computed(() => {
+    const base = live.value.filter(
+      (session) => session.live && session.id !== currentId.value && session.attached === 0,
+    )
+    const filter = splitFilter.value
+    if (filter === 'user') return base.filter((session) => !session.parent).map((session) => session.id)
+    if (filter !== 'all') return base.filter((session) => session.parent === filter).map((session) => session.id)
+    return base.map((session) => session.id)
+  })
   const visibleSessionIds = computed<string[]>(() => {
     if (mode.value === 'single') return currentId.value ? [currentId.value] : []
     return zoomedId.value ? [zoomedId.value] : tileIds.value
@@ -568,6 +575,148 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   function onFrame(frame: EventFrame): void {
     if (frame.kind === 'sessions') setLive(frame.sessions)
     if (frame.kind === 'event') onSessionEvent(frame)
+    if (frame.kind === 'groups_changed') groups.value = frame.groups
+  }
+
+  function setSplitFilter(filter: SplitFilter): void {
+    splitFilter.value = filter
+  }
+
+  async function refreshGroups(): Promise<void> {
+    const api = connection.getApi()
+    if (typeof api.listGroups !== 'function') return
+    const serial = ++groupsSerial
+    const loaded = await api.listGroups()
+    if (serial !== groupsSerial) return
+    groups.value = loaded
+  }
+
+  async function syncSessionsAfterStashChange(): Promise<void> {
+    const api = connection.getApi()
+    if (mode.value === 'split' && typeof api.watchAll === 'function') {
+      const sessions = await api.watchAll(true)
+      if (Array.isArray(sessions)) setLive(sessions)
+    } else if (typeof api.listSessions === 'function') {
+      const sessions = await api.listSessions()
+      if (Array.isArray(sessions)) setLive(sessions)
+    }
+    if (typeof api.listHistory === 'function') {
+      void refreshAllHistory().catch(notices.pushError)
+    }
+  }
+
+  async function stashAll(name?: string): Promise<StashGroup | null> {
+    const result = await connection.getApi().stashAll(name)
+    groupsSerial++
+    groups.value = result.groups
+    await syncSessionsAfterStashChange()
+    return result.group
+  }
+
+  async function createGroup(
+    sessionIds: string[],
+    options: { name?: string; stashLive?: boolean } = {},
+  ): Promise<StashGroup> {
+    const result = await connection.getApi().createGroup(sessionIds, options)
+    groupsSerial++
+    groups.value = result.groups
+    await syncSessionsAfterStashChange()
+    return result.group
+  }
+
+  async function renameGroup(groupId: string, name: string): Promise<void> {
+    const next = await connection.getApi().renameGroup(groupId, name)
+    groupsSerial++
+    groups.value = next
+  }
+
+  async function setGroupLocked(groupId: string, locked: boolean): Promise<void> {
+    const next = await connection.getApi().setGroupLocked(groupId, locked)
+    groupsSerial++
+    groups.value = next
+  }
+
+  async function deleteGroup(groupId: string): Promise<void> {
+    const next = await connection.getApi().deleteGroup(groupId)
+    groupsSerial++
+    groups.value = next
+  }
+
+  async function addToGroup(
+    groupId: string,
+    sessionId: string,
+    options: { position?: number; stashLive?: boolean } = {},
+  ): Promise<void> {
+    const next = await connection.getApi().addToGroup(groupId, sessionId, options)
+    groupsSerial++
+    groups.value = next
+    if (options.stashLive ?? true) await syncSessionsAfterStashChange()
+  }
+
+  async function moveGroupMember(
+    toGroupId: string,
+    sessionId: string,
+    position: number,
+    options: { fromGroupId?: string; stashLive?: boolean } = {},
+  ): Promise<void> {
+    const next = await connection.getApi().moveGroupMember(toGroupId, sessionId, position, options)
+    groupsSerial++
+    groups.value = next
+    if ((options.stashLive ?? true) && !options.fromGroupId) await syncSessionsAfterStashChange()
+  }
+
+  async function removeFromGroup(groupId: string, sessionId: string): Promise<void> {
+    const next = await connection.getApi().removeFromGroup(groupId, sessionId)
+    groupsSerial++
+    groups.value = next
+  }
+
+  async function mergeGroups(sourceGroupId: string, targetGroupId: string): Promise<void> {
+    const next = await connection.getApi().mergeGroups(sourceGroupId, targetGroupId)
+    groupsSerial++
+    groups.value = next
+  }
+
+  async function restoreGroup(groupId: string): Promise<string[]> {
+    const result = await connection.getApi().restoreGroup(groupId)
+    groupsSerial++
+    groups.value = result.groups
+    await syncSessionsAfterStashChange()
+    return result.restored_ids
+  }
+
+  async function restoreGroupMember(groupId: string, sessionId: string): Promise<boolean> {
+    const result = await connection.getApi().restoreGroupMember(groupId, sessionId)
+    groupsSerial++
+    groups.value = result.groups
+    await syncSessionsAfterStashChange()
+    return result.restored
+  }
+
+  function resetForBackendSwitch(): void {
+    latestOpen++
+    latestOpenTarget = undefined
+    openChain = Promise.resolve()
+    historySerial++
+    sidebarHistorySerial++
+    groupsSerial++
+    for (const session of chats.values()) session.dispose()
+    chats.clear()
+    attachingTiles.clear()
+    detachingTiles.clear()
+    live.value = []
+    history.value = []
+    historyLoaded.value = false
+    sidebarHistory.value = []
+    sidebarHistoryLoaded.value = false
+    sidebarHistorySynced.value = false
+    groups.value = []
+    currentId.value = undefined
+    zoomedId.value = undefined
+    tileFocusId.value = undefined
+    tileRects.value = []
+    cwd.value = ''
+    splitFilter.value = 'all'
   }
 
   // Called when the connection opens. The first time, opens the requested session if given.
@@ -583,12 +732,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         await discard(id)
       }
       await Promise.all([...chats.values()].map((session) => session.resync()))
+      void refreshGroups().catch(notices.pushError)
       return
     }
     cwd.value = start.cwd ?? connection.hello?.cwd ?? ''
     await connection.loadConfig(effectiveCwd.value)
     setLive(await api.listSessions())
     void refreshAllHistory().catch(notices.pushError)
+    void refreshGroups().catch(notices.pushError)
     await openRequested(start.sessionId)
     if (start.split) await enterSplit()
   }
@@ -612,6 +763,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     historyQuery,
     historyCreator,
     historyCurrentDir,
+    groups,
+    splitFilter,
     currentId,
     current,
     focusedId,
@@ -653,6 +806,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     focusTile,
     moveTileFocus,
     setTileRects,
+    setSplitFilter,
+    refreshGroups,
+    stashAll,
+    createGroup,
+    renameGroup,
+    setGroupLocked,
+    deleteGroup,
+    addToGroup,
+    moveGroupMember,
+    removeFromGroup,
+    mergeGroups,
+    restoreGroup,
+    restoreGroupMember,
+    resetForBackendSwitch,
     onFrame,
     onConnected,
   }

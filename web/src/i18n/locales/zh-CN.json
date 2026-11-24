@@ -93,7 +93,9 @@
     "connecting": "正在连接…",
     "reconnecting": "连接已断开，正在重连…",
     "closed": "已断开：{reason}",
-    "noDirectory": "没有工作目录：请通过 ref-web 打开此页面，或在直连 ref-server 时设置 ?cwd=（或 VITE_REF_CWD）。"
+    "noDirectory": "没有工作目录：请通过 ref-web 打开此页面，或在直连 ref-server 时设置 ?cwd=（或 VITE_REF_CWD）。",
+    "invalidServer": "无效的 ?server= WebSocket 地址。",
+    "switchBackend": "切换后端…"
   },
   "key": {
     "title": "输入密钥",
@@ -214,6 +216,15 @@
     "reload": {
       "title": "重新加载配置",
       "done": "配置已重新加载"
+    },
+    "backend": {
+      "title": "切换后端服务器…"
+    },
+    "stash": {
+      "title": "暂存运行中的会话"
+    },
+    "stashed": {
+      "title": "已暂存的会话分组…"
     }
   },
   "palette": {
@@ -251,7 +262,10 @@
     "reloadConfig": "重新加载配置",
     "resize": "调整侧边栏宽度",
     "resizeTodo": "调整待办区域高度",
-    "resizeRunning": "调整运行中区域高度"
+    "resizeRunning": "调整运行中区域高度",
+    "stashAll": "暂存全部运行中会话",
+    "stashAllHint": "暂存全部运行中会话（右键管理分组）",
+    "stashed": "已暂存分组"
   },
   "workspace": {
     "empty": "未打开会话"
@@ -261,7 +275,16 @@
     "zoom": "放大此分块",
     "unzoom": "返回分屏视图",
     "enter": "分屏视图",
-    "leave": "退出分屏视图"
+    "leave": "退出分屏视图",
+    "filterLabel": "筛选分屏视图",
+    "filterCreators": "按创建者筛选",
+    "filterAll": "显示全部",
+    "filterUser": "用户创建",
+    "filterByCreator": "由 {name} 创建",
+    "filterSpawnedBy": "由 {name} 派生",
+    "clearFilter": "清除筛选",
+    "emptyFiltered": "没有符合当前筛选的后台会话",
+    "showAll": "显示全部"
   },
   "time": {
     "justNow": "刚刚",
@@ -385,7 +408,50 @@
       "about": "ref {version} · 协议 {protocol}",
       "config": "配置文件",
       "editConfig": "编辑 ref.json…",
-      "reloadConfig": "重新加载配置"
+      "reloadConfig": "重新加载配置",
+      "backend": "后端连接",
+      "switchBackend": "切换后端…"
+    },
+    "backend": {
+      "title": "切换后端",
+      "current": "当前后端",
+      "localAuto": "本地自动发现后端",
+      "sourceAuto": "自动",
+      "sourceSaved": "已保存默认",
+      "sourceTemporary": "临时切换",
+      "sourceDirect": "直连 WS",
+      "urlLabel": "WebSocket 地址",
+      "urlPlaceholder": "ws://host:port/ws",
+      "tokenLabel": "访问令牌（可选）",
+      "tokenPlaceholder": "留空表示无令牌",
+      "keepToken": "已保存（{token}）— 留空以保留",
+      "tokenMasked": "令牌：{token}",
+      "clearToken": "清除令牌",
+      "emptyUrl": "请输入 WebSocket 地址。",
+      "invalidUrl": "地址必须以 ws:// 或 wss:// 开头。",
+      "switchTemporary": "临时切换",
+      "saveDefault": "设为默认",
+      "restoreDefault": "恢复本地默认"
+    },
+    "stash": {
+      "title": "暂存分组",
+      "runningColumn": "运行中",
+      "groupsColumn": "分组",
+      "stashAll": "全部暂存",
+      "newGroup": "新建分组",
+      "emptyGroups": "暂无已暂存分组",
+      "renameGroup": "点击重命名分组",
+      "lock": "锁定分组",
+      "unlock": "解锁分组",
+      "restoreAll": "全部恢复",
+      "deleteGroup": "删除分组",
+      "restoreMember": "恢复到后台",
+      "removeMember": "从分组移除",
+      "assignGroup": "分配到分组",
+      "addToGroup": "添加到 {name}",
+      "moveToGroup": "移动到 {name}",
+      "copyToGroup": "复制到 {name}",
+      "newGroupWithSession": "新建分组…"
     }
   },
   "banner": {
@@ -432,8 +498,8 @@
     "waitingPermission": "等待你的授权",
     "compacting": "正在压缩上下文…",
     "retrying": "{seconds} 秒后重试（第 {attempt} 次）：{error}",
-    "contextTitle": "上下文：{used} / {max} 词元（{percent}%）。建议在 {recommend} 压缩，{auto} 时自动压缩。",
-    "waitingQuestion": "等待你的回答"
+    "retryNow": "点击立刻重试",
+    "contextTitle": "上下文：{used} / {max} 词元（{percent}%）。建议在 {recommend} 压缩，{auto} 时自动压缩。"
   },
   "question": {
     "custom": "输入自己的答案",

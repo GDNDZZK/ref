@@ -1,11 +1,13 @@
 <script setup lang="ts">
 // The window (Main.qml): the sidebar beside the content, which is one session or the split view,
 // with the corner buttons, toasts and dialogs on top.
-import { computed, ref, watch } from 'vue'
+import { computed, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BackendBanner from './components/BackendBanner.vue'
 import CircleButton from './components/CircleButton.vue'
 import ConnectionBanner from './components/ConnectionBanner.vue'
+import ContextMenu from './components/ContextMenu.vue'
+import type { MenuItem } from './components/ContextMenu.vue'
 import DialogHost from './components/DialogHost.vue'
 import Icon from './components/Icon.vue'
 import KeyEntry from './components/KeyEntry.vue'
@@ -20,9 +22,8 @@ import { registerBuiltinCommands } from './commands/builtin.ts'
 import { installCustomCommands } from './commands/custom.ts'
 import { setBaseTitle } from './composables/useAttention.ts'
 import { APP_TITLE } from './notify/center.ts'
-import { liveLabel } from './shell/sessionRow.ts'
-import { usePermissionKeys } from './composables/usePermissionKeys.ts'
-import { useShortcuts } from './composables/useShortcuts.ts'
+import type { SessionInfo } from './proto/generated'
+import { creatorLabel, liveLabel } from './shell/sessionRow.ts'
 import { useCommandsStore } from './stores/commands.ts'
 import { useConnectionStore } from './stores/connection.ts'
 import { useDialogsStore } from './stores/dialogs.ts'
@@ -86,6 +87,55 @@ watch(
 )
 
 const splitLabel = computed(() => (workspace.mode === 'split' ? t('split.leave') : t('split.enter')))
+const showSplitFilter = computed(() => !layout.narrow && workspace.mode === 'split' && !workspace.zoomedId)
+const liveById = computed(() => new Map<string, SessionInfo>(workspace.live.map((s) => [s.id, s])))
+const splitCreators = computed(() => {
+  const ids = new Set<string>()
+  for (const session of workspace.live) {
+    if (session.live && session.id !== workspace.currentId && session.attached === 0 && session.parent) {
+      ids.add(session.parent)
+    }
+  }
+  return [...ids].map((id) => ({ id, name: creatorLabel(liveById.value, id) }))
+})
+const activeCreatorFilterName = computed(() => {
+  const filter = workspace.splitFilter
+  if (filter === 'all' || filter === 'user') return undefined
+  return creatorLabel(liveById.value, filter)
+})
+const splitFilterButton = useTemplateRef<HTMLButtonElement>('splitFilterButton')
+const splitFilterMenuOpen = ref(false)
+const splitFilterMenuMounted = ref(false)
+const splitFilterMenuCoords = ref({ x: 0, y: 0 })
+const splitFilterMenuItems = computed<MenuItem[]>(() => [
+  {
+    label: t('dialog.sessions.filterAll'),
+    checked: workspace.splitFilter === 'all',
+    run: () => workspace.setSplitFilter('all'),
+  },
+  {
+    label: t('dialog.sessions.filterUser'),
+    checked: workspace.splitFilter === 'user',
+    run: () => workspace.setSplitFilter('user'),
+  },
+  ...splitCreators.value.map((creator, index) => ({
+    label: t('dialog.sessions.filterByName', { name: creator.name }),
+    checked: workspace.splitFilter === creator.id,
+    separatorBefore: index === 0,
+    run: () => workspace.setSplitFilter(creator.id),
+  })),
+])
+
+function toggleSplitFilterMenu(): void {
+  if (splitFilterMenuOpen.value) {
+    splitFilterMenuOpen.value = false
+    return
+  }
+  const rect = splitFilterButton.value?.getBoundingClientRect()
+  splitFilterMenuCoords.value = { x: rect ? rect.left : 0, y: rect ? rect.bottom + 6 : 0 }
+  splitFilterMenuMounted.value = true
+  splitFilterMenuOpen.value = true
+}
 
 function toggleSplit(): void {
   commands.run('watch').catch(notices.pushError)
@@ -148,6 +198,58 @@ function toggleSplit(): void {
             >
               <Icon icon="plus-20" />
             </CircleButton>
+          </div>
+        </Transition>
+        <Transition name="fade">
+          <div v-if="showSplitFilter" class="split-filter" role="group" :aria-label="t('split.filterLabel')">
+            <button
+              type="button"
+              class="split-filter-pill"
+              :class="{ active: workspace.splitFilter === 'all' }"
+              :aria-pressed="workspace.splitFilter === 'all'"
+              @click="workspace.setSplitFilter('all')"
+            >
+              {{ t('dialog.sessions.filterAll') }}
+            </button>
+            <button
+              type="button"
+              class="split-filter-pill"
+              :class="{ active: workspace.splitFilter === 'user' }"
+              :aria-pressed="workspace.splitFilter === 'user'"
+              @click="workspace.setSplitFilter('user')"
+            >
+              {{ t('dialog.sessions.filterUser') }}
+            </button>
+            <button
+              v-if="activeCreatorFilterName"
+              type="button"
+              class="split-filter-pill active creator-pill"
+              :title="t('split.clearFilter')"
+              @click="workspace.setSplitFilter('all')"
+            >
+              {{ t('dialog.sessions.filterByName', { name: activeCreatorFilterName }) }} ×
+            </button>
+            <button
+              v-if="splitCreators.length > 0"
+              ref="splitFilterButton"
+              type="button"
+              class="split-filter-more"
+              :aria-label="t('split.filterCreators')"
+              :title="t('split.filterCreators')"
+              :aria-expanded="splitFilterMenuOpen"
+              aria-haspopup="menu"
+              @click="toggleSplitFilterMenu"
+            >
+              <Icon icon="filter-16" />
+            </button>
+            <ContextMenu
+              v-if="splitFilterMenuMounted"
+              :open="splitFilterMenuOpen"
+              :x="splitFilterMenuCoords.x"
+              :y="splitFilterMenuCoords.y"
+              :items="splitFilterMenuItems"
+              @close="splitFilterMenuOpen = false"
+            />
           </div>
         </Transition>
         <div class="corner right">
@@ -261,6 +363,63 @@ function toggleSplit(): void {
 
 .corner.right {
   right: var(--corner-inset);
+}
+.split-filter {
+  position: absolute;
+  top: var(--corner-inset);
+  left: 50%;
+  translate: -50% 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 34px;
+  max-width: calc(100% - 260px);
+  padding: 3px;
+  border-radius: 17px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.split-filter-pill,
+.split-filter-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  border-radius: 14px;
+  color: var(--text-muted);
+  font-size: var(--small-font-size);
+  white-space: nowrap;
+  transition:
+    background-color var(--motion-quick) var(--motion-ease),
+    color var(--motion-quick) var(--motion-ease);
+}
+
+.split-filter-pill {
+  padding: 0 10px;
+}
+
+.creator-pill {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.split-filter-more {
+  width: 28px;
+}
+
+.split-filter-pill:hover,
+.split-filter-more:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.split-filter-pill.active {
+  background: var(--user-bubble);
+  box-shadow: inset 0 0 0 1px var(--user-bubble-border);
+  color: var(--text);
 }
 
 .drawer-scrim {

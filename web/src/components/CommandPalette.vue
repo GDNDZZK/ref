@@ -44,6 +44,9 @@ const ICONS: Record<string, IconKey> = {
   help: 'info-16',
   config: 'file-text-16',
   reload: 'retry-16',
+  backend: 'globe-16',
+  stash: 'stash-16',
+  stashed: 'stash-16',
 }
 
 // Commands whose empty-arg invocation opens a dedicated picker/input dialog instead of an inline prompt.
