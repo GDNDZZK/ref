@@ -94,4 +94,19 @@ describe('SplitTile', () => {
     expect(focusedChild.classes()).toContain('focused')
     expect(focusedChild.getComponent(SessionDot).props('tint')).toBeUndefined()
   })
+
+  it('filters split view via header context menu', async () => {
+    const root = info({ id: 's_root', name: 'lead', parent: null })
+    const worker = info({ id: 's_worker', name: 'w1', parent: 's_root' })
+    const wrapper = mountTile({ focused: false, sessionInfo: worker, live: [root, worker] })
+    const workspace = useWorkspaceStore()
+
+    await wrapper.get('header.header').trigger('contextmenu')
+    const items = [...document.body.querySelectorAll('[role="menuitem"]')]
+    expect(items.map((el) => el.textContent?.trim())).toEqual(['Created by lead', 'Spawned by w1'])
+    ;(items[0] as HTMLElement).click()
+    expect(workspace.splitFilter).toBe('s_root')
+    wrapper.unmount()
+    document.body.innerHTML = ''
+  })
 })

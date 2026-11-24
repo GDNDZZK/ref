@@ -10,9 +10,7 @@
 import { describeError } from '../errorMessage.ts'
 import { PROTOCOL_VERSION } from '../proto/generated'
 import type { JsonValue, NotifyKind, Request, ServerFrame } from '../proto/generated'
-import type { Transport, TransportFactory } from './transport.ts'
-
-export type ConnectionState = 'connecting' | 'open' | 'closed'
+import type { ServerInfo, Transport, TransportFactory } from './transport.ts'
 
 export type EventFrame = Exclude<ServerFrame, { kind: 'response' }>
 
@@ -85,10 +83,13 @@ export class RefConnection {
     return this.helloResult
   }
 
+  get transportInfo(): ServerInfo | undefined {
+    return this.transport?.info
+  }
+
   open(): void {
     this.dial()
   }
-
   close(detail = 'closed by the client'): void {
     clearTimeout(this.retryTimer)
     this.setState('closed', detail)
@@ -211,11 +212,11 @@ export class RefConnection {
       case 'toast':
       case 'notify':
       case 'config_changed':
+      case 'groups_changed':
         for (const listener of [...this.frameListeners]) this.callListener(() => listener(frame))
         return
       default:
         this.reportError(new RefError(`unknown frame kind "${String((frame as { kind: unknown }).kind)}"`))
-    }
   }
 
   private settle(frame: Extract<ServerFrame, { kind: 'response' }>): void {

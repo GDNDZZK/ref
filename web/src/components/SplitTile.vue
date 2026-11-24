@@ -1,11 +1,13 @@
 <script setup lang="ts">
 // One session in the split view (SplitView.qml's tile): a header with its state and a zoom button,
 // and the session itself below. Zoomed, the header folds away and the frame fills the area.
-import { computed, nextTick, useTemplateRef } from 'vue'
+import { computed, nextTick, ref, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useNow } from '../composables/useNow.ts'
 import type { ChatSession } from '../model/chatSession.ts'
+import type { SessionInfo } from '../proto/generated'
 import {
+  creatorLabel,
   liveLabel,
   needsAttention,
   rootTaskOf,
@@ -16,6 +18,8 @@ import {
 import { useWorkspaceStore } from '../stores/workspace.ts'
 import { paletteColorFor } from '../theme/agentColor.ts'
 import AlertBadge from './AlertBadge.vue'
+import ContextMenu from './ContextMenu.vue'
+import type { MenuItem } from './ContextMenu.vue'
 import Icon from './Icon.vue'
 import SessionDot from './SessionDot.vue'
 import SessionPane from './SessionPane.vue'
@@ -69,8 +73,41 @@ const progress = computed(() => todoProgress(info.value?.todos))
 const elapsed = computed(() => (info.value ? runningTime(info.value, now.value) : undefined))
 const rootTask = computed(() => (info.value ? rootTaskOf(workspace.live, info.value) : undefined))
 const rootTint = computed(() => (rootTask.value ? paletteColorFor(rootTask.value.id) : undefined))
-</script>
+const liveById = computed(() => new Map<string, SessionInfo>(workspace.live.map((s) => [s.id, s])))
+const headerMenuOpen = ref(false)
+const headerMenuMounted = ref(false)
+const headerMenuCoords = ref({ x: 0, y: 0 })
+const headerMenuItems = computed<MenuItem[]>(() => {
+  const items: MenuItem[] = []
+  if (info.value?.parent) {
+    const parentId = info.value.parent
+    items.push({
+      label: t('split.filterByCreator', { name: creatorLabel(liveById.value, parentId) }),
+      checked: workspace.splitFilter === parentId,
+      run: () => workspace.setSplitFilter(parentId),
+    })
+  }
+  items.push({
+    label: t('split.filterSpawnedBy', { name: title.value }),
+    checked: workspace.splitFilter === props.session.id,
+    run: () => workspace.setSplitFilter(props.session.id),
+  })
+  if (workspace.splitFilter !== 'all') {
+    items.push({
+      label: t('split.filterAll'),
+      separatorBefore: true,
+      run: () => workspace.setSplitFilter('all'),
+    })
+  }
+  return items
+})
 
+function openHeaderMenu(event: MouseEvent): void {
+  headerMenuCoords.value = { x: event.clientX, y: event.clientY }
+  headerMenuMounted.value = true
+  headerMenuOpen.value = true
+}
+</script>
 <template>
   <div
     class="tile"
@@ -86,9 +123,9 @@ const rootTint = computed(() => (rootTask.value ? paletteColorFor(rootTask.value
       :style="{ '--clear-left': `${clearance.left}px`, '--clear-right': `${clearance.right}px` }"
       :inert="zoomed || undefined"
       @dblclick="emit('zoom')"
+      @contextmenu.prevent="openHeaderMenu"
     >
       <SessionDot :state="state" :tint="!focused ? rootTint : undefined" />
-      <span class="title">{{ title }}</span>
       <span v-if="rootTask" class="root-chip" :title="rootTask.name">⟲ {{ rootTask.name }}</span>
       <span v-if="needsAttention(state)" class="mark">
         <Icon v-if="state === 'permission'" icon="lock-16" class="lock" />
@@ -110,6 +147,14 @@ const rootTint = computed(() => (rootTask.value ? paletteColorFor(rootTask.value
       </button>
     </header>
     <SessionPane ref="pane" class="body" :session="session" :composer-shown="focused || zoomed" />
+    <ContextMenu
+      v-if="headerMenuMounted"
+      :open="headerMenuOpen"
+      :x="headerMenuCoords.x"
+      :y="headerMenuCoords.y"
+      :items="headerMenuItems"
+      @close="headerMenuOpen = false"
+    />
   </div>
 </template>
 

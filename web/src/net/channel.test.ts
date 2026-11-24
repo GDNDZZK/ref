@@ -5,8 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 import { channelTransport } from './channel.ts'
 import type { KeySource } from './channel.ts'
-import { KIND_TEXT, Sealer, channelKeys, fromHex, toHex, utf8 } from './channelCrypto.ts'
-import type { SocketHandlers, TransportHandlers } from './transport.ts'
+import { KIND_BINARY, KIND_TEXT, Opener, Sealer, channelKeys, fromHex, toHex, utf8 } from './channelCrypto.ts'
 
 // The vectors shared with crates/web: the page's nonce is fixed, so its auth message is too.
 const FIXTURE = fileURLToPath(new URL('../../../crates/web/fixtures/channel.json', import.meta.url))
@@ -245,5 +244,52 @@ describe('channelTransport', () => {
     expect(t.socketClose).toHaveBeenCalled()
     t.server.close(1000)
     expect(t.handlers.closed).not.toHaveBeenCalled()
+  })
+
+  it('sends sealed connect_upstream and waits for upstream_ready when channel_control is true', async () => {
+    const keys = { rootFor: vi.fn().mockResolvedValue(hex(fixture.root, 32)), rejected: vi.fn() }
+    const sent: (string | Uint8Array)[] = []
+    let socketHandlers!: SocketHandlers
+    const handlers = { opened: vi.fn(), message: vi.fn(), closed: vi.fn() } satisfies TransportHandlers
+    const factory = channelTransport(
+      (given) => {
+        socketHandlers = given
+        return { send: (data) => void sent.push(data), close: vi.fn() }
+      },
+      keys,
+      () => hex(fixture.cn, 16),
+      { mode: 'explicit', url: 'ws://custom:9000/ws', token: 'tok' },
+    )
+    factory(handlers)
+    socketHandlers.opened()
+    socketHandlers.message(helloText())
+    await flush()
+
+    const derived = channelKeys(hex(fixture.root, 32), hex(fixture.sn, 16), hex(fixture.cn, 16))
+    const serverSealer = new Sealer(derived.toPage)
+    const serverOpener = new Opener(derived.toServer)
+    const frame0 = serverSealer.seal(
+      KIND_TEXT,
+      utf8(JSON.stringify({ version: '0.2.4', cwd: '/work', mock: false, channel_control: true })),
+    )
+    socketHandlers.message(frame0)
+    await flush()
+
+    expect(handlers.opened).not.toHaveBeenCalled()
+    expect(sent).toHaveLength(2)
+    const ctrlWire = sent[1] as Uint8Array
+    const ctrlOpened = serverOpener.open(ctrlWire)
+    expect(ctrlOpened.kind).toBe(KIND_BINARY)
+    expect(JSON.parse(new TextDecoder().decode(ctrlOpened.plaintext))).toEqual({
+      op: 'connect_upstream',
+      mode: 'explicit',
+      url: 'ws://custom:9000/ws',
+      token: 'tok',
+    })
+
+    const ready = serverSealer.seal(KIND_BINARY, utf8(JSON.stringify({ op: 'upstream_ready' })))
+    socketHandlers.message(ready)
+    await flush()
+    expect(handlers.opened).toHaveBeenCalledOnce()
   })
 })

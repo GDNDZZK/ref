@@ -78,10 +78,23 @@ function reloadConfig(): void {
         />
       </div>
     </div>
+    <div class="row config-row backend-row">
+      <div class="backend-info">
+        <span>{{ t('dialog.settings.backend') }}</span>
+        <span class="backend-detail">
+          {{ connection.activeBackendUrl || t('dialog.backend.localAuto') }}
+          <template v-if="connection.maskedBackendToken"> · {{ connection.maskedBackendToken }}</template>
+        </span>
+      </div>
+      <DialogButton
+        small
+        :label="t('dialog.settings.switchBackend')"
+        @click="dialogs.open({ kind: 'backend' })"
+      />
+    </div>
     <p class="about">{{ about }}</p>
   </ModalDialog>
 </template>
-
 <style scoped>
 .row {
   display: flex;
@@ -109,6 +122,20 @@ function reloadConfig(): void {
   gap: 8px;
 }
 
+.backend-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.backend-detail {
+  overflow: hidden;
+  color: var(--text-muted);
+  font: var(--small-font-size) var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .about {
   margin: 16px 0 0;
   color: var(--text-muted);

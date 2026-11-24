@@ -93,7 +93,9 @@
     "connecting": "Connecting…",
     "reconnecting": "Connection lost. Reconnecting…",
     "closed": "Disconnected: {reason}",
-    "noDirectory": "No working directory: open this page through ref-web, or set ?cwd= (or VITE_REF_CWD) when connecting to ref-server directly."
+    "noDirectory": "No working directory: open this page through ref-web, or set ?cwd= (or VITE_REF_CWD) when connecting to ref-server directly.",
+    "invalidServer": "Invalid ?server= WebSocket URL.",
+    "switchBackend": "Switch Backend…"
   },
   "key": {
     "title": "Enter the key",
@@ -214,6 +216,15 @@
     "reload": {
       "title": "Reload configuration",
       "done": "Configuration reloaded"
+    },
+    "backend": {
+      "title": "Switch backend server…"
+    },
+    "stash": {
+      "title": "Stash running sessions"
+    },
+    "stashed": {
+      "title": "Stashed session groups…"
     }
   },
   "palette": {
@@ -251,7 +262,10 @@
     "reloadConfig": "Reload configuration",
     "resize": "Resize sidebar",
     "resizeTodo": "Resize Todo section",
-    "resizeRunning": "Resize Running section"
+    "resizeRunning": "Resize Running section",
+    "stashAll": "Stash all running sessions",
+    "stashAllHint": "Stash all running sessions (right-click to manage groups)",
+    "stashed": "Stashed groups"
   },
   "workspace": {
     "empty": "No session open"
@@ -261,7 +275,16 @@
     "zoom": "Zoom in on this tile",
     "unzoom": "Back to the split view",
     "enter": "Split view",
-    "leave": "Leave split view"
+    "leave": "Leave split view",
+    "filterLabel": "Filter split tiles",
+    "filterCreators": "Filter by creator",
+    "filterAll": "Show all tiles",
+    "filterUser": "User-created",
+    "filterByCreator": "Created by {name}",
+    "filterSpawnedBy": "Spawned by {name}",
+    "clearFilter": "Clear filter",
+    "emptyFiltered": "No background sessions match this filter",
+    "showAll": "Show all"
   },
   "time": {
     "justNow": "just now",
@@ -385,7 +408,50 @@
       "about": "ref {version} · protocol {protocol}",
       "config": "Configuration",
       "editConfig": "Edit ref.json…",
-      "reloadConfig": "Reload configuration"
+      "reloadConfig": "Reload configuration",
+      "backend": "Backend",
+      "switchBackend": "Switch Backend…"
+    },
+    "backend": {
+      "title": "Switch backend",
+      "current": "Active backend",
+      "localAuto": "Local auto-discovered backend",
+      "sourceAuto": "Auto",
+      "sourceSaved": "Saved default",
+      "sourceTemporary": "Temporary",
+      "sourceDirect": "Direct WS",
+      "urlLabel": "WebSocket URL",
+      "urlPlaceholder": "ws://host:port/ws",
+      "tokenLabel": "Token (optional)",
+      "tokenPlaceholder": "Leave blank if none",
+      "keepToken": "Saved ({token}) — leave blank to keep",
+      "tokenMasked": "Token: {token}",
+      "clearToken": "Clear token",
+      "emptyUrl": "Enter a WebSocket URL.",
+      "invalidUrl": "URL must start with ws:// or wss://.",
+      "switchTemporary": "Switch temporarily",
+      "saveDefault": "Save as default",
+      "restoreDefault": "Restore local default"
+    },
+    "stash": {
+      "title": "Stashed groups",
+      "runningColumn": "Running",
+      "groupsColumn": "Groups",
+      "stashAll": "Stash all",
+      "newGroup": "New group",
+      "emptyGroups": "No stashed groups yet",
+      "renameGroup": "Click to rename group",
+      "lock": "Lock group",
+      "unlock": "Unlock group",
+      "restoreAll": "Restore all",
+      "deleteGroup": "Delete group",
+      "restoreMember": "Restore to background",
+      "removeMember": "Remove from group",
+      "assignGroup": "Assign to group",
+      "addToGroup": "Add to {name}",
+      "moveToGroup": "Move to {name}",
+      "copyToGroup": "Copy to {name}",
+      "newGroupWithSession": "New group…"
     }
   },
   "banner": {
@@ -432,8 +498,8 @@
     "waitingPermission": "Waiting for your permission",
     "compacting": "Compacting context…",
     "retrying": "Retrying in {seconds}s (attempt {attempt}): {error}",
-    "contextTitle": "Context: {used} of {max} tokens ({percent}%). Recommended compaction at {recommend}, automatic at {auto}.",
-    "waitingQuestion": "Waiting for your answer"
+    "retryNow": "Click to retry now",
+    "contextTitle": "Context: {used} of {max} tokens ({percent}%). Recommended compaction at {recommend}, automatic at {auto}."
   },
   "question": {
     "custom": "Type your own answer",

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { SessionEvent } from '../proto/generated'
+import type { Message, MessageLayoutMeta, SessionEvent } from '../proto/generated'
 import type { Block } from './blocks.ts'
-import { Transcript } from './transcript.ts'
+import { EVICT_BUFFER, MAX_RESIDENT_MESSAGES, PAGE_SIZE, TAIL_KEEP_MESSAGES, Transcript } from './transcript.ts'
 import {
   assistantMessage,
   info,
@@ -107,7 +107,7 @@ describe('Transcript: loading', () => {
   it('reset replaces the history', () => {
     const { transcript } = setup()
     transcript.load(snapshot([userMessage('u1', 'old')]))
-    transcript.apply({ type: 'reset', messages: [userMessage('u2', 'new')], more_before: false }, 0)
+    transcript.apply({ type: 'reset', messages: [userMessage('u2', 'new')], more_before: false, total_messages: 1, start_seq: 0 }, 0)
     transcript.flush(0)
     expect(texts(transcript.blocks)).toEqual(['new'])
   })
@@ -399,7 +399,7 @@ describe('Transcript: compaction', () => {
     const { transcript } = setup()
     transcript.load(snapshot(compacted))
     transcript.flush(0)
-    transcript.apply({ type: 'reset', messages: compacted.slice(0, 3), more_before: false }, 0)
+    transcript.apply({ type: 'reset', messages: compacted.slice(0, 3), more_before: false, total_messages: 3, start_seq: 0 }, 0)
     transcript.flush(0)
     expect(transcript.blocks.filter((block) => block.kind === 'compaction')).toMatchObject([{ last: true }])
     expect(transcript.blocks.filter((block) => block.stale).map((block) => block.key)).toEqual([
@@ -415,7 +415,7 @@ describe('Transcript: reset and older pages', () => {
     transcript.load(snapshot([userMessage('u1', 'a'), userMessage('u2', 'b')]))
     transcript.flush(0)
     const before = transcript.blocks
-    transcript.apply({ type: 'reset', messages: [userMessage('u1', 'a')], more_before: false }, 0)
+    transcript.apply({ type: 'reset', messages: [userMessage('u1', 'a')], more_before: false, total_messages: 1, start_seq: 0 }, 0)
     transcript.flush(0)
     expect(transcript.blocks).toHaveLength(2)
     expect(transcript.blocks[0]).toBe(before[0])
@@ -454,7 +454,7 @@ describe('Transcript: session error', () => {
     const { transcript } = setup()
     transcript.load(snapshot([userMessage('u1', 'a')]))
     transcript.apply({ type: 'error', text: 'boom' }, 0)
-    transcript.apply({ type: 'reset', messages: [], more_before: false }, 0)
+    transcript.apply({ type: 'reset', messages: [], more_before: false, total_messages: 0, start_seq: 0 }, 0)
     transcript.flush(0)
     expect(transcript.blocks).toMatchObject([{ kind: 'error', text: 'boom' }])
   })
@@ -463,5 +463,79 @@ describe('Transcript: session error', () => {
     const { transcript } = setup()
     transcript.load(snapshot([assistantMessage('a1', [toolPart('c1', 'delayed')])]))
     expect(transcript.lastToolDelayed).toBe(true)
+  })
+})
+
+describe('Transcript: sliding window and eviction', () => {
+  const meta = (seq: number, id: string): MessageLayoutMeta => ({
+    seq,
+    id,
+    role: 'user',
+    source_kind: 'human',
+    has_error: false,
+    parts: [{ kind: 'text', chars: 10, lines: 1, code_blocks: 0, code_lines: 0, tables: 0, tool: null, tool_lines: 0, width: null, height: null }],
+  })
+
+  it('exports expected sliding-window constants', () => {
+    expect([PAGE_SIZE, MAX_RESIDENT_MESSAGES, TAIL_KEEP_MESSAGES, EVICT_BUFFER]).toEqual([100, 300, 100, 150])
+  })
+
+  it('populates 0..total_messages slots from layout_metas and messages, inserts ranges, and evicts outside window', () => {
+    const { transcript } = setup()
+    const metas = [meta(0, 'm0'), meta(1, 'm1'), meta(2, 'm2')]
+    const msgs: Message[] = [userMessage('m3', 'three'), userMessage('m4', 'four')]
+    transcript.load(snapshot(msgs, { more_before: true, total_messages: 5, start_seq: 3, layout_metas: metas }))
+    transcript.flush(0)
+
+    expect(transcript.totalCount).toBe(5)
+    expect(transcript.residentCount).toBe(2)
+    expect(transcript.slots.map((s) => s.kind)).toEqual([
+      'placeholder',
+      'placeholder',
+      'placeholder',
+      'materialized',
+      'materialized',
+    ])
+
+    transcript.insertRange(1, 3, [userMessage('m1', 'one'), userMessage('m2', 'two')])
+    transcript.flush(0)
+    expect(transcript.residentCount).toBe(4)
+    expect(transcript.slots.map((s) => s.kind)).toEqual([
+      'placeholder',
+      'materialized',
+      'materialized',
+      'materialized',
+      'materialized',
+    ])
+
+    const evicted = transcript.evictOutside(1, 2)
+    transcript.flush(0)
+    expect(evicted).toEqual(['m3', 'm4'])
+    expect(transcript.residentCount).toBe(2)
+    expect(transcript.slots.map((s) => s.kind)).toEqual([
+      'placeholder',
+      'materialized',
+      'materialized',
+      'placeholder',
+      'placeholder',
+    ])
+  })
+
+  it('evicts older than newest keepCount via evictBeforeTail', () => {
+    const { transcript } = setup()
+    const messages = Array.from({ length: 6 }, (_, i) => userMessage(`m${i}`, `msg ${i}`))
+    transcript.load(snapshot(messages))
+    transcript.flush(0)
+    const evicted = transcript.evictBeforeTail(2)
+    transcript.flush(0)
+    expect(evicted).toEqual(['m0', 'm1', 'm2', 'm3'])
+    expect(transcript.slots.map((s) => s.kind)).toEqual([
+      'placeholder',
+      'placeholder',
+      'placeholder',
+      'placeholder',
+      'materialized',
+      'materialized',
+    ])
   })
 })

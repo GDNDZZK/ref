@@ -9,6 +9,7 @@ import type { DialogRequest } from '../stores/dialogs.ts'
 import { useWorkspaceStore } from '../stores/workspace.ts'
 import CommandPalette from './CommandPalette.vue'
 import AgentsDialog from './dialogs/AgentsDialog.vue'
+import BackendDialog from './dialogs/BackendDialog.vue'
 import ConfigDialog from './dialogs/ConfigDialog.vue'
 import ConfirmDialog from './dialogs/ConfirmDialog.vue'
 import ExportDialog from './dialogs/ExportDialog.vue'
@@ -20,6 +21,7 @@ import PeersDialog from './dialogs/PeersDialog.vue'
 import RenameDialog from './dialogs/RenameDialog.vue'
 import SessionsDialog from './dialogs/SessionsDialog.vue'
 import SettingsDialog from './dialogs/SettingsDialog.vue'
+import StashDialog from './dialogs/StashDialog.vue'
 import VariantsDialog from './dialogs/VariantsDialog.vue'
 import { Key } from '../keys.ts'
 
@@ -92,6 +94,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           <HelpDialog v-else-if="shown.kind === 'help'" />
           <SettingsDialog v-else-if="shown.kind === 'settings'" />
           <ConfigDialog v-else-if="shown.kind === 'config'" :section="shown.section" />
+          <BackendDialog v-else-if="shown.kind === 'backend'" />
+          <StashDialog v-else-if="shown.kind === 'stash'" />
         </div>
       </Transition>
     </div>

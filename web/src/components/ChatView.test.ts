@@ -222,3 +222,114 @@ describe('ChatView scroll geometry', () => {
     wrapper.unmount()
   })
 })
+
+describe('ChatView virtualization', () => {
+  const originalResizeObserver = globalThis.ResizeObserver
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    MockResizeObserver.instances = []
+    globalThis.ResizeObserver = MockResizeObserver as unknown as typeof ResizeObserver
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    globalThis.ResizeObserver = originalResizeObserver
+  })
+
+  it('renders skeletons for placeholders, virtual spacers, and recomputes heights synchronously on fold toggle', async () => {
+    const slots = [
+      {
+        kind: 'placeholder' as const,
+        seq: 0,
+        id: 'm0',
+        meta: {
+          seq: 0,
+          id: 'm0',
+          role: 'assistant' as const,
+          source_kind: 'human',
+          has_error: false,
+          parts: [
+            {
+              kind: 'tool',
+              chars: 60,
+              lines: 5,
+              code_blocks: 0,
+              code_lines: 0,
+              tables: 0,
+              tool: 'bash',
+              tool_lines: 5,
+              width: null,
+              height: null,
+            },
+          ],
+        },
+      },
+      {
+        kind: 'materialized' as const,
+        seq: 1,
+        id: 'm1',
+        message: {
+          id: 'm1',
+          role: 'user' as const,
+          time: 0,
+          time_end: 0,
+          source: { kind: 'human' as const },
+          parts: [{ type: 'text' as const, text: 'hi', time: 0 }],
+          model: null,
+          agent: null,
+          usage: null,
+          error: null,
+        },
+        blocks: [makeBlock('m1:user')],
+        stale: false,
+        lastCompaction: false,
+      },
+    ]
+    const requestRange = vi.fn()
+    const evictAround = vi.fn()
+    const evictAtBottom = vi.fn()
+    const session = shallowReactive({
+      blocks: slots[1]!.blocks,
+      slots,
+      activity: 'idle' as Activity,
+      busy: false,
+      generation: 1,
+      moreBefore: true,
+      loadingOlder: false,
+      olderError: '',
+      thinkingExpanded: false,
+      detailsExpanded: false,
+      loadOlder: vi.fn(),
+      requestRange,
+      evictAround,
+      evictAtBottom,
+    })
+
+    const wrapper = mount(ChatView, {
+      props: { session: session as unknown as ChatSession, following: true },
+      global: {
+        stubs: {
+          BlockView: {
+            props: ['block', 'fresh', 'leaving'],
+            template: '<div class="block-stub" :data-key="block.key" />',
+          },
+          OlderMessages: true,
+        },
+      },
+    })
+    await nextTick()
+    const skeleton = wrapper.find('.skeleton-frame')
+    expect(skeleton.exists()).toBe(true)
+    expect(skeleton.text()).toContain('bash')
+    const initialHeight = skeleton.attributes('style')
+
+    // Toggling detailsExpanded recomputes skeleton height synchronously with 0 network calls.
+    requestRange.mockClear()
+    session.detailsExpanded = true
+    await nextTick()
+    expect(skeleton.attributes('style')).not.toBe(initialHeight)
+    expect(requestRange).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+})

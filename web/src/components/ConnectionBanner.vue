@@ -4,10 +4,12 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useConnectionStore } from '../stores/connection.ts'
+import { useDialogsStore } from '../stores/dialogs.ts'
+import DialogButton from './DialogButton.vue'
 
 const { t } = useI18n()
 const connection = useConnectionStore()
-
+const dialogs = useDialogsStore()
 const text = computed(() => {
   if (connection.fatal) return t(connection.fatal)
   if (connection.state === 'closed') return t('connection.closed', { reason: connection.detail })
@@ -37,10 +39,18 @@ watch(
   <Transition name="banner">
     <div v-if="text" class="slot">
       <div class="fold">
-        <p class="banner" role="alert">
-          {{ shownText }}
-          <span v-if="shownDetail" class="detail">{{ shownDetail }}</span>
-        </p>
+        <div class="banner" role="alert">
+          <span class="message">
+            {{ shownText }}
+            <span v-if="shownDetail" class="detail">{{ shownDetail }}</span>
+          </span>
+          <DialogButton
+            small
+            class="switch-backend"
+            :label="t('connection.switchBackend')"
+            @click="dialogs.open({ kind: 'backend' })"
+          />
+        </div>
       </div>
     </div>
   </Transition>
@@ -62,6 +72,10 @@ watch(
 }
 
 .banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
   margin: 0;
   padding: 8px var(--page-padding);
   background: var(--surface);
@@ -75,7 +89,6 @@ watch(
   margin-left: 8px;
   opacity: 0.7;
 }
-
 .banner-enter-from,
 .banner-leave-to {
   grid-template-rows: 0fr;

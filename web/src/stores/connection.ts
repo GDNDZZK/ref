@@ -1,19 +1,40 @@
 // The connection to the backend: state, handshake result and the typed API.
 
 import { defineStore } from 'pinia'
-import { computed, ref, shallowRef } from 'vue'
+import { computed, onScopeDispose, ref, shallowRef } from 'vue'
 import { RefApi } from '../net/api.ts'
+import {
+  clearSavedBackend,
+  maskToken,
+  readSavedBackend,
+  subscribeBackendStorage,
+  validateBackendUrl,
+  writeSavedBackend,
+} from '../net/backend.ts'
+import type { BackendConfig, BackendSource } from '../net/backend.ts'
+import { channelTransport } from '../net/channel.ts'
+import type { UpstreamTarget } from '../net/channel.ts'
 import { RefConnection, protocolOf } from '../net/connection.ts'
 import type { ConnectionState, EventFrame, HelloResult } from '../net/connection.ts'
-import { channelTransport } from '../net/channel.ts'
 import { keys } from '../net/keystore.ts'
 import { directServerUrl, webSocket, webSocketTransport } from '../net/transport.ts'
+import type { ServerInfo } from '../net/transport.ts'
 import { PROTOCOL_VERSION } from '../proto/generated'
 import type { ConfigFilesInfo, ServerConfigInfo } from '../proto/generated'
 import { useNoticesStore } from './notices.ts'
 import { useSettingsStore } from './settings.ts'
 
 const CLIENT_NAME = 'ref-web'
+
+export type SwitchBackendAction =
+  | { mode: 'temporary'; url: string; token?: string }
+  | { mode: 'saveDefault'; url: string; token?: string }
+  | { mode: 'restoreDefault' }
+
+export interface StartOptions {
+  direct?: boolean
+  token?: string
+}
 
 export const useConnectionStore = defineStore('connection', () => {
   const notices = useNoticesStore()
@@ -22,14 +43,21 @@ export const useConnectionStore = defineStore('connection', () => {
   const detail = ref('')
   const hello = shallowRef<HelloResult>()
   const config = shallowRef<ServerConfigInfo>()
+  const serverInfo = shallowRef<ServerInfo>()
   const protocol = computed(() => protocolOf(hello.value))
   const backendTooOld = computed(() => hello.value !== undefined && protocol.value < PROTOCOL_VERSION)
   const fatal = ref<string>() // i18n key of an error that stops the app before it connects
   const keyRequired = ref(false) // ref-web needs a key we do not have: the key-entry page shows
   const reconnected = ref(0) // counts the times the connection came back after a loss
+  const switchEpoch = ref(0)
+
+  const temporaryBackend = shallowRef<BackendConfig>()
+  const savedBackend = shallowRef<BackendConfig | undefined>(readSavedBackend())
+  const backendSource = ref<BackendSource>('auto')
 
   const frameListeners = new Set<(frame: EventFrame) => void>()
   const openListeners = new Set<(isReconnect: boolean) => void>()
+  const beforeSwitchListeners = new Set<() => void>()
   let connection: RefConnection | undefined
   let api: RefApi | undefined
   let opened = false
@@ -37,8 +65,13 @@ export const useConnectionStore = defineStore('connection', () => {
   let reloadingCount = 0
   let mutatingCount = 0
   let sawConfigChangedDuringMutation = false
-  let address: { url: string; cwd: string | undefined } | undefined
+  let address: { url: string; cwd: string | undefined; direct?: boolean; token?: string } | undefined
   let keyOutcome: ((accepted: boolean) => void) | undefined
+
+  const activeOverride = computed(() => temporaryBackend.value ?? savedBackend.value)
+  const activeBackendUrl = computed(() => activeOverride.value?.url ?? address?.url ?? '')
+  const activeBackendToken = computed(() => activeOverride.value?.token ?? address?.token)
+  const maskedBackendToken = computed(() => maskToken(activeBackendToken.value))
 
   function settleKey(accepted: boolean): void {
     keyOutcome?.(accepted)
@@ -53,20 +86,40 @@ export const useConnectionStore = defineStore('connection', () => {
     return true
   }
 
+  function resolveEffectiveSource(isDirect: boolean): BackendSource {
+    if (temporaryBackend.value) return 'temporary'
+    if (savedBackend.value) return 'saved'
+    return isDirect ? 'direct' : 'auto'
+  }
+
   // `cwd`: the directory new sessions start in; ref-web's own is used when there is none.
-  function start(url: string, cwd?: string): void {
-    address = { url, cwd }
-    // A dev build talks to a ref-server directly: no key, no channel.
-    const direct = directServerUrl() !== undefined
+  function start(url: string, cwd?: string, options: StartOptions = {}): void {
+    address = { url, cwd, direct: options.direct, token: options.token }
+    const direct = Boolean(options.direct) || directServerUrl() !== undefined
+    const override = activeOverride.value
+    const source = resolveEffectiveSource(direct)
+    backendSource.value = source
+
     if (!direct && !keys.hasKey()) {
       keys.required = true
       keyRequired.value = true
       return
     }
+
+    const dialUrl = direct && override ? override.url : url
+    const upstreamTarget: UpstreamTarget | undefined =
+      !direct && override
+        ? { mode: 'explicit', url: override.url, token: override.token }
+        : undefined
+    const token = override?.token ?? options.token
+
     const created = new RefConnection({
-      connect: direct ? webSocketTransport(url) : channelTransport(webSocket(url), keys),
+      connect: direct
+        ? webSocketTransport(dialUrl)
+        : channelTransport(webSocket(url), keys, undefined, upstreamTarget),
       client: CLIENT_NAME,
       cwd,
+      token,
       notifyKinds: () => settings.notifyKinds,
       giveUp: giveUpWithoutKey,
     })
@@ -74,23 +127,77 @@ export const useConnectionStore = defineStore('connection', () => {
     api = new RefApi(created)
 
     created.onState((next, why) => {
+      if (created !== connection) return
       state.value = next
       detail.value = why
       if (next !== 'open') return
       keyRequired.value = false
       settleKey(true)
       hello.value = created.hello
+      serverInfo.value = created.transportInfo
       const isReconnect = opened
       opened = true
       if (isReconnect) reconnected.value++
       for (const listener of openListeners) listener(isReconnect)
     })
     created.onFrame((frame) => {
+      if (created !== connection) return
       for (const listener of frameListeners) listener(frame)
     })
-    created.onError((error) => notices.pushError(error))
+    created.onError((error) => {
+      if (created !== connection) return
+      notices.pushError(error)
+    })
     created.open()
   }
+
+  function resetConnectionState(): void {
+    settleKey(false)
+    connection?.close()
+    connection = undefined
+    api = undefined
+    opened = false
+    reloadingCount = 0
+    mutatingCount = 0
+    sawConfigChangedDuringMutation = false
+    config.value = undefined
+    hello.value = undefined
+    serverInfo.value = undefined
+    fatal.value = undefined
+    state.value = 'connecting'
+    detail.value = ''
+    switchEpoch.value++
+    for (const listener of beforeSwitchListeners) listener()
+  }
+
+  function switchBackend(action: SwitchBackendAction): void {
+    if (action.mode === 'temporary') {
+      const checked = validateBackendUrl(action.url)
+      if (!checked.ok) throw new Error(checked.errorKey)
+      const token = action.token?.trim() || undefined
+      temporaryBackend.value = token ? { url: checked.url, token } : { url: checked.url }
+    } else if (action.mode === 'saveDefault') {
+      savedBackend.value = writeSavedBackend({ url: action.url, token: action.token })
+      temporaryBackend.value = undefined
+    } else {
+      temporaryBackend.value = undefined
+      clearSavedBackend()
+      savedBackend.value = undefined
+    }
+    resetConnectionState()
+    if (!address) return
+    start(address.url, address.cwd, { direct: address.direct, token: address.token })
+  }
+
+  const stopStorageSync = subscribeBackendStorage((next) => {
+    const previous = savedBackend.value
+    savedBackend.value = next
+    const same = previous?.url === next?.url && previous?.token === next?.token
+    if (same || !address || temporaryBackend.value || backendSource.value === 'direct') return
+    resetConnectionState()
+    start(address.url, address.cwd, { direct: address.direct, token: address.token })
+  })
+  onScopeDispose(stopStorageSync)
 
   // The key-entry page: signs in with the typed key. True when ref-web accepted it.
   function submitKey(key: string): Promise<boolean> {
@@ -100,7 +207,7 @@ export const useConnectionStore = defineStore('connection', () => {
       settleKey(false)
       keyOutcome = resolve
       connection?.close()
-      start(address.url, address.cwd)
+      start(address.url, address.cwd, { direct: address.direct, token: address.token })
     })
   }
 
@@ -208,6 +315,10 @@ export const useConnectionStore = defineStore('connection', () => {
     openListeners.add(listener)
   }
 
+  function onBeforeSwitch(listener: () => void): void {
+    beforeSwitchListeners.add(listener)
+  }
+
   function stop(): void {
     connection?.close()
   }
@@ -216,13 +327,22 @@ export const useConnectionStore = defineStore('connection', () => {
     state,
     detail,
     hello,
+    serverInfo,
     protocol,
     config,
     backendTooOld,
     reconnected,
+    switchEpoch,
+    backendSource,
+    temporaryBackend,
+    savedBackend,
+    activeBackendUrl,
+    activeBackendToken,
+    maskedBackendToken,
     fatal,
     keyRequired,
     start,
+    switchBackend,
     submitKey,
     stop,
     loadConfig,
@@ -238,5 +358,6 @@ export const useConnectionStore = defineStore('connection', () => {
     shutdownServer,
     onFrame,
     onOpen,
+    onBeforeSwitch,
   }
 })

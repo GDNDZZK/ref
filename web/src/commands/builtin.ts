@@ -340,6 +340,33 @@ export function registerBuiltinCommands(): void {
       run: () => dialogs.open({ kind: 'settings' }),
     }),
     define({
+      id: 'backend',
+      aliases: ['server'],
+      group: 'help',
+      run: () => dialogs.open({ kind: 'backend' }),
+    }),
+    define({
+      id: 'stash',
+      args: argument('[name]'),
+      run: async (_sessionId, args) => {
+        const name = args.trim()
+        if (name) {
+          await workspace.stashAll(name)
+          return
+        }
+        if (workspace.live.length > 0) {
+          await workspace.stashAll()
+          return
+        }
+        dialogs.open({ kind: 'stash' })
+      },
+    }),
+    define({
+      id: 'stashed',
+      aliases: ['groups'],
+      run: () => dialogs.open({ kind: 'stash' }),
+    }),
+    define({
       id: 'palette',
       slash: false,
       group: 'help',

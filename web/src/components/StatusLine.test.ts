@@ -1,12 +1,20 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { createPinia } from 'pinia'
+import { describe, expect, it, vi } from 'vitest'
 import { nextTick, shallowReactive } from 'vue'
 import { createAppI18n } from '../i18n/index.ts'
 import type { Activity, ChatSession } from '../model/chatSession.ts'
 import type { ContextUsage } from '../proto/generated'
+import { useNoticesStore } from '../stores/notices.ts'
 import StatusLine from './StatusLine.vue'
 
-function mountStatusLine(options: { activity: Activity; error?: string; context?: ContextUsage }) {
+function mountStatusLine(options: {
+  activity: Activity
+  error?: string
+  context?: ContextUsage
+  retryNow?: () => Promise<boolean>
+}) {
+  const retryNow = options.retryNow ?? vi.fn().mockResolvedValue(true)
   const session = shallowReactive({
     id: 's1',
     activity: options.activity,
@@ -17,15 +25,17 @@ function mountStatusLine(options: { activity: Activity; error?: string; context?
     busySince: undefined,
     context: options.context,
     info: undefined,
+    retryNow,
   })
+  const pinia = createPinia()
   const wrapper = mount(StatusLine, {
     props: { session: session as unknown as ChatSession },
     global: {
-      plugins: [createAppI18n(['en'])],
+      plugins: [pinia, createAppI18n(['en'])],
       stubs: { StatusTodo: true },
     },
   })
-  return { wrapper, session }
+  return { wrapper, session, retryNow, pinia }
 }
 
 describe('StatusLine', () => {
@@ -97,6 +107,34 @@ describe('StatusLine', () => {
     session.context = { used: 0, max: 0, recommend: 50, auto: 80 }
     await nextTick()
     expect(wrapper.find('.context').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('renders a clickable retry button when retrying and triggers session.retryNow', async () => {
+    const retryNow = vi.fn().mockResolvedValue(true)
+    const { wrapper, session } = mountStatusLine({ activity: 'retrying', error: 'rate limit', retryNow })
+
+    const btn = wrapper.get('button.retry-button')
+    expect(btn.attributes('title')).toBe('Click to retry now')
+    expect(btn.attributes('aria-label')).toBe('Click to retry now')
+    await btn.trigger('click')
+    expect(retryNow).toHaveBeenCalledTimes(1)
+
+    session.activity = 'thinking'
+    session.retry = undefined
+    await nextTick()
+    expect(wrapper.find('button.retry-button').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('pushes an error notice when immediate retry fails', async () => {
+    const retryNow = vi.fn().mockRejectedValue(new Error('retry failed'))
+    const { wrapper, pinia } = mountStatusLine({ activity: 'retrying', retryNow })
+
+    await wrapper.get('button.retry-button').trigger('click')
+    await nextTick()
+    await nextTick()
+    expect(useNoticesStore(pinia).notices.map((n) => n.text)).toEqual(['retry failed'])
     wrapper.unmount()
   })
 })

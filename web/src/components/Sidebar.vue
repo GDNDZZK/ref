@@ -193,6 +193,17 @@ function report(promise: Promise<unknown>): void {
   promise.catch(notices.pushError)
 }
 
+function onStashButtonClick(): void {
+  if (workspace.live.length > 0) {
+    report(workspace.stashAll())
+    return
+  }
+  dialogs.open({ kind: 'stash' })
+}
+
+function openStashDialog(): void {
+  dialogs.open({ kind: 'stash' })
+}
 function open(id: string): void {
   layout.closeDrawer()
   if (workspace.mode === 'single' && id === workspace.currentId) {
@@ -565,6 +576,17 @@ onBeforeUnmount(() => {
       </header>
 
       <div class="new-row">
+        <button
+          type="button"
+          class="stash-btn"
+          :aria-label="workspace.live.length > 0 ? t('sidebar.stashAll') : t('sidebar.stashed')"
+          :title="workspace.live.length > 0 ? t('sidebar.stashAllHint') : t('sidebar.stashed')"
+          @click="onStashButtonClick"
+          @contextmenu.prevent="openStashDialog"
+        >
+          <Icon :icon="workspace.groups.length > 0 ? 'stash-count-20' : 'stash-20'" />
+          <span v-if="workspace.groups.length > 0" class="stash-count">{{ workspace.groups.length }}</span>
+        </button>
         <button type="button" class="new" @click="report(commands.run('new'))">
           <Icon icon="plus-20" />
           {{ t('sidebar.newSession') }}
@@ -927,7 +949,8 @@ onBeforeUnmount(() => {
 }
 
 .new,
-.folder {
+.folder,
+.stash-btn {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -942,25 +965,44 @@ onBeforeUnmount(() => {
 
 .new {
   flex: 1;
+  min-width: 0;
   gap: 6px;
   font-size: calc(var(--small-font-size) + 1px);
 }
 
-.folder {
+.folder,
+.stash-btn {
+  position: relative;
+  flex: none;
   width: 36px;
   color: var(--text-muted);
 }
 
+.stash-count {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-top: 2px;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  pointer-events: none;
+}
+
 .new:hover,
-.folder:hover {
+.folder:hover,
+.stash-btn:hover {
   background: var(--surface-hover);
 }
 
 .new:active,
-.folder:active {
+.folder:active,
+.stash-btn:active {
   scale: 0.96;
 }
-
 .body {
   --sidebar-todo-share: 3; /* the Todo section takes at most this fraction of the column */
   --search-height: 32px;

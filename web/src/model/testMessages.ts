@@ -88,10 +88,14 @@ export function toolPart(callId: string, state: ToolPart['state'] = 'running'): 
 }
 
 export function snapshot(messages: Message[], overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
+  const startSeq = overrides.start_seq ?? overrides.layout_metas?.length ?? 0
+  const totalMessages = overrides.total_messages ?? startSeq + messages.length
   return {
     info: info(),
     messages,
     more_before: false,
+    total_messages: totalMessages,
+    start_seq: startSeq,
     pending_permissions: [],
     pending_questions: [],
     queued: [],

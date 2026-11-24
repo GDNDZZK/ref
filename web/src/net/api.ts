@@ -13,11 +13,17 @@ import type {
   ServerConfigInfo,
   SessionInfo,
   SessionSnapshot,
+  StashGroup,
 } from '../proto/generated'
 import type { RefConnection } from './connection.ts'
 
 export type ShellCompletionItem = { value: string; description?: string }
-
+export interface MessagesPage {
+  messages: Message[]
+  more_before: boolean
+  start_seq: number
+  end_seq: number
+}
 export class RefApi {
   private readonly connection: RefConnection
 
@@ -236,14 +242,25 @@ export class RefApi {
   }
 
   // One page of messages older than `before`, oldest first.
-  async messagesBefore(
-    sessionId: string,
-    before: string,
-    limit?: number,
-  ): Promise<{ messages: Message[]; more_before: boolean }> {
+  async messagesBefore(sessionId: string, before: string, limit?: number): Promise<MessagesPage> {
     return this.callWhole({ op: 'messages', session_id: sessionId, before, limit: limit ?? null })
   }
 
+  // A contiguous range of messages [startSeq, endSeq), oldest first.
+  async messagesRange(
+    sessionId: string,
+    startSeq: number,
+    endSeq: number,
+    limit?: number,
+  ): Promise<MessagesPage> {
+    return this.callWhole({
+      op: 'messages',
+      session_id: sessionId,
+      start_seq: startSeq,
+      end_seq: endSeq,
+      limit: limit ?? null,
+    })
+  }
   // The bytes of an image the messages only carry as a stub.
   async getImage(sessionId: string, imageId: string): Promise<{ mime: string; data: string }> {
     return this.call({ op: 'get_image', session_id: sessionId, image_id: imageId }, 'image')
@@ -265,6 +282,10 @@ export class RefApi {
 
   async abort(sessionId: string): Promise<void> {
     await this.connection.request({ op: 'abort', session_id: sessionId })
+  }
+
+  async retryNow(sessionId: string): Promise<boolean> {
+    return this.call({ op: 'retry_now', session_id: sessionId }, 'retried')
   }
 
   async permissionReply(sessionId: string, callId: string, allow: boolean, always: boolean): Promise<void> {
@@ -312,5 +333,92 @@ export class RefApi {
   // Whether the tab is in front and which sessions it shows, so the backend does not notify about those.
   async setFocus(focused: boolean, sessions: string[]): Promise<void> {
     await this.connection.request({ op: 'set_focus', focused, sessions })
+  }
+
+  async listGroups(): Promise<StashGroup[]> {
+    return this.call({ op: 'list_groups' }, 'groups')
+  }
+
+  async stashAll(name?: string): Promise<{ group: StashGroup | null; groups: StashGroup[] }> {
+    return this.callWhole({ op: 'stash_all', name: name ?? null })
+  }
+
+  async createGroup(
+    sessionIds: string[],
+    options: { name?: string; stashLive?: boolean } = {},
+  ): Promise<{ group: StashGroup; groups: StashGroup[] }> {
+    return this.callWhole({
+      op: 'create_group',
+      name: options.name ?? null,
+      session_ids: sessionIds,
+      stash_live: options.stashLive ?? true,
+    })
+  }
+
+  async renameGroup(groupId: string, name: string): Promise<StashGroup[]> {
+    return this.call({ op: 'rename_group', group_id: groupId, name }, 'groups')
+  }
+
+  async setGroupLocked(groupId: string, locked: boolean): Promise<StashGroup[]> {
+    return this.call({ op: 'set_group_locked', group_id: groupId, locked }, 'groups')
+  }
+
+  async deleteGroup(groupId: string): Promise<StashGroup[]> {
+    return this.call({ op: 'delete_group', group_id: groupId }, 'groups')
+  }
+
+  async addToGroup(
+    groupId: string,
+    sessionId: string,
+    options: { position?: number; stashLive?: boolean } = {},
+  ): Promise<StashGroup[]> {
+    return this.call(
+      {
+        op: 'add_to_group',
+        group_id: groupId,
+        session_id: sessionId,
+        position: options.position ?? null,
+        stash_live: options.stashLive ?? true,
+      },
+      'groups',
+    )
+  }
+
+  async moveGroupMember(
+    toGroupId: string,
+    sessionId: string,
+    position: number,
+    options: { fromGroupId?: string; stashLive?: boolean } = {},
+  ): Promise<StashGroup[]> {
+    return this.call(
+      {
+        op: 'move_group_member',
+        from_group_id: options.fromGroupId ?? null,
+        to_group_id: toGroupId,
+        session_id: sessionId,
+        position,
+        stash_live: options.stashLive ?? true,
+      },
+      'groups',
+    )
+  }
+
+  async removeFromGroup(groupId: string, sessionId: string): Promise<StashGroup[]> {
+    return this.call({ op: 'remove_from_group', group_id: groupId, session_id: sessionId }, 'groups')
+  }
+
+  async mergeGroups(sourceGroupId: string, targetGroupId: string): Promise<StashGroup[]> {
+    return this.call(
+      { op: 'merge_groups', source_group_id: sourceGroupId, target_group_id: targetGroupId },
+      'groups',
+    )
+  }
+
+  async restoreGroup(groupId: string): Promise<{ restored_ids: string[]; groups: StashGroup[] }> {
+    return this.callWhole({ op: 'restore_group', group_id: groupId })
+  }
+
+  async restoreGroupMember(groupId: string, sessionId: string): Promise<{ restored: boolean; groups: StashGroup[] }> {
+    return this.callWhole({ op: 'restore_group_member', group_id: groupId, session_id: sessionId })
   }
 }

@@ -879,4 +879,36 @@ describe('Sidebar', () => {
       wrapper.unmount()
     })
   })
+
+  describe('stash button', () => {
+    it('shows stash-20 when 0 groups and stash-count-20 with count when >= 1 groups', async () => {
+      const { workspace, wrapper } = mountSidebar()
+      const dialogs = useDialogsStore()
+      const stashAllSpy = vi.spyOn(workspace, 'stashAll').mockResolvedValue(null)
+      const btn = wrapper.get('button.stash-btn')
+      expect(btn.find('.stash-count').exists()).toBe(false)
+      expect(btn.html()).toContain('M5 3h10l2 4v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z')
+
+      // Left-click when live > 0 calls stashAll().
+      await btn.trigger('click')
+      expect(stashAllSpy).toHaveBeenCalledTimes(1)
+
+      // Right-click opens StashDialog.
+      await btn.trigger('contextmenu')
+      expect(dialogs.current).toEqual({ kind: 'stash' })
+      dialogs.close()
+
+      // With >= 1 groups and 0 live sessions, displays count and left-click opens StashDialog.
+      workspace.onFrame({
+        kind: 'groups_changed',
+        groups: [{ id: 'g1', name: 'G1', locked: false, created_at: 1, updated_at: 1, members: [] }],
+      })
+      workspace.onFrame({ kind: 'sessions', sessions: [] })
+      await nextTick()
+      expect(btn.get('.stash-count').text()).toBe('1')
+      await btn.trigger('click')
+      expect(dialogs.current).toEqual({ kind: 'stash' })
+      wrapper.unmount()
+    })
+  })
 })

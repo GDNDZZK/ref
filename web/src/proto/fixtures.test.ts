@@ -46,8 +46,8 @@ const SERVER_FRAME_KINDS = {
   toast: 0,
   notify: 0,
   config_changed: 0,
+  groups_changed: 0,
 } satisfies Record<ServerFrame['kind'], 0>
-
 const REQUEST_OPS = [
   'hello',
   'get_config',
@@ -90,10 +90,22 @@ const REQUEST_OPS = [
   'delete_config_file',
   'list_binaries',
   'complete_shell',
+  'retry_now',
+  'list_groups',
+  'stash_all',
+  'create_group',
+  'rename_group',
+  'set_group_locked',
+  'delete_group',
+  'add_to_group',
+  'move_group_member',
+  'remove_from_group',
+  'merge_groups',
+  'restore_group',
+  'restore_group_member',
   'shutdown',
   'ping',
 ] satisfies ClientFrame['op'][]
-
 describe('request samples', () => {
   const samples = fixtures<ClientFrame>('request')
 

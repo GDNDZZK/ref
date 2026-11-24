@@ -186,4 +186,21 @@ describe('built-in commands', () => {
     await commands.runSlash('/close-session ALPHA')
     expect(closeSessionSpy).toHaveBeenCalledWith('ses_1')
   })
+
+  it('registers /backend (/server), /stash [name], and /stashed (/groups)', async () => {
+    registerBuiltinCommands()
+    const commands = useCommandsStore()
+    const workspace = useWorkspaceStore()
+    const dialogs = useDialogsStore()
+    const stashSpy = vi.spyOn(workspace, 'stashAll').mockResolvedValue(null)
+
+    await commands.runSlash('/server')
+    expect(dialogs.current).toEqual({ kind: 'backend' })
+
+    await commands.runSlash('/groups')
+    expect(dialogs.current).toEqual({ kind: 'stash' })
+
+    await commands.runSlash('/stash sprint-1')
+    expect(stashSpy).toHaveBeenCalledWith('sprint-1')
+  })
 })

@@ -51,7 +51,13 @@ export const useMcpStore = defineStore('mcp', () => {
     },
     { immediate: true },
   )
+  function reset(): void {
+    clearTimeout(recheck)
+    recheck = undefined
+    servers.value = []
+  }
+
   onScopeDispose(() => clearTimeout(recheck))
 
-  return { servers, refresh }
+  return { servers, refresh, reset }
 })

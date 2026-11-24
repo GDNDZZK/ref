@@ -47,15 +47,19 @@ interface Hello {
   sn: string
 }
 
-type Phase = 'hello' | 'frame0' | 'open' | 'over'
+export type UpstreamTarget =
+  | { mode: 'auto' }
+  | { mode: 'cli_default' }
+  | { mode: 'explicit'; url: string; token?: string }
+
+type Phase = 'hello' | 'frame0' | 'upstream' | 'open' | 'over'
 
 export function channelTransport(
   open: SocketFactory,
   keys: KeySource,
   random: RandomBytes = cryptoRandom,
+  upstream?: UpstreamTarget,
 ): TransportFactory {
-  return (handlers) => {
-    let phase: Phase = 'hello'
     let sealer: Sealer | undefined
     let opener: Opener | undefined
     let info: ServerInfo | undefined
@@ -109,8 +113,33 @@ export function channelTransport(
           return
         }
         info = parsed
-        phase = 'open'
-        handlers.opened()
+        if (parsed.channel_control !== true) {
+          phase = 'open'
+          handlers.opened()
+          return
+        }
+        const target: UpstreamTarget = upstream ?? (parsed.cli_server ? { mode: 'cli_default' } : { mode: 'auto' })
+        const control = buildControlMessage(target)
+        phase = 'upstream'
+        socket.send(sealer!.seal(KIND_BINARY, utf8(JSON.stringify(control))))
+        return
+      }
+      if (phase === 'upstream') {
+        if (opened.kind !== KIND_BINARY) {
+          end('ref-web sent an unexpected frame during upstream setup')
+          return
+        }
+        const control = parseControlMessage(text)
+        if (control?.op === 'upstream_ready') {
+          if (typeof control.cwd === 'string' && info) {
+            info = { ...info, cwd: control.cwd }
+          }
+          phase = 'open'
+          handlers.opened()
+          return
+        }
+        const reason = typeof control?.error === 'string' ? control.error : 'upstream connection failed'
+        end(reason)
         return
       }
       if (opened.kind === KIND_BINARY) {
@@ -119,7 +148,6 @@ export function channelTransport(
       }
       handlers.message(text)
     }
-
     const receive = async (data: string | Uint8Array): Promise<void> => {
       if (phase === 'over') return
       if (phase === 'hello') {
@@ -180,6 +208,32 @@ function parseInfo(text: string): ServerInfo | undefined {
     const wellFormed =
       typeof info.version === 'string' && typeof info.cwd === 'string' && typeof info.mock === 'boolean'
     return wellFormed ? (info as ServerInfo) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function buildControlMessage(target: UpstreamTarget): Record<string, string> {
+  if (target.mode === 'explicit') {
+    return {
+      op: 'connect_upstream',
+      mode: 'explicit',
+      url: target.url,
+      ...(target.token ? { token: target.token } : {}),
+    }
+  }
+  return { op: 'connect_upstream', mode: target.mode }
+}
+
+function parseControlMessage(text: string): { op?: string; cwd?: string; error?: string } | undefined {
+  try {
+    const parsed = JSON.parse(text) as { op?: unknown; cwd?: unknown; error?: unknown }
+    if (typeof parsed !== 'object' || parsed === null || typeof parsed.op !== 'string') return undefined
+    return {
+      op: parsed.op,
+      cwd: typeof parsed.cwd === 'string' ? parsed.cwd : undefined,
+      error: typeof parsed.error === 'string' ? parsed.error : undefined,
+    }
   } catch {
     return undefined
   }

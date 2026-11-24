@@ -1,15 +1,16 @@
 // One session's conversation as blocks.
 //
-//   snapshot / events --> Transcript --flush(now), once per frame--> Block[]
+//   snapshot / events --> Transcript --flush(now), once per frame--> Block[] + TranscriptSlot[]
 //                           |  text growth goes through the StreamPacer first
 //
-// Pure TypeScript, no Vue: the store wraps `blocks` in a shallowRef and calls `flush` from the
-// frame loop. Events change the model at once; what the view shows changes only in `flush`,
-// which also releases paced text, so a burst of events costs one view update.
+// Pure TypeScript, no Vue: the store wraps `blocks` and `slots` in shallowRefs and calls `flush`
+// from the frame loop. Events change the model at once; what the view shows changes only in
+// `flush`, which also releases paced text, so a burst of events costs one view update.
 
 import type {
   Delta,
   Message,
+  MessageLayoutMeta,
   Part,
   PermissionRequest,
   QuestionRequest,
@@ -21,23 +22,50 @@ import { reuseIfEqual } from './blocks.ts'
 import type { Block } from './blocks.ts'
 import { buildBlocks, messageText } from './buildBlocks.ts'
 import type { MessageEntry } from './buildBlocks.ts'
+import { layoutMetaFromMessage } from './layoutEstimator.ts'
 import { PartView } from './partView.ts'
 import { StreamPacer } from './streamPacer.ts'
 import { partialPurpose } from './toolArgs.ts'
+
+export const PAGE_SIZE = 100
+export const MAX_RESIDENT_MESSAGES = 300
+export const TAIL_KEEP_MESSAGES = 100
+export const EVICT_BUFFER = 150
+
+export type TranscriptSlot =
+  | {
+      kind: 'materialized'
+      seq: number
+      id: string
+      message: Message
+      blocks: readonly Block[]
+      stale: boolean
+      lastCompaction: boolean
+    }
+  | {
+      kind: 'placeholder'
+      seq: number
+      id: string
+      meta: MessageLayoutMeta
+    }
 
 export interface TranscriptOptions {
   reportError(message: string): void // an event that does not fit the conversation
 }
 
 interface MessageBlocks {
+  seq: number
   entry: MessageEntry
   blocks: Block[]
   stale: boolean // before the last compaction
   lastCompaction: boolean
 }
 
-const TAIL_ERROR_KEY = 'session:error'
+type SlotModel =
+  | { kind: 'materialized'; seq: number; entry: MessageBlocks }
+  | { kind: 'placeholder'; seq: number; id: string; meta: MessageLayoutMeta }
 
+const TAIL_ERROR_KEY = 'session:error'
 const STREAM_SEPARATOR = '@'
 
 type TextLikePart = Extract<Part, { type: 'text' | 'reasoning' }>
@@ -56,16 +84,29 @@ function parseStreamKey(stream: string): { messageId: string; index: number } {
   return { index: Number(stream.slice(0, at)), messageId: stream.slice(at + 1) }
 }
 
+function fallbackMeta(seq: number): MessageLayoutMeta {
+  return {
+    seq,
+    id: `placeholder-${seq}`,
+    role: 'user',
+    source_kind: 'human',
+    has_error: false,
+    parts: [],
+  }
+}
+
 export class Transcript {
   private readonly options: TranscriptOptions
   private readonly pacer = new StreamPacer()
   private entries: MessageBlocks[] = []
+  private slotModels: SlotModel[] = []
   private readonly byId = new Map<string, MessageBlocks>()
   private readonly dirty = new Set<string>() // messages whose blocks must be rebuilt
   private readonly pacedMessages = new Set<string>() // messages with text in the pacer
   private structureChanged = false
   private tailChanged = false
   private flat: readonly Block[] = []
+  private publishedSlots: readonly TranscriptSlot[] = []
   private tailError: Block | undefined
 
   info: SessionInfo | undefined
@@ -83,6 +124,18 @@ export class Transcript {
 
   get blocks(): readonly Block[] {
     return this.flat
+  }
+
+  get slots(): readonly TranscriptSlot[] {
+    return this.publishedSlots
+  }
+
+  get totalCount(): number {
+    return this.slotModels.length
+  }
+
+  get residentCount(): number {
+    return this.entries.length
   }
 
   get busy(): boolean {
@@ -118,6 +171,35 @@ export class Transcript {
     return reply ? messageText(reply.entry.message) : ''
   }
 
+  // Returns contiguous [startSeq, endSeq) bounds containing placeholders around [start, end).
+  missingRangeAround(start: number, end: number): { startSeq: number; endSeq: number } | undefined {
+    const total = this.slotModels.length
+    if (total === 0) return undefined
+    const clampedStart = Math.max(0, Math.min(start, total - 1))
+    const clampedEnd = Math.max(clampedStart + 1, Math.min(end, total))
+
+    let firstMissing = -1
+    let lastMissing = -1
+    for (let seq = clampedStart; seq < clampedEnd; seq++) {
+      if (this.slotModels[seq]?.kind !== 'placeholder') continue
+      if (firstMissing < 0) firstMissing = seq
+      lastMissing = seq
+    }
+    if (firstMissing < 0) return undefined
+
+    let reqStart = firstMissing
+    let reqEnd = lastMissing + 1
+    // Expand contiguous placeholder block up to PAGE_SIZE so adjacent scrolling does not thrash.
+    while (reqEnd - reqStart < PAGE_SIZE) {
+      const canExpandLeft = reqStart > 0 && this.slotModels[reqStart - 1]?.kind === 'placeholder'
+      const canExpandRight = reqEnd < total && this.slotModels[reqEnd]?.kind === 'placeholder'
+      if (!canExpandLeft && !canExpandRight) break
+      if (canExpandLeft) reqStart--
+      if (reqEnd - reqStart < PAGE_SIZE && canExpandRight) reqEnd++
+    }
+    return { startSeq: reqStart, endSeq: reqEnd }
+  }
+
   // A prompt was sent: the error of the turn before is history.
   clearError(): void {
     if (this.errorText === '') return
@@ -126,13 +208,90 @@ export class Transcript {
   }
 
   // A page of older messages: shown at once, above what is there.
-  prepend(messages: Message[], moreBefore: boolean): void {
-    const added = messages
-      .filter((message) => !this.byId.has(message.id))
-      .map((message) => this.newEntry(message, false, 0))
-    this.entries = [...added, ...this.entries]
+  prepend(messages: Message[], moreBefore: boolean, startSeq?: number): void {
+    const firstMaterialized = this.entries[0]?.seq ?? this.slotModels.length
+    if (firstMaterialized > 0) {
+      const seq = startSeq ?? Math.max(0, firstMaterialized - messages.length)
+      this.insertRange(seq, seq + messages.length, messages)
+      this.moreBefore = moreBefore
+      return
+    }
+    const addedMessages = messages.filter((message) => !this.byId.has(message.id))
+    const shift = addedMessages.length
+    for (const slot of this.slotModels) {
+      slot.seq += shift
+      if (slot.kind === 'materialized') slot.entry.seq = slot.seq
+      else slot.meta = { ...slot.meta, seq: slot.seq }
+    }
+    const addedSlots: SlotModel[] = addedMessages.map((message, index) => ({
+      kind: 'materialized',
+      seq: index,
+      entry: this.newEntry(message, index, false, 0),
+    }))
+    this.slotModels = [...addedSlots, ...this.slotModels]
+    this.rebuildEntriesOrder()
     this.moreBefore = moreBefore
     this.structureChanged = true
+  }
+
+  insertRange(startSeq: number, endSeq: number, messages: Message[]): void {
+    if (messages.length === 0 || startSeq < 0) return
+    let changed = false
+    for (let i = 0; i < messages.length; i++) {
+      const seq = startSeq + i
+      if (seq >= endSeq) break
+      const message = messages[i]!
+      if (this.byId.has(message.id)) continue
+      while (this.slotModels.length <= seq) {
+        const padSeq = this.slotModels.length
+        const meta = fallbackMeta(padSeq)
+        this.slotModels.push({ kind: 'placeholder', seq: padSeq, id: meta.id, meta })
+      }
+      const existingSlot = this.slotModels[seq]
+      if (existingSlot?.kind === 'materialized' && existingSlot.entry.entry.message.id === message.id) {
+        continue
+      }
+      const added = this.newEntry(message, seq, false, 0)
+      this.slotModels[seq] = { kind: 'materialized', seq, entry: added }
+      changed = true
+    }
+    if (!changed) return
+    this.rebuildEntriesOrder()
+    this.structureChanged = true
+  }
+
+  // Evicts materialized messages outside [keepStart, keepEnd] inclusive, converting them to placeholders.
+  evictOutside(keepStart: number, keepEnd: number): string[] {
+    const evicted: string[] = []
+    for (let i = 0; i < this.slotModels.length; i++) {
+      const slot = this.slotModels[i]!
+      if (slot.kind !== 'materialized') continue
+      if (slot.seq >= keepStart && slot.seq <= keepEnd) continue
+      const message = slot.entry.entry.message
+      const id = message.id
+      slot.entry.entry.views.forEach((_view, index) => this.pacer.discard(streamKey(id, index)))
+      this.byId.delete(id)
+      this.dirty.delete(id)
+      this.pacedMessages.delete(id)
+      this.slotModels[i] = {
+        kind: 'placeholder',
+        seq: slot.seq,
+        id,
+        meta: layoutMetaFromMessage(slot.seq, message),
+      }
+      evicted.push(id)
+    }
+    if (evicted.length === 0) return evicted
+    this.rebuildEntriesOrder()
+    this.structureChanged = true
+    return evicted
+  }
+
+  // Evicts materialized messages older than the newest `keepCount`.
+  evictBeforeTail(keepCount: number): string[] {
+    const total = this.slotModels.length
+    const keepStart = Math.max(0, total - Math.max(0, keepCount))
+    return this.evictOutside(keepStart, total - 1)
   }
 
   load(snapshot: SessionSnapshot): void {
@@ -146,7 +305,13 @@ export class Transcript {
     for (const request of snapshot.pending_permissions) this.permissions.set(request.call_id, request)
     this.questions.clear()
     for (const request of snapshot.pending_questions) this.questions.set(request.call_id, request)
-    this.replaceMessages(snapshot.messages)
+    this.replaceWindow(
+      snapshot.messages,
+      snapshot.start_seq ?? snapshot.layout_metas?.length ?? 0,
+      snapshot.total_messages,
+      snapshot.layout_metas ?? [],
+      false,
+    )
   }
 
   apply(event: SessionEvent, now: number): void {
@@ -168,7 +333,13 @@ export class Transcript {
         break
       case 'reset':
         this.moreBefore = event.more_before
-        this.replaceMessages(event.messages, true)
+        this.replaceWindow(
+          event.messages,
+          event.start_seq ?? event.layout_metas?.length ?? 0,
+          event.total_messages,
+          event.layout_metas ?? [],
+          true,
+        )
         break
       case 'permission':
         this.permissions.set(event.request.call_id, event.request)
@@ -205,21 +376,22 @@ export class Transcript {
   }
 
   // Releases what the pacer says is due and rebuilds the blocks that changed.
-  // Returns true when `blocks` is a new array.
+  // Returns true when `blocks` or `slots` is a new array.
   flush(now: number): boolean {
     for (const chunk of this.pacer.take(now)) this.show(chunk.stream, chunk.text)
     this.markDrained()
     if (this.dirty.size === 0 && !this.structureChanged && !this.tailChanged) return false
 
+    const wasStructured = this.structureChanged
     // Whether a message is the first decides its turn divider.
     const first = this.entries[0]
-    if (this.structureChanged && first) this.dirty.add(first.entry.message.id)
-    if (this.structureChanged) this.markCompactions()
+    if (wasStructured && first) this.dirty.add(first.entry.message.id)
+    if (wasStructured) this.markCompactions()
     for (const id of this.dirty) this.rebuild(id)
     this.dirty.clear()
     this.structureChanged = false
     this.tailChanged = false
-    return this.publish()
+    return this.publish(wasStructured)
   }
 
   private setInfo(info: SessionInfo): void {
@@ -251,7 +423,7 @@ export class Transcript {
 
   private replacePart(messageId: string, index: number, part: Part, now: number): void {
     const existing = this.byId.get(messageId)
-    if (!existing) return // older than the loaded page, or removed
+    if (!existing) return // older than the loaded page, evicted, or removed
     if (index > existing.entry.message.parts.length) {
       this.options.reportError(
         `part ${index} of message ${messageId} arrived before part ${existing.entry.message.parts.length}`,
@@ -265,7 +437,7 @@ export class Transcript {
 
   private applyDelta(messageId: string, index: number, delta: Delta, now: number): void {
     const existing = this.byId.get(messageId)
-    if (!existing) return // older than the loaded page, or removed
+    if (!existing) return // older than the loaded page, evicted, or removed
     const { entry } = existing
     const parts = entry.message.parts
 
@@ -296,9 +468,14 @@ export class Transcript {
     const existing = this.byId.get(messageId)
     if (!existing) return
     existing.entry.views.forEach((_view, index) => this.pacer.discard(streamKey(messageId, index)))
-    this.entries = this.entries.filter((candidate) => candidate !== existing)
+    this.slotModels = this.slotModels.filter(
+      (slot) => !(slot.kind === 'materialized' && slot.entry === existing),
+    )
+    this.reindexSlots()
+    this.rebuildEntriesOrder()
     this.byId.delete(messageId)
     this.dirty.delete(messageId)
+    this.pacedMessages.delete(messageId)
     this.structureChanged = true
   }
 
@@ -321,31 +498,60 @@ export class Transcript {
 
   // History loaded or replaced as a whole: shown at once, not paced.
   // `keepBlocks`: the messages that stay keep their blocks, so only what differs changes.
-  private replaceMessages(messages: Message[], keepBlocks = false): void {
+  private replaceWindow(
+    messages: Message[],
+    startSeq: number,
+    totalMessages: number | undefined,
+    layoutMetas: readonly MessageLayoutMeta[],
+    keepBlocks: boolean,
+  ): void {
     const previous = keepBlocks ? this.byId : new Map<string, MessageBlocks>()
     const previousBlocks = new Map([...previous].map(([id, existing]) => [id, existing.blocks]))
     this.pacedMessages.clear()
     this.pacer.takeAll()
     this.entries = []
+    this.slotModels = []
     this.byId.clear()
     this.dirty.clear()
-    for (const message of messages) {
-      const added = this.newEntry(message, false, 0)
+
+    const metaBySeq = new Map<number, MessageLayoutMeta>()
+    for (const meta of layoutMetas) metaBySeq.set(meta.seq, meta)
+
+    const effectiveStart = Math.max(0, startSeq)
+    for (let seq = 0; seq < effectiveStart; seq++) {
+      const meta = metaBySeq.get(seq) ?? layoutMetas[seq] ?? fallbackMeta(seq)
+      this.slotModels.push({ kind: 'placeholder', seq, id: meta.id, meta })
+    }
+
+    messages.forEach((message, index) => {
+      const seq = effectiveStart + index
+      const added = this.newEntry(message, seq, false, 0)
       added.blocks = previousBlocks.get(message.id) ?? []
       this.entries.push(added)
+      this.slotModels.push({ kind: 'materialized', seq, entry: added })
+    })
+
+    const expectedTotal = Math.max(totalMessages ?? this.slotModels.length, this.slotModels.length)
+    while (this.slotModels.length < expectedTotal) {
+      const seq = this.slotModels.length
+      const meta = metaBySeq.get(seq) ?? fallbackMeta(seq)
+      this.slotModels.push({ kind: 'placeholder', seq, id: meta.id, meta })
     }
     this.structureChanged = true
   }
 
   private addMessage(message: Message, live: boolean, now: number): void {
-    this.entries.push(this.newEntry(message, live, now))
+    const seq = this.slotModels.length
+    const added = this.newEntry(message, seq, live, now)
+    this.entries.push(added)
+    this.slotModels.push({ kind: 'materialized', seq, entry: added })
     this.structureChanged = true
   }
 
-  // Registers the message; the caller places it in `entries`.
-  private newEntry(message: Message, live: boolean, now: number): MessageBlocks {
+  // Registers the message; the caller places it in `entries` and `slotModels`.
+  private newEntry(message: Message, seq: number, live: boolean, now: number): MessageBlocks {
     const entry: MessageEntry = { message: { ...message, parts: [] }, views: new Map() }
-    const existing: MessageBlocks = { entry, blocks: [], stale: false, lastCompaction: false }
+    const existing: MessageBlocks = { seq, entry, blocks: [], stale: false, lastCompaction: false }
     this.byId.set(message.id, existing)
 
     const paced = live && message.role === 'assistant'
@@ -354,12 +560,34 @@ export class Transcript {
     return existing
   }
 
+  private reindexSlots(): void {
+    this.slotModels.forEach((slot, index) => {
+      slot.seq = index
+      if (slot.kind === 'materialized') slot.entry.seq = index
+      else slot.meta = { ...slot.meta, seq: index }
+    })
+  }
+
+  private rebuildEntriesOrder(): void {
+    const next: MessageBlocks[] = []
+    for (const slot of this.slotModels) {
+      if (slot.kind === 'materialized') next.push(slot.entry)
+    }
+    this.entries = next
+  }
+
   // Messages before the last compaction are stale; the compaction itself carries the note.
   private markCompactions(): void {
-    const last = this.entries.findLastIndex(({ entry }) => entry.message.source.kind === 'compaction')
-    this.entries.forEach((existing, index) => {
-      const stale = index < last
-      const lastCompaction = index === last
+    const lastSlotIndex = this.slotModels.findLastIndex((slot) =>
+      slot.kind === 'materialized'
+        ? slot.entry.entry.message.source.kind === 'compaction'
+        : slot.meta.source_kind === 'compaction',
+    )
+    this.slotModels.forEach((slot, slotIndex) => {
+      if (slot.kind !== 'materialized') return
+      const existing = slot.entry
+      const stale = slotIndex < lastSlotIndex
+      const lastCompaction = slotIndex === lastSlotIndex
       if (existing.stale === stale && existing.lastCompaction === lastCompaction) return
       existing.stale = stale
       existing.lastCompaction = lastCompaction
@@ -432,13 +660,12 @@ export class Transcript {
     const existing = this.byId.get(messageId)
     if (!existing) return
     const { entry } = existing
-    const position = this.entries.indexOf(existing)
     const previousBlocks = new Map(existing.blocks.map((block) => [block.key, block]))
 
     const built = buildBlocks(entry, {
       sessionBusy: this.busy,
       hasOlderRows: this.moreBefore,
-      isFirst: position === 0,
+      isFirst: existing.seq === 0,
       stale: existing.stale,
       lastCompaction: existing.lastCompaction,
       isPacing: (index) => this.pacer.hasPending(streamKey(messageId, index)),
@@ -469,14 +696,35 @@ export class Transcript {
   }
 
   // The flat list, or the old array when nothing in it changed.
-  private publish(): boolean {
+  private publish(forceSlots: boolean): boolean {
     const next = this.entries.flatMap((existing) => existing.blocks)
     const tail = this.tailErrorBlock()
     if (tail) next.push(tail)
-    const unchanged = next.length === this.flat.length && next.every((block, i) => block === this.flat[i])
-    if (unchanged) return false
-    this.flat = next
-    return true
+    const blocksUnchanged =
+      next.length === this.flat.length && next.every((block, i) => block === this.flat[i])
+    if (!blocksUnchanged) this.flat = next
+
+    const nextSlots: TranscriptSlot[] = this.slotModels.map((slot) => {
+      if (slot.kind === 'placeholder') {
+        return { kind: 'placeholder', seq: slot.seq, id: slot.id, meta: slot.meta }
+      }
+      return {
+        kind: 'materialized',
+        seq: slot.seq,
+        id: slot.entry.entry.message.id,
+        message: slot.entry.entry.message,
+        blocks: slot.entry.blocks,
+        stale: slot.entry.stale,
+        lastCompaction: slot.entry.lastCompaction,
+      }
+    })
+    const slotsChanged =
+      forceSlots ||
+      !blocksUnchanged ||
+      nextSlots.length !== this.publishedSlots.length
+    if (slotsChanged) this.publishedSlots = nextSlots
+
+    return !blocksUnchanged || slotsChanged
   }
 }
 
