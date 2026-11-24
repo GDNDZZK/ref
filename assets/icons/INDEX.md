@@ -89,6 +89,9 @@ Sets: `20`, `16` or both. Names are the file names without the set suffix.
 | `restore` | 20 | Corners pointing inwards | Back to the split view |
 | `folder` | 16, 20 | Closed folder | A directory in lists and completion |
 | `folder-open` | 20 | Open folder | Choose the session directory |
+| `float` | 20 | Window frame with a floating orb | Toggle floating ball mode |
+| `stash` | 16, 20 | Archive tray | Stash sessions; open stash groups |
+| `stash-count` | 20 | Open-centre archive tray | Stash button with embedded group count |
 | `command` | 20 | Command key | Command palette |
 | `sliders` | 20 | Three sliders | Settings |
 | `bell` | 20 | Bell | Notification settings |
