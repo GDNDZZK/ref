@@ -29,8 +29,7 @@ bool rendersMarkdown(const Block& block)
 bool opensTurn(const Block& block)
 {
 	// User messages from these start a new turn; the others are interjections.
-	const bool isTurnSource = block.sourceKind == SourceKind::Human || block.sourceKind == SourceKind::Peer || block.sourceKind == SourceKind::Spawn;
-	return block.kind == Block::Kind::User && isTurnSource;
+	return block.kind == Block::Kind::User && isTurnSourceKind(block.sourceKind);
 }
 
 QList<int> changedRoles(const Block& before, const Block& after)
@@ -259,11 +258,11 @@ QVariant ConversationModel::data(const QModelIndex& index, int role) const
 	case OpensTurnRole:
 		if(block.kind == Block::Kind::Skeleton && block.skeletonMeta)
 		{
-			const QString& sk = block.skeletonMeta->sourceKind;
-			const bool isTurnSource = sk.isEmpty() || sk == "human"_L1 || sk == "peer"_L1 || sk == "spawn"_L1;
-			return index.row() > 0 && block.skeletonMeta->role == proto::Role::User && isTurnSource;
+			return index.row() > 0 && block.skeletonMeta->role == proto::Role::User && isTurnSourceKindName(block.skeletonMeta->sourceKind);
 		}
 		return index.row() > 0 && opensTurn(block);
+	case TimeRole:
+		return block.time;
 	case ToolNameRole:
 		return block.toolName;
 	case PurposeRole:
@@ -462,7 +461,8 @@ ConversationModel::Built ConversationModel::buildNodes(const QList<proto::Messag
 		metaBySeq.insert(meta.seq, meta);
 	}
 
-	built.nodes.reserve(static_cast<qsizetype>(total));
+	constexpr quint64 MaxPreallocNodes = 10000;
+	built.nodes.reserve(static_cast<qsizetype>(std::min(total, MaxPreallocNodes)));
 	for(quint64 seq = 0; seq < total; ++seq)
 	{
 		if(seq >= startSeq && seq < startSeq + static_cast<quint64>(messages.size()))
@@ -1040,13 +1040,11 @@ void ConversationModel::setColumnWidth(double width)
 
 void ConversationModel::emitSkeletonHeightsChanged()
 {
-	for(qsizetype row = 0; row < m_rows.size(); ++row)
+	if(rowCount() <= 0)
 	{
-		if(m_rows.at(row).kind == Block::Kind::Skeleton)
-		{
-			emitRoleChanged(row, EstimatedHeightRole);
-		}
+		return;
 	}
+	emit dataChanged(index(0), index(rowCount() - 1), {EstimatedHeightRole});
 }
 
 bool ConversationModel::hasPlaceholders() const

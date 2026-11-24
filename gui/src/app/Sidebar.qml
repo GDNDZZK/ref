@@ -445,8 +445,9 @@ Rectangle {
 					onTapped: Workspace.openDialog(DialogId.stash)
 				}
 				PlainToolTip {
+					readonly property int hoverDelayMs: 400
 					visible: stashHover.hovered
-					delay: 400
+					delay: hoverDelayMs
 					text: Workspace.sessions.count > 0
 						? qsTr("Stash all running sessions (right-click to manage)")
 						: qsTr("Manage stashed groups")

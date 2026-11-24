@@ -13,6 +13,7 @@
 #include <QStringList>
 #include <QVariantList>
 #include <QVariantMap>
+
 namespace refgui::workspace
 {
 
@@ -64,18 +65,9 @@ private:
 	QVariantMap groupToMap(const proto::StashGroup& group) const;
 	QVariantMap memberToMap(const proto::StashMember& member) const;
 
+	template<typename T, typename OnOk>
+	QCoro::Task<> run(QCoro::Task<client::Result<T>> request, OnOk onOk);
 	QCoro::Task<> refreshTask();
-	QCoro::Task<> stashAllTask(std::optional<QString> name);
-	QCoro::Task<> createGroupTask(std::optional<QString> name, QStringList sessionIds, bool stashLive);
-	QCoro::Task<> renameGroupTask(QString groupId, QString name);
-	QCoro::Task<> setGroupLockedTask(QString groupId, bool locked);
-	QCoro::Task<> deleteGroupTask(QString groupId);
-	QCoro::Task<> addToGroupTask(QString groupId, QString sessionId, std::optional<quint32> position, bool stashLive);
-	QCoro::Task<> moveGroupMemberTask(std::optional<QString> fromGroupId, QString toGroupId, QString sessionId, quint32 position, bool stashLive);
-	QCoro::Task<> removeFromGroupTask(QString groupId, QString sessionId);
-	QCoro::Task<> mergeGroupsTask(QString sourceGroupId, QString targetGroupId);
-	QCoro::Task<> restoreGroupTask(QString groupId);
-	QCoro::Task<> restoreGroupMemberTask(QString groupId, QString sessionId);
 	QCoro::Task<> assignSessionTask(QString sessionId, QStringList targetGroupIds);
 	QCoro::Task<> createGroupFromMemberTask(QString fromGroupId, QString sessionId, std::optional<QString> name);
 
@@ -87,6 +79,7 @@ private:
 	bool m_loading = false;
 	int m_inFlight = 0;
 	int m_serial = 0;
+	int m_refreshSerial = 0;
 };
 
 } // namespace refgui::workspace

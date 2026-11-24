@@ -24,6 +24,7 @@ refgui_add_test(tst_main_window
 		${PROJECT_SOURCE_DIR}/src/app/floating_ball_helper.cpp
 		${PROJECT_SOURCE_DIR}/src/app/floating_ball_helper.h
 		${PROJECT_SOURCE_DIR}/src/app/link_colorizer.cpp
+		${PROJECT_SOURCE_DIR}/src/app/link_colorizer.h
 		${PROJECT_SOURCE_DIR}/src/app/local_only_network.cpp
 		${PROJECT_SOURCE_DIR}/src/app/local_only_network.h
 		${PROJECT_SOURCE_DIR}/src/app/notification_center_type.h

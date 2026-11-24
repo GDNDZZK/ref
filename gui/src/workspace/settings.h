@@ -39,17 +39,18 @@ class Settings : public QObject
 	Q_PROPERTY(bool sidebarHistoryCurrentDir READ sidebarHistoryCurrentDir WRITE setSidebarHistoryCurrentDir NOTIFY sidebarHistoryCurrentDirChanged)
 	Q_PROPERTY(int windowWidth READ windowWidth WRITE setWindowWidth NOTIFY windowSizeChanged)
 	Q_PROPERTY(int windowHeight READ windowHeight WRITE setWindowHeight NOTIFY windowSizeChanged)
-\tQ_PROPERTY(double uiScale READ uiScale WRITE setUiScale NOTIFY uiScaleChanged)
-\tQ_PROPERTY(double minUiScale READ minUiScale CONSTANT)
-\tQ_PROPERTY(double maxUiScale READ maxUiScale CONSTANT)
-\tQ_PROPERTY(double uiScaleStep READ uiScaleStep CONSTANT)
-\tQ_PROPERTY(QString backendUrl READ backendUrl NOTIFY backendChanged)
-\tQ_PROPERTY(QString backendToken READ backendToken NOTIFY backendChanged)
-\tQ_PROPERTY(QString floatingBallScreen READ floatingBallScreen NOTIFY floatingBallChanged)
-\tQ_PROPERTY(int floatingBallX READ floatingBallX NOTIFY floatingBallChanged)
-\tQ_PROPERTY(int floatingBallY READ floatingBallY NOTIFY floatingBallChanged)
-\tQ_PROPERTY(bool hasFloatingBallPosition READ hasFloatingBallPosition NOTIFY floatingBallChanged)
-\tQ_PROPERTY(QString loadProblem READ loadProblem CONSTANT)
+	Q_PROPERTY(double uiScale READ uiScale WRITE setUiScale NOTIFY uiScaleChanged)
+	Q_PROPERTY(double minUiScale READ minUiScale CONSTANT)
+	Q_PROPERTY(double maxUiScale READ maxUiScale CONSTANT)
+	Q_PROPERTY(double uiScaleStep READ uiScaleStep CONSTANT)
+	Q_PROPERTY(QString backendUrl READ backendUrl NOTIFY backendChanged)
+	Q_PROPERTY(bool hasBackendToken READ hasBackendToken NOTIFY backendChanged)
+	Q_PROPERTY(QString maskedBackendToken READ maskedBackendToken NOTIFY backendChanged)
+	Q_PROPERTY(QString floatingBallScreen READ floatingBallScreen NOTIFY floatingBallChanged)
+	Q_PROPERTY(int floatingBallX READ floatingBallX NOTIFY floatingBallChanged)
+	Q_PROPERTY(int floatingBallY READ floatingBallY NOTIFY floatingBallChanged)
+	Q_PROPERTY(bool hasFloatingBallPosition READ hasFloatingBallPosition NOTIFY floatingBallChanged)
+	Q_PROPERTY(QString loadProblem READ loadProblem CONSTANT)
 public:
 	// The values of `theme` and `language` that mean "do what the system does".
 	static const QString System;
@@ -99,12 +100,14 @@ public:
 	double minUiScale() const { return MinUiScale; }
 	double maxUiScale() const { return MaxUiScale; }
 	double uiScaleStep() const { return UiScaleStep; }
-\tQString backendUrl() const { return m_backendUrl; }
-\tQString backendToken() const { return m_backendToken; }
-\tQString floatingBallScreen() const { return m_floatingBallScreen; }
-\tint floatingBallX() const { return m_floatingBallX; }
-\tint floatingBallY() const { return m_floatingBallY; }
-\tbool hasFloatingBallPosition() const { return m_hasFloatingBallPosition; }
+	QString backendUrl() const { return m_backendUrl; }
+	QString backendToken() const { return m_backendToken; }
+	bool hasBackendToken() const { return !m_backendToken.isEmpty(); }
+	QString maskedBackendToken() const;
+	QString floatingBallScreen() const { return m_floatingBallScreen; }
+	int floatingBallX() const { return m_floatingBallX; }
+	int floatingBallY() const { return m_floatingBallY; }
+	bool hasFloatingBallPosition() const { return m_hasFloatingBallPosition; }
 
 	// Precondition for both: a known value (see the constants above).
 	void setTheme(const QString& theme);
@@ -126,8 +129,8 @@ public:
 	void setWindowWidth(int width);
 	void setWindowHeight(int height);
 	void setUiScale(double scale);
-\tQ_INVOKABLE void setBackend(const QString\u0026 url, const QString\u0026 token);
-\tQ_INVOKABLE void setFloatingBallPosition(const QString\u0026 screenName, int x, int y);
+	Q_INVOKABLE void setBackend(const QString& url, const QString& token);
+	Q_INVOKABLE void setFloatingBallPosition(const QString& screenName, int x, int y);
 	// What went wrong reading the file, for the user. Empty when it was read or did not exist.
 	QString loadProblem() const { return m_loadProblem; }
 
@@ -150,8 +153,8 @@ signals:
 	void sidebarHistoryCurrentDirChanged();
 	void windowSizeChanged();
 	void uiScaleChanged();
-\tvoid backendChanged();
-\tvoid floatingBallChanged();
+	void backendChanged();
+	void floatingBallChanged();
 	void saveFailed(const QString& reason);
 
 private:
@@ -184,12 +187,12 @@ private:
 	int m_windowWidth = DefaultWindowWidth;
 	int m_windowHeight = DefaultWindowHeight;
 	double m_uiScale = DefaultUiScale;
-\tQString m_backendUrl;
-\tQString m_backendToken;
-\tQString m_floatingBallScreen;
-\tint m_floatingBallX = 0;
-\tint m_floatingBallY = 0;
-\tbool m_hasFloatingBallPosition = false;
+	QString m_backendUrl;
+	QString m_backendToken;
+	QString m_floatingBallScreen;
+	int m_floatingBallX = 0;
+	int m_floatingBallY = 0;
+	bool m_hasFloatingBallPosition = false;
 	QString m_loadProblem;
 	QTimer m_saveTimer;
 	bool m_dirty = false;

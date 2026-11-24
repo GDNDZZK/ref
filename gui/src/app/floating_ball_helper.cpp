@@ -293,8 +293,3 @@ QVariantMap FloatingBallHelper::clampWindowRect(int x, int y, int width, int hei
 		{u"screenName"_s, pickScreenName(clamped, screens, screenName)},
 	};
 }
-
-QString FloatingBallHelper::screenNameAt(int x, int y, int width, int height) const
-{
-	return pickScreenName(QRect(x, y, width, height), currentScreens());
-}

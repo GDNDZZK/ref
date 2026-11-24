@@ -172,7 +172,9 @@ public:
 	QString editableBackendUrl() const;
 	bool hasEditableBackendToken() const;
 	QString maskedEditableBackendToken() const;
-	// The chat session for `sessionId`, made when the window does not have it yet. Null for an empty id.
+	// The chat session for `sessionId`, or null when not opened yet. Never creates or attaches.
+	Q_INVOKABLE ChatSession* findSession(const QString& sessionId) const;
+	// The chat session for `sessionId`, or null when not opened yet.
 	Q_INVOKABLE ChatSession* session(const QString& sessionId);
 
 	// Opens a session (live or from history) and makes it current. In split view it also gets the focus.
@@ -211,7 +213,13 @@ public:
 	Q_INVOKABLE void setHistorySearch(const QString& query);
 	Q_INVOKABLE void filterHistoryByCreator(const QString& sessionId);
 	void beginLocalConfigMutation() { ++m_localMutationsInFlight; }
-	void endLocalConfigMutation() { --m_localMutationsInFlight; }
+	void endLocalConfigMutation()
+	{
+		if(m_localMutationsInFlight > 0)
+		{
+			--m_localMutationsInFlight;
+		}
+	}
 
 	Q_INVOKABLE void toggleSplit();
 	Q_INVOKABLE void setSplitFilter(const QString& filter);

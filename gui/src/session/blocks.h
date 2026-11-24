@@ -114,6 +114,8 @@ QString kindName(Block::Kind kind);
 // The names the views get: "human", "peer", "spawn", "reminder", "compaction" or "shell"; empty for none.
 QString sourceName(std::optional<proto::MessageSource::Kind> kind);
 std::optional<proto::MessageSource::Kind> sourceKindFromName(QStringView name);
+bool isTurnSourceKind(std::optional<proto::MessageSource::Kind> kind);
+bool isTurnSourceKindName(QStringView name);
 // The wire name of the state, e.g. "awaiting_permission"; empty for none.
 QString toolStateName(std::optional<proto::ToolState> state);
 

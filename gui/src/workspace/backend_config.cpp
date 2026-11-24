@@ -130,21 +130,23 @@ void BackendConfig::apply(proto::ServerConfig config)
 
 void BackendConfig::reset()
 {
-\t++m_configSerial;
-\t++m_mcpSerial;
-\tm_reloadsInFlight = 0;
-\tm_config = {};
-\tm_agents.clear();
-\tm_models.clear();
-\tm_commands.clear();
-\tm_mcpServers.clear();
-\temit changed();
-\temit mcpChanged();
+	++m_configSerial;
+	++m_mcpSerial;
+	++m_reloadSerial;
+	m_reloadsInFlight = 0;
+	m_config = {};
+	m_agents.clear();
+	m_models.clear();
+	m_commands.clear();
+	m_mcpServers.clear();
+	emit changed();
+	emit mcpChanged();
 }
 
 QCoro::Task<client::Result<proto::ReloadConfigResult>> BackendConfig::reload(std::optional<QString> cwdOverride)
 {
 	const QPointer<BackendConfig> self(this);
+	const int reloadSerial = m_reloadSerial;
 	const std::optional<QString> targetCwd = cwdOverride ? std::move(cwdOverride) : optionalCwd();
 	++m_reloadsInFlight;
 	const auto result = co_await m_backend.client().reloadConfig(targetCwd);
@@ -152,8 +154,11 @@ QCoro::Task<client::Result<proto::ReloadConfigResult>> BackendConfig::reload(std
 	{
 		co_return result;
 	}
-	--m_reloadsInFlight;
-	if(result)
+	if(reloadSerial == m_reloadSerial && m_reloadsInFlight > 0)
+	{
+		--m_reloadsInFlight;
+	}
+	if(reloadSerial == m_reloadSerial && result)
 	{
 		apply(result->config);
 		loadMcp();
@@ -197,4 +202,5 @@ QCoro::Task<> BackendConfig::loadMcp()
 	m_mcpServers = toList(*servers);
 	emit mcpChanged();
 }
+
 } // namespace refgui::workspace

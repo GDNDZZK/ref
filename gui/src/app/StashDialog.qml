@@ -7,6 +7,40 @@ import RefGui
 ModalDialog {
 	id: dialog
 
+	readonly property int stashDialogWidth: 820
+	readonly property real dragThresholdPx: 5
+	readonly property real runningColumnRatio: 0.42
+	readonly property int columnSpacing: 14
+	readonly property int columnPadding: 10
+	readonly property int minRootHeight: 320
+	readonly property int minColumnHeight: 300
+	readonly property int listSpacing: 8
+	readonly property int groupInnerSpacing: 6
+	readonly property int groupCardPadX: 10
+	readonly property int groupCardPadY: 8
+	readonly property int headerRowHeight: 28
+	readonly property int runningRowHeight: 48
+	readonly property int memberRowHeight: 46
+	readonly property int tintBarWidth: 3
+	readonly property int tintBarInsetY: 6
+	readonly property int tintBarRadius: 2
+	readonly property int tintDotSize: 7
+	readonly property int tintDotX: 10
+	readonly property int rowTextLeftMargin: 24
+	readonly property int titleEditHeight: 26
+	readonly property int dropIndicatorHeight: 2
+	readonly property int dragChipMaxWidth: 220
+	readonly property int dragChipHeight: 30
+	readonly property int dragChipPadX: 12
+	readonly property int menuAnchorGap: 4
+	readonly property int newGroupPadX: 18
+	readonly property int emptyLabelPadY: 20
+	readonly property int emptyGroupPadY: 6
+	readonly property int emptyGroupsListPadY: 24
+	readonly property real draggedOpacity: 0.45
+	readonly property real draggedGroupOpacity: 0.55
+	readonly property real headerLetterSpacing: 0.6
+
 	property string dragKind: "" // "", "running", "member", "group"
 	property string dragSessionId: ""
 	property string dragGroupId: ""
@@ -18,12 +52,80 @@ ModalDialog {
 	property string dropMemberSessionId: ""
 	property int dropIndex: -1
 	property string editingGroupId: ""
+	property int groupsRevision: 0
+	property var groupsById: ({})
+
+	signal groupsSynced()
 
 	readonly property bool dragging: dragKind !== ""
 
-	function memberTint(rootId, fallbackId) {
-		const key = rootId !== "" ? rootId : fallbackId
+	function memberTint(parentId, fallbackId) {
+		const key = parentId !== "" ? parentId : fallbackId
 		return key !== "" ? Theme.hashColor(key) : Theme.accent
+	}
+
+	function syncKeyModel(listModel, items, keyName) {
+		const wantedKeys = []
+		const wantedMap = {}
+		for (let i = 0; i < items.length; ++i) {
+			const k = String(items[i][keyName] ?? "")
+			if (k !== "" && !wantedMap[k]) {
+				wantedKeys.push(k)
+				wantedMap[k] = true
+			}
+		}
+		for (let i = listModel.count - 1; i >= 0; --i) {
+			if (!wantedMap[listModel.get(i).itemId])
+				listModel.remove(i)
+		}
+		for (let i = 0; i < wantedKeys.length; ++i) {
+			const k = wantedKeys[i]
+			if (i < listModel.count && listModel.get(i).itemId === k)
+				continue
+			let found = -1
+			for (let j = i + 1; j < listModel.count; ++j) {
+				if (listModel.get(j).itemId === k) {
+					found = j
+					break
+				}
+			}
+			if (found >= 0)
+				listModel.move(found, i, 1)
+			else
+				listModel.insert(i, { itemId: k })
+		}
+	}
+
+	function syncGroupsModel() {
+		const groups = Workspace.stash.groups
+		const map = {}
+		for (let i = 0; i < groups.length; ++i) {
+			const g = groups[i]
+			map[String(g.id ?? "")] = g
+		}
+		groupsById = map
+		++groupsRevision
+		syncKeyModel(groupsListModel, groups, "id")
+		groupsSynced()
+	}
+
+	function groupInfo(groupId) {
+		void groupsRevision
+		return groupsById[groupId] ?? null
+	}
+
+	function membersForGroup(groupId) {
+		const g = groupInfo(groupId)
+		return g ? (g.members ?? []) : []
+	}
+
+	function memberInfo(groupId, sessionId) {
+		const members = membersForGroup(groupId)
+		for (let i = 0; i < members.length; ++i) {
+			if (String(members[i].sessionId ?? "") === sessionId)
+				return members[i]
+		}
+		return null
 	}
 
 	function pointInItem(item, sceneX, sceneY) {
@@ -69,9 +171,9 @@ ModalDialog {
 			return
 		}
 
-		for (let i = 0; i < groupsRepeater.count; ++i) {
-			const groupCard = groupsRepeater.itemAt(i)
-			if (!groupCard || groupCard.groupLocked)
+		for (let i = 0; i < groupsListView.count; ++i) {
+			const groupCard = groupsListView.itemAtIndex(i)
+			if (!groupCard || groupCard.removing || groupCard.groupLocked)
 				continue
 			if (dragKind === "group" && groupCard.groupId === dragGroupId)
 				continue
@@ -99,12 +201,7 @@ ModalDialog {
 	}
 
 	function groupMemberCount(groupId) {
-		const groups = Workspace.stash.groups
-		for (let i = 0; i < groups.length; ++i) {
-			if (groups[i].id === groupId)
-				return groups[i].members.length
-		}
-		return 0
+		return membersForGroup(groupId).length
 	}
 
 	function finishDrag() {
@@ -189,31 +286,41 @@ ModalDialog {
 			position: 0
 		})
 		assignMenu.entries = items
-		const pt = anchorItem.mapToItem(columnsRoot, 0, anchorItem.height + 4)
+		const pt = anchorItem.mapToItem(columnsRoot, 0, anchorItem.height + dialog.menuAnchorGap)
 		assignMenu.openAt(pt)
 	}
 
 	title: qsTr("Stashed groups")
-	dialogWidth: 820
+	dialogWidth: stashDialogWidth
 
-	Component.onCompleted: Workspace.stash.refresh()
+	ListModel { id: groupsListModel }
+
+	Connections {
+		target: Workspace.stash
+		function onGroupsChanged() { dialog.syncGroupsModel() }
+	}
+
+	Component.onCompleted: {
+		syncGroupsModel()
+		Workspace.stash.refresh()
+	}
 
 	Item {
 		id: columnsRoot
 		x: Theme.dialogPadding
 		width: parent.width - 2 * Theme.dialogPadding
-		height: Math.max(320, columnsRow.implicitHeight)
+		height: Math.max(dialog.minRootHeight, columnsRow.implicitHeight)
 
 		Row {
 			id: columnsRow
 			width: parent.width
-			spacing: 14
+			spacing: dialog.columnSpacing
 
 			// Left column: currently running sessions.
 			Rectangle {
 				id: runningColumn
-				width: Math.floor((parent.width - parent.spacing) * 0.42)
-				height: Math.max(300, runningCol.implicitHeight + 20)
+				width: Math.floor((parent.width - parent.spacing) * dialog.runningColumnRatio)
+				height: Math.max(dialog.minColumnHeight, runningCol.implicitHeight + 2 * dialog.columnPadding)
 				radius: Theme.radius
 				color: Theme.background
 				border.color: dialog.dropTargetKind === "outside" ? Theme.danger : Theme.border
@@ -222,21 +329,21 @@ ModalDialog {
 
 				Column {
 					id: runningCol
-					x: 10
-					y: 10
-					width: parent.width - 20
-					spacing: 8
+					x: dialog.columnPadding
+					y: dialog.columnPadding
+					width: parent.width - 2 * dialog.columnPadding
+					spacing: dialog.listSpacing
 
 					Item {
 						width: parent.width
-						height: 28
+						height: dialog.headerRowHeight
 
 						Text {
 							textFormat: Text.PlainText
 							anchors { left: parent.left; right: stashAllBtn.visible ? stashAllBtn.left : parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
 							text: qsTr("RUNNING")
 							color: Theme.textMuted
-							font { pixelSize: Theme.smallFontSize; bold: true; letterSpacing: 0.6 }
+							font { pixelSize: Theme.smallFontSize; bold: true; letterSpacing: dialog.headerLetterSpacing }
 							elide: Text.ElideRight
 						}
 
@@ -255,57 +362,76 @@ ModalDialog {
 						textFormat: Text.PlainText
 						visible: Workspace.sessions.count === 0
 						width: parent.width
-						topPadding: 20
-						bottomPadding: 20
+						topPadding: dialog.emptyLabelPadY
+						bottomPadding: dialog.emptyLabelPadY
 						horizontalAlignment: Text.AlignHCenter
 						text: qsTr("No running sessions")
 						color: Theme.textMuted
 						font.pixelSize: Theme.smallFontSize
 					}
 
-					Repeater {
+					ListView {
+						id: runningListView
+						width: parent.width
+						height: contentHeight
+						interactive: false
+						spacing: dialog.listSpacing
 						model: Workspace.sessions
+
+						add: Transition {
+							NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Motion.standard; easing.type: Motion.ease }
+						}
+						remove: Transition {
+							ParallelAnimation {
+								NumberAnimation { property: "opacity"; to: 0; duration: Motion.standard; easing.type: Motion.exitEase }
+								NumberAnimation { property: "height"; to: 0; duration: Motion.standard; easing.type: Motion.exitEase }
+							}
+						}
+						displaced: Transition {
+							NumberAnimation { property: "y"; duration: Motion.standard; easing.type: Motion.ease }
+						}
 
 						delegate: Rectangle {
 							id: runningCard
 							required property string sessionId
 							required property string displayTitle
 							required property string dirName
-							required property string rootId
+							required property string parentId
 							required property int index
 
-							readonly property color tint: dialog.memberTint(rootId, sessionId)
+							readonly property color tint: dialog.memberTint(parentId, sessionId)
 							readonly property bool beingDragged: dialog.dragKind === "running" && dialog.dragSessionId === sessionId
 
-							width: runningCol.width
-							height: 48
+							width: runningListView.width
+							height: dialog.runningRowHeight
+							clip: true
 							radius: Theme.radiusSmall
 							color: Theme.surface
 							border.color: beingDragged ? Theme.accentText : Theme.border
-							opacity: beingDragged ? 0.45 : 1
+							opacity: beingDragged ? dialog.draggedOpacity : 1
 
 							Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 
 							Rectangle {
 								x: 0
-								y: 6
-								width: 3
-								height: parent.height - 12
-								radius: 2
+								y: dialog.tintBarInsetY
+								width: dialog.tintBarWidth
+								height: parent.height - 2 * dialog.tintBarInsetY
+								radius: dialog.tintBarRadius
 								color: runningCard.tint
 							}
 
 							Rectangle {
-								x: 10
+								x: dialog.tintDotX
 								anchors.verticalCenter: parent.verticalCenter
-								width: 7
-								height: 7
-								radius: 3.5
+								width: dialog.tintDotSize
+								height: dialog.tintDotSize
+								radius: height / 2
 								color: runningCard.tint
 							}
 
 							Column {
-								anchors { left: parent.left; leftMargin: 24; right: addBtn.left; rightMargin: 6; verticalCenter: parent.verticalCenter }
+								anchors { left: parent.left; leftMargin: dialog.rowTextLeftMargin; right: addBtn.left; rightMargin: 6; verticalCenter: parent.verticalCenter }
 								spacing: 1
 
 								Text {
@@ -342,7 +468,7 @@ ModalDialog {
 								}
 								onPositionChanged: mouse => {
 									const pt = mapToItem(null, mouse.x, mouse.y)
-									if (!started && Math.hypot(mouse.x - pressX, mouse.y - pressY) >= 5) {
+									if (!started && Math.hypot(mouse.x - pressX, mouse.y - pressY) >= dialog.dragThresholdPx) {
 										started = true
 										dialog.startDrag("running", runningCard.sessionId, "", runningCard.displayTitle, pt.x, pt.y)
 									} else if (started) {
@@ -380,28 +506,28 @@ ModalDialog {
 			Rectangle {
 				id: groupsColumn
 				width: parent.width - runningColumn.width - parent.spacing
-				height: Math.max(300, groupsCol.implicitHeight + 20)
+				height: Math.max(dialog.minColumnHeight, groupsCol.implicitHeight + 2 * dialog.columnPadding)
 				radius: Theme.radius
 				color: Theme.background
 				border.color: Theme.border
 
 				Column {
 					id: groupsCol
-					x: 10
-					y: 10
-					width: parent.width - 20
-					spacing: 8
+					x: dialog.columnPadding
+					y: dialog.columnPadding
+					width: parent.width - 2 * dialog.columnPadding
+					spacing: dialog.listSpacing
 
 					Item {
 						width: parent.width
-						height: 28
+						height: dialog.headerRowHeight
 
 						Text {
 							textFormat: Text.PlainText
 							anchors { left: parent.left; right: newGroupZone.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
 							text: qsTr("STASHED GROUPS")
 							color: Theme.textMuted
-							font { pixelSize: Theme.smallFontSize; bold: true; letterSpacing: 0.6 }
+							font { pixelSize: Theme.smallFontSize; bold: true; letterSpacing: dialog.headerLetterSpacing }
 							elide: Text.ElideRight
 						}
 
@@ -409,9 +535,9 @@ ModalDialog {
 							id: newGroupZone
 							objectName: "newStashGroupButton"
 							anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-							width: newGroupRow.implicitWidth + 18
-							height: 28
-							radius: 14
+							width: newGroupRow.implicitWidth + dialog.newGroupPadX
+							height: dialog.headerRowHeight
+							radius: height / 2
 							color: (newGroupHover.hovered || dialog.dropTargetKind === "newGroup") ? Theme.surfaceHover : Theme.surface
 							border.color: dialog.dropTargetKind === "newGroup" ? Theme.accentText : Theme.border
 
@@ -448,35 +574,69 @@ ModalDialog {
 						textFormat: Text.PlainText
 						visible: Workspace.stash.groupCount === 0
 						width: parent.width
-						topPadding: 24
-						bottomPadding: 24
+						topPadding: dialog.emptyGroupsListPadY
+						bottomPadding: dialog.emptyGroupsListPadY
 						horizontalAlignment: Text.AlignHCenter
 						text: Workspace.stash.loading ? qsTr("Loading…") : qsTr("No stashed groups yet")
 						color: Theme.textMuted
 						font.pixelSize: Theme.smallFontSize
 					}
 
-					Repeater {
-						id: groupsRepeater
-						model: Workspace.stash.groups
+					ListView {
+						id: groupsListView
+						width: parent.width
+						height: contentHeight
+						interactive: false
+						spacing: dialog.listSpacing
+						model: groupsListModel
+
+						add: Transition {
+							NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Motion.standard; easing.type: Motion.ease }
+						}
+						remove: Transition {
+							ParallelAnimation {
+								NumberAnimation { property: "opacity"; to: 0; duration: Motion.standard; easing.type: Motion.exitEase }
+								NumberAnimation { property: "height"; to: 0; duration: Motion.standard; easing.type: Motion.exitEase }
+							}
+						}
+						displaced: Transition {
+							NumberAnimation { property: "y"; duration: Motion.standard; easing.type: Motion.ease }
+						}
 
 						delegate: Rectangle {
 							id: groupCard
-							required property var modelData
+							required property string itemId
 							required property int index
 
-							readonly property string groupId: modelData.id ?? ""
-							readonly property string groupName: modelData.name ?? ""
-							readonly property bool groupLocked: modelData.locked === true
-							readonly property var members: modelData.members ?? []
+							property bool removing: false
+							ListView.onRemove: removing = true
+
+							readonly property string groupId: itemId
+							readonly property var groupData: dialog.groupInfo(groupId)
+							readonly property string groupName: groupData ? String(groupData.name ?? "") : ""
+							readonly property bool groupLocked: groupData ? groupData.locked === true : false
+							readonly property var members: groupData ? (groupData.members ?? []) : []
 							readonly property bool editing: dialog.editingGroupId === groupId
 							readonly property bool isDropTarget: dialog.dropTargetKind === "group" && dialog.dropGroupId === groupId
 							readonly property bool beingDragged: dialog.dragKind === "group" && dialog.dragGroupId === groupId
 
+							ListModel { id: membersListModel }
+
+							function syncMembers() {
+								dialog.syncKeyModel(membersListModel, members, "sessionId")
+							}
+
+							Connections {
+								target: dialog
+								function onGroupsSynced() { groupCard.syncMembers() }
+							}
+
+							Component.onCompleted: syncMembers()
+
 							function memberHitAt(sceneX, sceneY) {
-								for (let j = 0; j < memberRepeater.count; ++j) {
-									const rowItem = memberRepeater.itemAt(j)
-									if (rowItem && dialog.pointInItem(rowItem, sceneX, sceneY))
+								for (let j = 0; j < membersListView.count; ++j) {
+									const rowItem = membersListView.itemAtIndex(j)
+									if (rowItem && !rowItem.removing && dialog.pointInItem(rowItem, sceneX, sceneY))
 										return { sessionId: rowItem.sessionId, positionIndex: rowItem.index }
 								}
 								return null
@@ -491,27 +651,34 @@ ModalDialog {
 									Workspace.stash.renameGroup(groupId, trimmed)
 							}
 
-							width: groupsCol.width
-							height: groupCol.implicitHeight + 16
+							width: groupsListView.width
+							height: groupCol.implicitHeight + 2 * dialog.groupCardPadY
+							clip: true
 							radius: Theme.radius
 							color: Theme.surface
 							border.color: (isDropTarget || beingDragged) ? Theme.accentText : Theme.border
-							opacity: beingDragged ? 0.55 : 1
-							Behavior on height { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-							Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+							opacity: beingDragged ? dialog.draggedGroupOpacity : 1
+							Behavior on height {
+								enabled: !groupCard.removing
+								NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
+							}
+							Behavior on opacity {
+								enabled: !groupCard.removing
+								NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
+							}
 							Behavior on border.color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 
 							Column {
 								id: groupCol
-								x: 10
-								y: 8
-								width: parent.width - 20
-								spacing: 6
+								x: dialog.groupCardPadX
+								y: dialog.groupCardPadY
+								width: parent.width - 2 * dialog.groupCardPadX
+								spacing: dialog.groupInnerSpacing
 
 								Item {
 									id: groupHeader
 									width: parent.width
-									height: 28
+									height: dialog.headerRowHeight
 
 									MouseArea {
 										anchors { left: parent.left; right: groupActions.left; top: parent.top; bottom: parent.bottom }
@@ -528,7 +695,7 @@ ModalDialog {
 										}
 										onPositionChanged: mouse => {
 											const pt = mapToItem(null, mouse.x, mouse.y)
-											if (!started && Math.hypot(mouse.x - pressX, mouse.y - pressY) >= 5) {
+											if (!started && Math.hypot(mouse.x - pressX, mouse.y - pressY) >= dialog.dragThresholdPx) {
 												started = true
 												dialog.startDrag("group", "", groupCard.groupId, groupCard.groupName, pt.x, pt.y)
 											} else if (started) {
@@ -568,11 +735,12 @@ ModalDialog {
 									Rectangle {
 										visible: groupCard.editing
 										anchors { left: parent.left; right: groupActions.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
-										height: 26
+										height: dialog.titleEditHeight
 										radius: Theme.radiusSmall
 										color: Theme.background
 										border.color: Theme.accentText
 
+										// TextInput renders plain text only.
 										TextInput {
 											id: titleEdit
 											anchors { fill: parent; leftMargin: 8; rightMargin: 8 }
@@ -651,29 +819,56 @@ ModalDialog {
 									textFormat: Text.PlainText
 									visible: groupCard.members.length === 0
 									width: parent.width
-									topPadding: 6
-									bottomPadding: 6
+									topPadding: dialog.emptyGroupPadY
+									bottomPadding: dialog.emptyGroupPadY
 									horizontalAlignment: Text.AlignHCenter
 									text: qsTr("Drop sessions here")
 									color: Theme.textMuted
 									font.pixelSize: Theme.smallFontSize
 								}
 
-								Repeater {
-									id: memberRepeater
-									model: groupCard.members
+								ListView {
+									id: membersListView
+									width: parent.width
+									height: contentHeight
+									interactive: false
+									spacing: dialog.groupInnerSpacing
+									model: membersListModel
+
+									add: Transition {
+										NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Motion.standard; easing.type: Motion.ease }
+									}
+									remove: Transition {
+										ParallelAnimation {
+											NumberAnimation { property: "opacity"; to: 0; duration: Motion.standard; easing.type: Motion.exitEase }
+											NumberAnimation { property: "height"; to: 0; duration: Motion.standard; easing.type: Motion.exitEase }
+										}
+									}
+									displaced: Transition {
+										NumberAnimation { property: "y"; duration: Motion.standard; easing.type: Motion.ease }
+									}
+									move: Transition {
+										NumberAnimation { property: "y"; duration: Motion.standard; easing.type: Motion.ease }
+									}
+									moveDisplaced: Transition {
+										NumberAnimation { property: "y"; duration: Motion.standard; easing.type: Motion.ease }
+									}
 
 									delegate: Rectangle {
 										id: memberRow
-										required property var modelData
+										required property string itemId
 										required property int index
 
-										readonly property string sessionId: modelData.sessionId ?? ""
-										readonly property string displayTitle: modelData.displayTitle ?? sessionId
-										readonly property string dirName: modelData.dirName ?? ""
-										readonly property bool live: modelData.live === true
-										readonly property string rootId: modelData.rootId ?? ""
-										readonly property color tint: dialog.memberTint(rootId, sessionId)
+										property bool removing: false
+										ListView.onRemove: removing = true
+
+										readonly property string sessionId: itemId
+										readonly property var memberData: dialog.memberInfo(groupCard.groupId, sessionId)
+										readonly property string displayTitle: memberData ? String(memberData.displayTitle ?? sessionId) : sessionId
+										readonly property string dirName: memberData ? String(memberData.dirName ?? "") : ""
+										readonly property bool live: memberData ? memberData.live === true : false
+										readonly property string parentId: memberData ? String(memberData.parentId ?? "") : ""
+										readonly property color tint: dialog.memberTint(parentId, sessionId)
 										readonly property bool isDropTarget: dialog.dropTargetKind === "member"
 											&& dialog.dropGroupId === groupCard.groupId
 											&& dialog.dropMemberSessionId === sessionId
@@ -681,42 +876,46 @@ ModalDialog {
 											&& dialog.dragGroupId === groupCard.groupId
 											&& dialog.dragSessionId === sessionId
 
-										width: groupCol.width
-										height: 46
+										width: membersListView.width
+										height: dialog.memberRowHeight
+										clip: true
 										radius: Theme.radiusSmall
 										color: live ? Theme.userBubble : Theme.background
 										border.color: isDropTarget ? Theme.accentText : (live ? Theme.userBubbleBorder : Theme.border)
-										opacity: beingDragged ? 0.45 : 1
+										opacity: beingDragged ? dialog.draggedOpacity : 1
 
-										Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+										Behavior on opacity {
+											enabled: !memberRow.removing
+											NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
+										}
 
 										Rectangle {
 											visible: memberRow.isDropTarget
 											anchors { top: parent.top; left: parent.left; right: parent.right }
-											height: 2
+											height: dialog.dropIndicatorHeight
 											color: Theme.accentText
 										}
 
 										Rectangle {
 											x: 0
-											y: 6
-											width: 3
-											height: parent.height - 12
-											radius: 2
+											y: dialog.tintBarInsetY
+											width: dialog.tintBarWidth
+											height: parent.height - 2 * dialog.tintBarInsetY
+											radius: dialog.tintBarRadius
 											color: memberRow.tint
 										}
 
 										Rectangle {
-											x: 10
+											x: dialog.tintDotX
 											anchors.verticalCenter: parent.verticalCenter
-											width: 7
-											height: 7
-											radius: 3.5
+											width: dialog.tintDotSize
+											height: dialog.tintDotSize
+											radius: height / 2
 											color: memberRow.tint
 										}
 
 										Column {
-											anchors { left: parent.left; leftMargin: 24; right: memberActions.left; rightMargin: 6; verticalCenter: parent.verticalCenter }
+											anchors { left: parent.left; leftMargin: dialog.rowTextLeftMargin; right: memberActions.left; rightMargin: 6; verticalCenter: parent.verticalCenter }
 											spacing: 1
 
 											Text {
@@ -731,7 +930,7 @@ ModalDialog {
 											Text {
 												textFormat: Text.PlainText
 												width: parent.width
-												text: memberRow.live ? memberRow.dirName + " · " + qsTr("Live") : memberRow.dirName
+												text: memberRow.dirName
 												color: Theme.textMuted
 												font.pixelSize: Theme.microFontSize
 												elide: Text.ElideRight
@@ -753,7 +952,7 @@ ModalDialog {
 											}
 											onPositionChanged: mouse => {
 												const pt = mapToItem(null, mouse.x, mouse.y)
-												if (!started && Math.hypot(mouse.x - pressX, mouse.y - pressY) >= 5) {
+												if (!started && Math.hypot(mouse.x - pressX, mouse.y - pressY) >= dialog.dragThresholdPx) {
 													started = true
 													dialog.startDrag("member", memberRow.sessionId, groupCard.groupId, memberRow.displayTitle, pt.x, pt.y)
 												} else if (started) {
@@ -832,16 +1031,16 @@ ModalDialog {
 				const pt = columnsRoot.mapFromItem(null, dialog.dragSceneX, dialog.dragSceneY)
 				return pt.y - height / 2
 			}
-			width: Math.min(220, dragProxyText.implicitWidth + 24)
-			height: 30
-			radius: 15
+			width: Math.min(dialog.dragChipMaxWidth, dragProxyText.implicitWidth + 2 * dialog.dragChipPadX)
+			height: dialog.dragChipHeight
+			radius: height / 2
 			color: Theme.userBubble
 			border.color: dialog.dropTargetKind === "outside" ? Theme.danger : Theme.accentText
 
 			Text {
 				id: dragProxyText
 				textFormat: Text.PlainText
-				anchors { left: parent.left; right: parent.right; leftMargin: 12; rightMargin: 12; verticalCenter: parent.verticalCenter }
+				anchors { left: parent.left; right: parent.right; leftMargin: dialog.dragChipPadX; rightMargin: dialog.dragChipPadX; verticalCenter: parent.verticalCenter }
 				text: dialog.dropTargetKind === "outside"
 					? qsTr("Drop to remove: %1").arg(dialog.dragTitle)
 					: dialog.dragTitle

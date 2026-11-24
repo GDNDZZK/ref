@@ -39,9 +39,9 @@ public:
 	const SessionListModel& choices() const { return m_choices; }
 	// The live session, or null.
 	const proto::SessionInfo* find(const QString& sessionId) const { return m_live.find(sessionId); }
+	// Any known live or persisted session, or null.
+	const proto::SessionInfo* findAny(const QString& sessionId) const;
 	// Every live session, newest first.
-\t// Any known live or persisted session, or null.
-\tconst proto::SessionInfo* findAny(const QString\u0026 sessionId) const;
 	const QList<proto::SessionInfo>& liveSessions() const { return m_liveSessions; }
 
 	// Every live session followed by every non-live persisted session.
@@ -59,8 +59,8 @@ public:
 	// Takes `info` in, e.g. the answer to a rename, without waiting for the backend's list frame.
 	void update(const proto::SessionInfo& info);
 	void setLiveOrder(const QStringList& ids);
-\t// Clears cached session lists and stops pending refresh timers (e.g. on backend switch).
-\tvoid reset();
+	// Clears cached session lists and stops pending refresh timers (e.g. on backend switch).
+	void reset();
 
 	// Requests about one session by id, attached here or not. Those that answer with the
 	// session's new info take it in with update().
@@ -95,6 +95,7 @@ signals:
 	void historyUpdated();
 	// A request for the lists failed.
 	void failed(const QString& reason);
+
 private:
 	// Waits for a request answering with a session's info and takes the info in.
 	QCoro::Task<Result<void>> adopt(QCoro::Task<Result<proto::SessionInfo>> request);

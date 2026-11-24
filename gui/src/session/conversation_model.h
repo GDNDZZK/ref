@@ -3,6 +3,7 @@
 
 #include "proto/types.h"
 #include "session/blocks.h"
+#include "session/layout_estimator.h"
 
 #include <QAbstractListModel>
 #include <QHash>
@@ -268,6 +269,6 @@ private:
 	QHash<QString, proto::EditPreview> m_permissionPreviews;
 	bool m_reasoningExpanded = false;
 	bool m_toolsExpanded = false;
-	double m_columnWidth = 760.0;
+	double m_columnWidth = LayoutEstimator::DefaultColumnWidth;
 };
 } // namespace refgui::session

@@ -6,6 +6,7 @@
 #include <QJSEngine>
 #include <QPointer>
 #include <QUrl>
+
 #include <type_traits>
 
 using refgui::client::Result;

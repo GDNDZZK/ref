@@ -1127,11 +1127,12 @@ QCoro::Task<> ConfigEditorController::fetchTask(std::optional<QString> fileName,
 QCoro::Task<> ConfigEditorController::saveTask(QString fileName, QString content)
 {
 	++m_fetchSerial;
+	const int epoch = m_mutationEpoch;
 	const QPointer<ConfigEditorController> self(this);
 	setSaving(true);
 	emit mutationStarted();
 	const auto result = co_await m_connection.backend().client().saveConfigFile(fileName, std::move(content), optionalCwd());
-	if(!self)
+	if(!self || epoch != m_mutationEpoch)
 	{
 		co_return;
 	}
@@ -1154,11 +1155,12 @@ QCoro::Task<> ConfigEditorController::saveTask(QString fileName, QString content
 QCoro::Task<> ConfigEditorController::createTask(std::optional<QString> label, bool cloneCurrent)
 {
 	++m_fetchSerial;
+	const int epoch = m_mutationEpoch;
 	const QPointer<ConfigEditorController> self(this);
 	setSaving(true);
 	emit mutationStarted();
 	const auto result = co_await m_connection.backend().client().createConfigFile(std::move(label), cloneCurrent, std::nullopt, optionalCwd());
-	if(!self)
+	if(!self || epoch != m_mutationEpoch)
 	{
 		co_return;
 	}
@@ -1180,11 +1182,12 @@ QCoro::Task<> ConfigEditorController::createTask(std::optional<QString> label, b
 QCoro::Task<> ConfigEditorController::activateTask(QString fileName)
 {
 	++m_fetchSerial;
+	const int epoch = m_mutationEpoch;
 	const QPointer<ConfigEditorController> self(this);
 	setSaving(true);
 	emit mutationStarted();
 	const auto result = co_await m_connection.backend().client().selectConfigFile(fileName, optionalCwd());
-	if(!self)
+	if(!self || epoch != m_mutationEpoch)
 	{
 		co_return;
 	}
@@ -1206,11 +1209,12 @@ QCoro::Task<> ConfigEditorController::activateTask(QString fileName)
 QCoro::Task<> ConfigEditorController::deleteTask(QString fileName)
 {
 	++m_fetchSerial;
+	const int epoch = m_mutationEpoch;
 	const QPointer<ConfigEditorController> self(this);
 	setSaving(true);
 	emit mutationStarted();
 	const auto result = co_await m_connection.backend().client().deleteConfigFile(fileName, optionalCwd());
-	if(!self)
+	if(!self || epoch != m_mutationEpoch)
 	{
 		co_return;
 	}
@@ -1267,33 +1271,34 @@ QCoro::Task<> ConfigEditorController::reloadTask()
 
 void ConfigEditorController::reset()
 {
-\t++m_fetchSerial;
-\tsetLoading(false);
-\tsetSaving(false);
-\tsetErrorText({});
-\tsetParseError({});
-\tm_cwd.clear();
-\tm_configDir.clear();
-\tm_files.clear();
-\tm_selectedFile = u\"ref.json\"_s;
-\tm_selectedFileActive = true;
-\tm_selectedFileExists = false;
-\tm_hasJsoncOverride = false;
-\tm_envConfigOverride.clear();
-\tm_projectOverrides.clear();
-\tm_warnings.clear();
-\tm_envStatus.clear();
-\tm_patcher = ConfigJsonPatcher();
-\tm_baselineRoot = OrderedJsonObject();
-\tm_baselineRawText = u\"{}\\n\"_s;
-\tm_hasValidBaseline = true;
-\tm_rawText = m_baselineRawText;
-\t++m_revision;
-\tupdateDirty(false);
-\temit filesChanged();
-\temit envStatusChanged();
-\temit rawTextChanged();
-\temit parsedChanged();
+	++m_fetchSerial;
+	++m_mutationEpoch;
+	setLoading(false);
+	setSaving(false);
+	setErrorText({});
+	setParseError({});
+	m_cwd.clear();
+	m_configDir.clear();
+	m_files.clear();
+	m_selectedFile = u"ref.json"_s;
+	m_selectedFileActive = true;
+	m_selectedFileExists = false;
+	m_hasJsoncOverride = false;
+	m_envConfigOverride.clear();
+	m_projectOverrides.clear();
+	m_warnings.clear();
+	m_envStatus.clear();
+	m_patcher = ConfigJsonPatcher();
+	m_baselineRoot = OrderedJsonObject();
+	m_baselineRawText = u"{}\n"_s;
+	m_hasValidBaseline = true;
+	m_rawText = m_baselineRawText;
+	++m_revision;
+	updateDirty(false);
+	emit filesChanged();
+	emit envStatusChanged();
+	emit rawTextChanged();
+	emit parsedChanged();
 }
 
 } // namespace refgui::workspace

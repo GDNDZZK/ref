@@ -117,6 +117,7 @@ void SessionDirectory::refreshHistory(bool immediate)
 	}
 	m_historyTimer.start();
 }
+
 QList<proto::SessionInfo> SessionDirectory::allSessions() const
 {
 	QList<proto::SessionInfo> all = m_liveSessions;
@@ -132,15 +133,16 @@ QList<proto::SessionInfo> SessionDirectory::allSessions() const
 }
 
 
-const proto::SessionInfo* SessionDirectory::findAny(const QString\u0026 sessionId) const
+const proto::SessionInfo* SessionDirectory::findAny(const QString& sessionId) const
 {
-\tif(const proto::SessionInfo* liveInfo = m_live.find(sessionId))
-\t{
-\t\treturn liveInfo;
-\t}
-\tconst auto it = m_knownSessions.constFind(sessionId);
-\treturn it == m_knownSessions.constEnd() ? nullptr : \u0026*it;
+	if(const proto::SessionInfo* liveInfo = m_live.find(sessionId))
+	{
+		return liveInfo;
+	}
+	const auto it = m_knownSessions.constFind(sessionId);
+	return it == m_knownSessions.constEnd() ? nullptr : &*it;
 }
+
 void SessionDirectory::update(const proto::SessionInfo& info)
 {
 	QList<proto::SessionInfo> sessions = m_liveSessions;
@@ -176,28 +178,28 @@ void SessionDirectory::forgetPersisted(const QString& sessionId)
 
 void SessionDirectory::reset()
 {
-\tm_historyTimer.stop();
-\tm_historySearchTimer.stop();
-\t++m_historyRequest;
-\t++m_unfilteredHistoryRequest;
-\tm_liveSessions.clear();
-\tm_persisted.clear();
-\tm_sidebarPersisted.clear();
-\tm_knownSessions.clear();
-\tm_watchAll = false;
-\tm_live.setSessions({});
-\tm_history.setSessions({});
-\tm_choices.setSessions({});
-\tm_live.setKnownSessions({});
-\tm_history.setKnownSessions({});
-\tm_choices.setKnownSessions({});
-\tif(m_historyLoaded)
-\t{
-\t\tm_historyLoaded = false;
-\t\temit historyLoadedChanged();
-\t}
-\temit liveChanged();
-\temit historyUpdated();
+	m_historyTimer.stop();
+	m_historySearchTimer.stop();
+	++m_historyRequest;
+	++m_unfilteredHistoryRequest;
+	m_liveSessions.clear();
+	m_persisted.clear();
+	m_sidebarPersisted.clear();
+	m_knownSessions.clear();
+	m_watchAll = false;
+	m_live.setSessions({});
+	m_history.setSessions({});
+	m_choices.setSessions({});
+	m_live.setKnownSessions({});
+	m_history.setKnownSessions({});
+	m_choices.setKnownSessions({});
+	if(m_historyLoaded)
+	{
+		m_historyLoaded = false;
+		emit historyLoadedChanged();
+	}
+	emit liveChanged();
+	emit historyUpdated();
 }
 
 QCoro::Task<SessionDirectory::Result<void>> SessionDirectory::adopt(QCoro::Task<Result<proto::SessionInfo>> request)
@@ -403,6 +405,7 @@ QCoro::Task<> SessionDirectory::loadUnfilteredHistory()
 		emit historyLoadedChanged();
 	}
 }
+
 void SessionDirectory::setLive(QList<proto::SessionInfo> sessions)
 {
 	std::ranges::sort(sessions, [](const proto::SessionInfo& a, const proto::SessionInfo& b) {

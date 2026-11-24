@@ -61,7 +61,6 @@ public:
 	                                             int panelHeight,
 	                                             const QString& screenName = {}) const;
 	Q_INVOKABLE QVariantMap clampWindowRect(int x, int y, int width, int height, const QString& screenName = {}) const;
-	Q_INVOKABLE QString screenNameAt(int x, int y, int width, int height) const;
 
 signals:
 	void screenGeometryChanged();

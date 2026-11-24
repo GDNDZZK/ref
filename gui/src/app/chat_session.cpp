@@ -44,6 +44,19 @@ ChatSession::ChatSession(Backend& backend, const refgui::workspace::BackendConfi
 	connect(&m_controller, &refgui::session::SessionController::aboutToMaterialize, this, &ChatSession::aboutToMaterialize);
 	connect(&m_controller, &refgui::session::SessionController::materialized, this, &ChatSession::materialized);
 	connect(&m_controller, &refgui::session::SessionController::messagesEvicted, this, &ChatSession::messagesEvicted);
+	connect(&m_controller, &refgui::session::SessionController::rangeErrorChanged, this, [this] {
+		const QString& err = m_controller.rangeError();
+		if(!err.isEmpty())
+		{
+			m_lastRangeError = err;
+		}
+		else if(!m_lastRangeError.isEmpty() && m_failure == m_lastRangeError)
+		{
+			m_lastRangeError.clear();
+			setFailure({});
+		}
+		emit rangeErrorChanged();
+	});
 
 	m_permissionGuard.setSingleShot(true);
 	m_permissionGuard.setInterval(PermissionGuard);
@@ -600,6 +613,16 @@ void ChatSession::setVisibleSeqRange(int startSeq, int endSeq)
 		return;
 	}
 	m_controller.setVisibleSeqRange(static_cast<quint64>(startSeq), static_cast<quint64>(endSeq));
+}
+
+void ChatSession::retryRangeFetch()
+{
+	if(!m_lastRangeError.isEmpty() && m_failure == m_lastRangeError)
+	{
+		m_lastRangeError.clear();
+		setFailure({});
+	}
+	m_controller.retryRangeFetch();
 }
 
 void ChatSession::setFollowing(bool following)

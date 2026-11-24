@@ -117,10 +117,10 @@ QCoro::Task<Result<proto::HelloResult>> ServerClient::open(Endpoint endpoint,
                                                            std::chrono::milliseconds timeout,
                                                            QList<proto::NotifyFrame::Kind> notify)
 {
-\tif(m_socket.state() != QAbstractSocket::UnconnectedState)
-\t{
-\t\tm_socket.abort();
-\t}
+	if(m_socket.state() != QAbstractSocket::UnconnectedState)
+	{
+		m_socket.abort();
+	}
 	m_closeReason.clear();
 	const bool connected = co_await ConnectAwaiter{*this, withToken(endpoint.url, endpoint.token), timeout};
 	if(!connected)
@@ -500,6 +500,7 @@ QCoro::Task<Result<void>> ServerClient::shutdown()
 {
 	co_return asVoidResult(co_await request(proto::request::shutdown()));
 }
+
 void ServerClient::ResponseAwaiter::await_suspend(std::coroutine_handle<> handle)
 {
 	waiter = handle;

@@ -30,6 +30,22 @@ bool parseId(const QString& id, QString& sessionId, QString& imageId)
 	return true;
 }
 
+// Strips the trailing `:<part>:<n>` fields from `<msg_id>:<part>:<n>` so message IDs containing `:` still match.
+QString messageIdFromImageId(const QString& imageId)
+{
+	const qsizetype lastColon = imageId.lastIndexOf(u':');
+	if(lastColon <= 0)
+	{
+		return imageId.section(u':', 0, 0);
+	}
+	const qsizetype secondLastColon = imageId.lastIndexOf(u':', lastColon - 1);
+	if(secondLastColon <= 0)
+	{
+		return imageId.left(lastColon);
+	}
+	return imageId.left(secondLastColon);
+}
+
 } // namespace
 
 // Lives on the GUI thread. A request comes in queued from a loader thread; the answer goes
@@ -61,6 +77,7 @@ public:
 				m_cache.remove(key);
 			}
 		}
+		pruneStaleKeys();
 	}
 
 	void clearAll()
@@ -99,9 +116,26 @@ private:
 			co_return;
 		}
 		m_cache.insert(key, new QByteArray(*result), static_cast<int>(result->size()));
-		const QString prefix = sessionId + u'/' + imageId.section(u':', 0, 0) + u':';
+		pruneStaleKeys();
+		const QString prefix = sessionId + u'/' + messageIdFromImageId(imageId) + u':';
 		m_keysByMsg[prefix].insert(key);
 		emit fetched(key, *result, {});
+	}
+
+	void pruneStaleKeys()
+	{
+		for(auto it = m_keysByMsg.begin(); it != m_keysByMsg.end();)
+		{
+			it.value().removeIf([this](const QString& key) { return !m_cache.contains(key); });
+			if(it.value().isEmpty())
+			{
+				it = m_keysByMsg.erase(it);
+			}
+			else
+			{
+				++it;
+			}
+		}
 	}
 
 	SessionLookup m_lookup;

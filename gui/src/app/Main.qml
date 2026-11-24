@@ -351,7 +351,7 @@ Window {
 					// Connection trouble, or why no session could be opened, until it is gone.
 					StatusPill {
 						text: window.noticeText()
-						actionText: Workspace.connectionText !== "" ? qsTr("Switch Backend…") : ""
+						actionText: Workspace.connectionState === "disconnected" ? qsTr("Switch Backend…") : ""
 						onActionClicked: Commands.run(CommandId.backend)
 					}
 				}
@@ -363,10 +363,57 @@ Window {
 				height: Theme.sidebarHeaderHeight
 				color: Theme.background
 
+				readonly property int titleDragThreshold: 4
+
+				component FilterPill: Rectangle {
+					id: pillItem
+					property string labelText: ""
+					property bool active: false
+					property string tooltipText: ""
+					property real maxPillWidth: 0
+					signal activated()
+
+					readonly property int pillHeight: 28
+					readonly property int pillPadX: 10
+
+					width: maxPillWidth > 0
+						? Math.min(maxPillWidth, pillLabel.implicitWidth + 2 * pillPadX)
+						: (pillLabel.implicitWidth + 2 * pillPadX)
+					height: pillHeight
+					radius: height / 2
+					color: active ? Theme.userBubble : (pillHover.hovered ? Theme.surfaceHover : "transparent")
+					border.color: active ? Theme.userBubbleBorder : "transparent"
+
+					Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+
+					Text {
+						id: pillLabel
+						textFormat: Text.PlainText
+						anchors {
+							left: parent.left
+							right: parent.right
+							leftMargin: pillItem.pillPadX
+							rightMargin: pillItem.pillPadX
+							verticalCenter: parent.verticalCenter
+						}
+						horizontalAlignment: Text.AlignHCenter
+						text: pillItem.labelText
+						color: pillItem.active || pillHover.hovered ? Theme.text : Theme.textMuted
+						font.pixelSize: Theme.smallFontSize
+						elide: Text.ElideRight
+					}
+					HoverHandler { id: pillHover; cursorShape: Qt.PointingHandCursor }
+					TapHandler { onTapped: pillItem.activated() }
+					PlainToolTip {
+						visible: pillItem.tooltipText !== "" && pillHover.hovered
+						text: pillItem.tooltipText
+					}
+				}
+
 				DragHandler {
 					enabled: !dialogs.visible
 					target: null
-					dragThreshold: 4
+					dragThreshold: titleBar.titleDragThreshold
 					onActiveChanged: {
 						if (active && !window.overTopButtons(centroid.scenePosition))
 							window.startSystemMove()
@@ -384,19 +431,31 @@ Window {
 					id: splitFilterCapsule
 					objectName: "splitFilterCapsule"
 
+					readonly property int capsuleSideClear: 8
+					readonly property int sidebarOpenClear: 12
+					readonly property int capsuleMinWidth: 96
+					readonly property int capsulePadding: 6
+					readonly property int capsuleRowSpacing: 2
+					readonly property int capsuleZ: 5
+					readonly property int topLeftButtonCount: 2
+					readonly property int topRightGapCount: 3
+					readonly property int maxCreatorPillWidth: 150
+					readonly property int filterMenuButtonSize: 28
+					readonly property int filterIconSize: 16
+					readonly property int filterMenuGap: 6
 					readonly property real leftClear: sidebar.width === 0
-						? ((window.isMac ? window.macTrafficLightInset : Theme.windowButtonMargin) + 2 * Theme.buttonHeight + Theme.windowButtonGap + 8)
-						: 12
+						? ((window.isMac ? window.macTrafficLightInset : Theme.windowButtonMargin) + topLeftButtonCount * Theme.buttonHeight + Theme.windowButtonGap + capsuleSideClear)
+						: sidebarOpenClear
 					readonly property real rightClear: (window.showWindowControls ? windowControls.width + Theme.windowButtonGap : 0)
 						+ themeToggle.width + floatButton.width + splitButton.width
-						+ 3 * Theme.windowButtonGap + Theme.windowButtonMargin + 8
+						+ topRightGapCount * Theme.windowButtonGap + Theme.windowButtonMargin + capsuleSideClear
 					readonly property real maxWidth: Math.max(0, area.width - leftClear - rightClear)
-					readonly property bool shown: Workspace.splitView && !window.zoomed && maxWidth >= 96
+					readonly property bool shown: Workspace.splitView && !window.zoomed && maxWidth >= capsuleMinWidth
 
 					anchors.horizontalCenter: parent.horizontalCenter
 					y: window.topButtonY
-					z: 5
-					width: Math.min(splitFilterRow.implicitWidth + 6, maxWidth)
+					z: capsuleZ
+					width: Math.min(splitFilterRow.implicitWidth + capsulePadding, maxWidth)
 					height: Theme.buttonHeight
 					radius: height / 2
 					color: Theme.surface
@@ -411,101 +470,52 @@ Window {
 					Row {
 						id: splitFilterRow
 						anchors.centerIn: parent
-						spacing: 2
+						spacing: splitFilterCapsule.capsuleRowSpacing
 
-						Rectangle {
+						FilterPill {
 							id: filterAllPill
 							objectName: "splitFilterAll"
-							readonly property bool active: Workspace.splitFilter === "all"
-							width: filterAllText.implicitWidth + 20
-							height: 28
-							radius: 14
-							color: active ? Theme.userBubble : (filterAllHover.hovered ? Theme.surfaceHover : "transparent")
-							border.color: active ? Theme.userBubbleBorder : "transparent"
-
-							Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
-
-							Text {
-								id: filterAllText
-								textFormat: Text.PlainText
-								anchors.centerIn: parent
-								text: qsTr("All")
-								color: filterAllPill.active || filterAllHover.hovered ? Theme.text : Theme.textMuted
-								font.pixelSize: Theme.smallFontSize
-							}
-							HoverHandler { id: filterAllHover; cursorShape: Qt.PointingHandCursor }
-							TapHandler { onTapped: Workspace.setSplitFilter("all") }
+							labelText: qsTr("All")
+							active: Workspace.splitFilter === "all"
+							onActivated: Workspace.setSplitFilter("all")
 						}
 
-						Rectangle {
+						FilterPill {
 							id: filterUserPill
 							objectName: "splitFilterUser"
-							readonly property bool active: Workspace.splitFilter === "user"
-							width: filterUserText.implicitWidth + 20
-							height: 28
-							radius: 14
-							color: active ? Theme.userBubble : (filterUserHover.hovered ? Theme.surfaceHover : "transparent")
-							border.color: active ? Theme.userBubbleBorder : "transparent"
-
-							Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
-
-							Text {
-								id: filterUserText
-								textFormat: Text.PlainText
-								anchors.centerIn: parent
-								text: qsTr("User-created")
-								color: filterUserPill.active || filterUserHover.hovered ? Theme.text : Theme.textMuted
-								font.pixelSize: Theme.smallFontSize
-							}
-							HoverHandler { id: filterUserHover; cursorShape: Qt.PointingHandCursor }
-							TapHandler { onTapped: Workspace.setSplitFilter("user") }
+							labelText: qsTr("User-created")
+							active: Workspace.splitFilter === "user"
+							onActivated: Workspace.setSplitFilter("user")
 						}
 
-						Rectangle {
+						FilterPill {
 							id: filterCreatorPill
 							objectName: "splitFilterCreator"
-							readonly property bool active: Workspace.splitFilter !== "all" && Workspace.splitFilter !== "user"
+							active: Workspace.splitFilter !== "all" && Workspace.splitFilter !== "user"
 							visible: active
-							width: Math.min(150, filterCreatorText.implicitWidth + 20)
-							height: 28
-							radius: 14
-							color: Theme.userBubble
-							border.color: Theme.userBubbleBorder
-
-							Text {
-								id: filterCreatorText
-								textFormat: Text.PlainText
-								anchors { left: parent.left; right: parent.right; leftMargin: 10; rightMargin: 10; verticalCenter: parent.verticalCenter }
-								text: qsTr("By %1 ×").arg(Workspace.splitFilterLabel)
-								color: Theme.text
-								font.pixelSize: Theme.smallFontSize
-								elide: Text.ElideRight
-							}
-							HoverHandler { id: filterCreatorHover; cursorShape: Qt.PointingHandCursor }
-							TapHandler { onTapped: Workspace.setSplitFilter("all") }
-							PlainToolTip {
-								visible: filterCreatorHover.hovered
-								text: qsTr("Clear creator filter")
-							}
+							maxPillWidth: splitFilterCapsule.maxCreatorPillWidth
+							labelText: qsTr("By %1 ×").arg(Workspace.splitFilterLabel)
+							tooltipText: qsTr("Clear creator filter")
+							onActivated: Workspace.setSplitFilter("all")
 						}
 
 						Item {
 							id: filterMoreButton
 							objectName: "splitFilterMenuButton"
 							visible: Workspace.splitCreators.length > 0
-							width: 28
-							height: 28
+							width: splitFilterCapsule.filterMenuButtonSize
+							height: splitFilterCapsule.filterMenuButtonSize
 
 							Rectangle {
 								anchors.fill: parent
-								radius: 14
+								radius: height / 2
 								color: filterMoreHover.hovered ? Theme.surfaceHover : "transparent"
 								Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 							}
 							Icon {
 								anchors.centerIn: parent
 								name: "filter"
-								size: 16
+								size: splitFilterCapsule.filterIconSize
 								color: filterMoreHover.hovered ? Theme.text : Theme.textMuted
 							}
 							HoverHandler { id: filterMoreHover; cursorShape: Qt.PointingHandCursor }
@@ -519,7 +529,7 @@ Window {
 									for (let i = 0; i < creators.length; ++i)
 										items.push({text: qsTr("By %1").arg(creators[i].name), action: creators[i].id})
 									splitFilterMenu.entries = items
-									splitFilterMenu.openAt(Qt.point(0, filterMoreButton.height + 6))
+									splitFilterMenu.openAt(Qt.point(0, filterMoreButton.height + splitFilterCapsule.filterMenuGap))
 								}
 							}
 							PlainToolTip {
