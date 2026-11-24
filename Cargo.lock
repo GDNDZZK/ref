@@ -3145,6 +3145,7 @@ dependencies = [
 name = "ref-client"
 version = "0.2.3"
 dependencies = [
+ "futures-util",
  "rand 0.9.5",
  "ref-proto",
  "ref-sys",
