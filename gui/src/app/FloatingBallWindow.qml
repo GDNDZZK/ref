@@ -230,6 +230,20 @@ Item {
 			if (session && session.sessionId === root.selectedSessionId)
 				root.selectedSessionId = Workspace.currentId
 		}
+		function onFloatingModeChanged() {
+			if (Workspace.floatingMode) {
+				root.resolvePosition()
+				root.positionRestored = true
+				if (Workspace.currentId !== "")
+					root.selectedSessionId = Workspace.currentId
+			} else {
+				hoverOpenTimer.stop()
+				hoverCloseTimer.stop()
+				root.hoverCardShown = false
+				root.confirmCloseShown = false
+				root.panelExpanded = false
+			}
+		}
 	}
 
 	Connections {
@@ -788,7 +802,7 @@ Item {
 
 				Loader {
 					anchors.fill: parent
-					active: root.activeSession !== null && root.panelExpanded
+					active: Workspace.floatingMode && root.activeSession !== null && root.panelExpanded
 					sourceComponent: SessionPane {
 						session: root.activeSession
 						compact: true

@@ -103,7 +103,7 @@ Window {
 	Binding {
 		target: Workspace
 		property: "windowActive"
-		value: window.active || (floatingBallLoader.item ? floatingBallLoader.item.panelActive : false)
+		value: window.active || floatingBall.panelActive
 	}
 	Binding {
 		target: Theme
@@ -693,9 +693,7 @@ Window {
 		visible: window.windowBorderShown
 	}
 
-	Loader {
-		id: floatingBallLoader
-		active: Workspace.floatingMode
-		sourceComponent: FloatingBallWindow {}
+	FloatingBallWindow {
+		id: floatingBall
 	}
 }
