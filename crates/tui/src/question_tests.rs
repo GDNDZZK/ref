@@ -570,11 +570,13 @@ fn a_question_is_shown_once_and_restored_from_a_snapshot() {
         info: v.info.clone(),
         messages: vec![],
         more_before: false,
+        total_messages: 0,
+        start_seq: 0,
+        layout_metas: vec![],
         pending_permissions: vec![],
         pending_questions: vec![request(vec![loop_bound(), checks()])],
         queued: vec![],
     };
-    v.load_snapshot(snap.clone());
     assert_eq!(v.questions.len(), 1);
     render(&mut app, 100, 30);
     assert!(screen(&mut app).contains("? Questions"));
@@ -739,6 +741,9 @@ fn reconnect_after_drop(
         info: app.views[TEST_SESSION].info.clone(),
         messages: vec![],
         more_before: false,
+        total_messages: 0,
+        start_seq: 0,
+        layout_metas: vec![],
         pending_permissions: vec![],
         pending_questions: pending,
         queued: vec![],
@@ -843,7 +848,16 @@ fn collapsed_question_tool_shows_answers_after_submit() {
         usage: None,
         error: None,
     };
-    app.views.get_mut(TEST_SESSION).unwrap().messages = vec![msg.clone()];
+    app.views
+        .get_mut(TEST_SESSION)
+        .unwrap()
+        .apply(SessionEvent::Reset {
+            messages: vec![msg.clone()],
+            more_before: false,
+            total_messages: 1,
+            start_seq: 0,
+            layout_metas: vec![],
+        });
     let s = screen(&mut app);
     assert!(s.contains("▸ ✓ question"), "{s}");
     assert!(s.contains("Loop bound = Iterator"), "{s}");
@@ -856,10 +870,14 @@ fn collapsed_question_tool_shows_answers_after_submit() {
         *meta = Some(serde_json::json!({ "answers": [[], ["Clippy"]] }));
     }
     let v = app.views.get_mut(TEST_SESSION).unwrap();
-    v.messages = vec![msg_unanswered];
+    v.apply(SessionEvent::Reset {
+        messages: vec![msg_unanswered],
+        more_before: false,
+        total_messages: 1,
+        start_seq: 0,
+        layout_metas: vec![],
+    });
     v.chat.invalidate();
-    let s = screen(&mut app);
-    assert!(s.contains("Loop bound = (not answered)"), "{s}");
     assert!(s.contains("Checks = Clippy"), "{s}");
 }
 

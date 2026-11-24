@@ -2,8 +2,9 @@
 
 use std::time::{Duration, Instant};
 
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
@@ -1096,11 +1097,364 @@ impl HelpDialog {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackendField {
+    Url,
+    Token,
+    ConnectTemp,
+    SaveDefault,
+    RestoreLocal,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BackendAction {
+    Close,
+    ConnectTemporary { url: String, token: Option<String> },
+    SaveDefault { url: String, token: Option<String> },
+    RestoreLocal,
+}
+
+const BACKEND_DIALOG_W: u16 = 74;
+const BACKEND_DIALOG_H: u16 = 15;
+const BACKEND_MIN_W: u16 = 24;
+const BACKEND_MIN_H: u16 = 10;
+
+pub struct BackendDialog {
+    pub url: Editor,
+    pub token: Editor,
+    pub focus: BackendField,
+    pub current_summary: String,
+    pub error: Option<String>,
+    pub opened: Instant,
+    pub rect: Rect,
+    url_rect: Rect,
+    token_rect: Rect,
+    btn_rects: Vec<(Rect, BackendField)>,
+    cursor_at: Option<(u16, u16)>,
+}
+
+impl BackendDialog {
+    pub fn new(
+        initial_url: Option<&str>,
+        initial_token: Option<&str>,
+        current_summary: String,
+    ) -> Self {
+        let mut url = Editor::default();
+        if let Some(u) = initial_url {
+            url.set_text(u);
+        }
+        let mut token = Editor::default();
+        if let Some(t) = initial_token {
+            token.set_text(t);
+        }
+        Self {
+            url,
+            token,
+            focus: BackendField::Url,
+            current_summary,
+            error: None,
+            opened: Instant::now(),
+            rect: Rect::default(),
+            url_rect: Rect::default(),
+            token_rect: Rect::default(),
+            btn_rects: Vec::new(),
+            cursor_at: None,
+        }
+    }
+
+    fn cycle_focus(&mut self, dir: i32) {
+        const ORDER: [BackendField; 5] = [
+            BackendField::Url,
+            BackendField::Token,
+            BackendField::ConnectTemp,
+            BackendField::SaveDefault,
+            BackendField::RestoreLocal,
+        ];
+        let idx = ORDER.iter().position(|f| *f == self.focus).unwrap_or(0) as i32;
+        let next = (idx + dir).rem_euclid(ORDER.len() as i32) as usize;
+        self.focus = ORDER[next];
+    }
+
+    fn submit_explicit(&mut self, save: bool) -> Option<BackendAction> {
+        let raw_url = self.url.text.trim().to_string();
+        if let Err(e) = ref_client::validate_explicit_url(&raw_url) {
+            self.error = Some(e.to_string());
+            self.focus = BackendField::Url;
+            return None;
+        }
+        self.error = None;
+        let tok = crate::prefs::normalize_token(Some(&self.token.text));
+        if save {
+            Some(BackendAction::SaveDefault {
+                url: raw_url,
+                token: tok,
+            })
+        } else {
+            Some(BackendAction::ConnectTemporary {
+                url: raw_url,
+                token: tok,
+            })
+        }
+    }
+
+    pub fn handle_key(&mut self, k: &KeyEvent) -> Option<BackendAction> {
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        match k.code {
+            KeyCode::Esc => return Some(BackendAction::Close),
+            KeyCode::Char('c') if ctrl => return Some(BackendAction::Close),
+            KeyCode::Char('s') if ctrl => return self.submit_explicit(true),
+            KeyCode::Char('r') if ctrl => return Some(BackendAction::RestoreLocal),
+            KeyCode::Tab | KeyCode::Down => self.cycle_focus(1),
+            KeyCode::BackTab | KeyCode::Up => self.cycle_focus(-1),
+            KeyCode::Enter => match self.focus {
+                BackendField::Url | BackendField::Token | BackendField::ConnectTemp => {
+                    return self.submit_explicit(false);
+                }
+                BackendField::SaveDefault => return self.submit_explicit(true),
+                BackendField::RestoreLocal => return Some(BackendAction::RestoreLocal),
+            },
+            _ => match self.focus {
+                BackendField::Url => {
+                    if crate::input::edit_key(&mut self.url, k, false) {
+                        self.error = None;
+                    }
+                }
+                BackendField::Token => {
+                    crate::input::edit_key(&mut self.token, k, false);
+                }
+                _ => {}
+            },
+        }
+        None
+    }
+
+    pub fn handle_paste(&mut self, text: &str) {
+        let clean = text::one_line(text);
+        match self.focus {
+            BackendField::Url => {
+                self.url.insert(&clean);
+                self.error = None;
+            }
+            BackendField::Token => {
+                self.token.insert(&clean);
+            }
+            _ => {}
+        }
+    }
+
+    pub fn handle_mouse(&mut self, me: MouseEvent) -> (bool, Option<BackendAction>) {
+        let MouseEventKind::Down(MouseButton::Left) = me.kind else {
+            return (false, None);
+        };
+        let pos = Position::new(me.column, me.row);
+        if !self.rect.contains(pos) {
+            return (true, Some(BackendAction::Close));
+        }
+        if self.url_rect.contains(pos) {
+            self.focus = BackendField::Url;
+            let off = self.url.offset_at_single_line(self.url_rect, me.column);
+            self.url.mouse_down(off, 1);
+            self.url.mouse_up();
+            return (true, None);
+        }
+        if self.token_rect.contains(pos) {
+            self.focus = BackendField::Token;
+            let off = self.token.offset_at_single_line(self.token_rect, me.column);
+            self.token.mouse_down(off, 1);
+            self.token.mouse_up();
+            return (true, None);
+        }
+        if let Some((_, field)) = self
+            .btn_rects
+            .iter()
+            .find(|(r, _)| r.contains(pos))
+            .copied()
+        {
+            self.focus = field;
+            let act = match field {
+                BackendField::ConnectTemp => self.submit_explicit(false),
+                BackendField::SaveDefault => self.submit_explicit(true),
+                BackendField::RestoreLocal => Some(BackendAction::RestoreLocal),
+                _ => None,
+            };
+            return (true, act);
+        }
+        (true, None)
+    }
+
+    pub fn cursor(&self) -> Option<(u16, u16)> {
+        self.cursor_at
+    }
+
+    pub fn draw(&mut self, buf: &mut Buffer, screen: Rect) {
+        self.cursor_at = None;
+        self.btn_rects.clear();
+        self.url_rect = Rect::default();
+        self.token_rect = Rect::default();
+        if screen.width < BACKEND_MIN_W || screen.height < BACKEND_MIN_H {
+            self.rect = Rect::default();
+            return;
+        }
+        let t = open_progress(self.opened);
+        let w = screen
+            .width
+            .saturating_sub(4)
+            .clamp(BACKEND_MIN_W, BACKEND_DIALOG_W)
+            .min(screen.width);
+        let h = screen
+            .height
+            .saturating_sub(4)
+            .clamp(BACKEND_MIN_H, BACKEND_DIALOG_H)
+            .min(screen.height);
+        let r = frame(buf, screen, w, h, "Backend connection", t);
+        self.rect = r;
+        if r.width < 10 || r.height < 8 {
+            return;
+        }
+        let inner = Rect::new(
+            r.x + 2,
+            r.y + 1,
+            r.width.saturating_sub(4),
+            r.height.saturating_sub(2),
+        );
+        let bg = theme::PANEL;
+        let fade = |c: Color| theme::blend(bg, c, t);
+        let iw = inner.width as usize;
+
+        buf.set_string(
+            inner.x,
+            inner.y,
+            text::truncate(&format!("Current: {}", self.current_summary), iw),
+            Style::new().fg(fade(theme::MUTED)).bg(bg),
+        );
+
+        let url_label_y = inner.y + 2;
+        let url_y = inner.y + 3;
+        let tok_label_y = inner.y + 5;
+        let tok_y = inner.y + 6;
+
+        let url_lbl_style = Style::new()
+            .fg(fade(if self.focus == BackendField::Url {
+                theme::PRIMARY
+            } else {
+                theme::ACCENT
+            }))
+            .bg(bg)
+            .add_modifier(Modifier::BOLD);
+        buf.set_string(
+            inner.x,
+            url_label_y,
+            "Backend WebSocket URL:",
+            url_lbl_style,
+        );
+        let url_area = Rect::new(inner.x, url_y, inner.width, 1);
+        self.url_rect = url_area;
+        let url_bg = if self.focus == BackendField::Url {
+            theme::ELEMENT
+        } else {
+            bg
+        };
+        buf.set_style(url_area, Style::new().bg(url_bg));
+        let url_cur = self.url.draw_single_line(
+            buf,
+            url_area,
+            Some(url_bg),
+            "ws://host:port or wss://host/path",
+            self.focus == BackendField::Url,
+        );
+        if self.focus == BackendField::Url {
+            self.cursor_at = url_cur;
+        }
+
+        let tok_lbl_style = Style::new()
+            .fg(fade(if self.focus == BackendField::Token {
+                theme::PRIMARY
+            } else {
+                theme::ACCENT
+            }))
+            .bg(bg)
+            .add_modifier(Modifier::BOLD);
+        buf.set_string(inner.x, tok_label_y, "Token (optional):", tok_lbl_style);
+        let tok_area = Rect::new(inner.x, tok_y, inner.width, 1);
+        self.token_rect = tok_area;
+        let tok_bg = if self.focus == BackendField::Token {
+            theme::ELEMENT
+        } else {
+            bg
+        };
+        buf.set_style(tok_area, Style::new().bg(tok_bg));
+        let tok_cur = self.token.draw_single_line(
+            buf,
+            tok_area,
+            Some(tok_bg),
+            "(none)",
+            self.focus == BackendField::Token,
+        );
+        if self.focus == BackendField::Token {
+            self.cursor_at = tok_cur;
+        }
+
+        if let Some(err) = &self.error {
+            buf.set_string(
+                inner.x,
+                inner.y + 8,
+                text::truncate(err, iw),
+                Style::new().fg(fade(theme::ERROR)).bg(bg),
+            );
+        }
+
+        let btn_y = inner.y + inner.height.saturating_sub(3);
+        let mut bx = inner.x;
+        let btns = [
+            ("Connect (temp)", BackendField::ConnectTemp),
+            ("Save default (ctrl+s)", BackendField::SaveDefault),
+            ("Local auto (ctrl+r)", BackendField::RestoreLocal),
+        ];
+        for (label, field) in btns {
+            let bw = width(label) as u16 + 2;
+            if bx + bw > inner.x + inner.width {
+                break;
+            }
+            let focused = self.focus == field;
+            let (fg, bbg) = if focused {
+                (theme::PANEL, theme::PRIMARY)
+            } else {
+                (fade(theme::TEXT), theme::ELEMENT)
+            };
+            buf.set_string(
+                bx,
+                btn_y,
+                format!(" {label} "),
+                Style::new().fg(fg).bg(bbg).add_modifier(if focused {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
+            );
+            self.btn_rects.push((Rect::new(bx, btn_y, bw, 1), field));
+            bx += bw + 1;
+        }
+
+        let hint_y = inner.y + inner.height.saturating_sub(1);
+        buf.set_string(
+            inner.x,
+            hint_y,
+            text::truncate(
+                "tab field · enter connect · ctrl+s save default · ctrl+r local auto · esc cancel",
+                iw,
+            ),
+            Style::new().fg(fade(theme::DIM)).bg(bg),
+        );
+    }
+}
+
 #[allow(clippy::large_enum_variant)]
 pub enum Dialog {
     List(ListDialog),
     Help(HelpDialog),
     Mcp(super::mcp::McpDialog),
+    Backend(BackendDialog),
+    Stash(super::stash::StashDialog),
 }
 
 impl Dialog {
@@ -1109,6 +1463,8 @@ impl Dialog {
             Dialog::List(d) => d.opened,
             Dialog::Help(d) => d.opened,
             Dialog::Mcp(d) => d.opened,
+            Dialog::Backend(d) => d.opened,
+            Dialog::Stash(d) => d.opened,
         };
         o.elapsed() < OPEN_SETTLE
     }

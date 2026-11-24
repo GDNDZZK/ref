@@ -5,14 +5,16 @@ use std::time::{Duration, Instant};
 
 use ratatui::layout::Rect;
 use ratatui::style::Color;
+use ref_client::BackendTarget;
 use ref_proto::{
-    ImageData, ModelRef, Request, ServerConfigInfo, ServerFrame, SessionEvent, SessionInfo,
-    SessionSnapshot, SessionStatus,
+    ImageData, Message, ModelRef, Request, ServerConfigInfo, ServerFrame, SessionEvent,
+    SessionInfo, SessionSnapshot, SessionStatus, StashGroup,
 };
 use serde_json::Value;
 
 use crate::net::{Client, NetEvent};
-use crate::state::{Queued, SessionView};
+use crate::prefs::{BackendSource, TuiPrefs};
+use crate::state::{PAGE_SIZE, Queued, RANGE_DEBOUNCE, SessionView, TAIL_KEEP_MESSAGES};
 use crate::text;
 pub use crate::ui::autocomplete::{AcKind, Autocomplete};
 use crate::ui::autocomplete::{
@@ -20,10 +22,14 @@ use crate::ui::autocomplete::{
     build_dir_items, build_shell_arg_items, has_drive_prefix, has_drive_root_prefix, is_bare_drive,
     last_arg_token, shell_token_context, split_dir_query,
 };
-use crate::ui::dialog::{CreatorFilter, Dialog, HelpDialog, Item, Kind, ListDialog, OPEN_SETTLE};
+use crate::ui::dialog::{
+    BackendAction, BackendDialog, CreatorFilter, Dialog, HelpDialog, Item, Kind, ListDialog,
+    OPEN_SETTLE,
+};
 use crate::ui::editor::{Editor, History};
 use crate::ui::permission::PermissionView;
 use crate::ui::question::QuestionView;
+use crate::ui::stash::{StashCommand, StashDialog};
 use crate::ui::theme;
 use crate::ui::toast::Toasts;
 use crate::util::{cmd, placeholder_info};
@@ -39,6 +45,14 @@ pub struct InitPlan {
     pub prompt: Option<String>,
 }
 
+/// Configuration for the next lazily-created session while `current == None`.
+#[derive(Debug, Clone, Default)]
+pub struct DraftConfig {
+    pub agent: Option<String>,
+    pub model: Option<ModelRef>,
+    pub variant: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Chat,
@@ -49,6 +63,12 @@ pub enum Mode {
 const NO_PENDING_QUESTION: &str = ref_proto::NO_PENDING_QUESTION;
 
 #[derive(Debug)]
+pub enum PostCreate {
+    Prompt(String, Vec<ImageData>),
+    Shell(String),
+}
+
+#[derive(Debug)]
 pub enum Pending {
     Config {
         toast_warnings: bool,
@@ -56,7 +76,7 @@ pub enum Pending {
     ReloadConfig,
     LiveList,
     Created {
-        prompt: Option<(String, Vec<ImageData>)>,
+        post: Option<PostCreate>,
     },
     Attach {
         sid: String,
@@ -77,11 +97,12 @@ pub enum Pending {
         sid: String,
         count: Option<usize>,
     },
-    /// Page of history before message `before` (view generation `generation`).
-    Older {
+    /// Sequence range `[start_seq, end_seq)` requested for `sid` (view generation `generation`).
+    MessagesRange {
         sid: String,
         generation: u64,
-        before: String,
+        start_seq: usize,
+        end_seq: usize,
     },
     /// A session was closed; refresh dialogs / history afterwards.
     Closed {
@@ -91,6 +112,8 @@ pub enum Pending {
     Cwd {
         sid: String,
     },
+    /// `/cd` validation when `current == None`.
+    DraftCd,
     Expand {
         sid: Option<String>,
     },
@@ -142,6 +165,16 @@ pub enum Pending {
         sid: String,
         call_id: String,
     },
+    /// `RetryNow` response.
+    RetryNow,
+    /// Stash group list / mutation response carrying `{ groups }`.
+    Groups {
+        ok: Option<String>,
+    },
+    StashAll,
+    CreateGroup,
+    RestoreGroup,
+    RestoreGroupMember,
 }
 
 /// Error from a `ServerFrame::Response` with `ok: false`.
@@ -176,10 +209,15 @@ pub struct Watch {
     pub drag_tile: Option<String>,
     /// Tiles at last draw.
     pub tiles: Vec<(String, Rect)>,
+    /// Direct-parent filter (`All` / `UserCreated` / `ByCreator`).
+    pub filter: CreatorFilter,
+    /// Remembered direct parent `(id, name)` when cycling `All -> UserCreated -> ByCreator`.
+    pending_parent: Option<(String, String)>,
+    /// Clickable rect of the filter pill in the watch status line.
+    pub filter_pill_rect: Option<Rect>,
     /// WatchAll state last sent to the server.
     subscribed: bool,
 }
-
 #[derive(Clone)]
 pub struct Cmd {
     pub name: &'static str,
@@ -249,14 +287,49 @@ pub const COMMANDS: &[Cmd] = &[
     Cmd {
         name: cmd::CD,
         aliases: &["cwd"],
-        desc: "Change this session's working directory",
+        desc: "Change working directory",
+        key: "",
+        requires_args: false,
+    },
+    Cmd {
+        name: cmd::DETACH,
+        aliases: &["background", "leave"],
+        desc: "Detach from current session",
+        key: "",
+        requires_args: false,
+    },
+    Cmd {
+        name: cmd::RETRY,
+        aliases: &[],
+        desc: "Retry immediately (skip backoff)",
+        key: "",
+        requires_args: false,
+    },
+    Cmd {
+        name: cmd::STASH,
+        aliases: &[],
+        desc: "Stash all live sessions into a group",
+        key: "",
+        requires_args: false,
+    },
+    Cmd {
+        name: cmd::STASHED,
+        aliases: &["groups", "stash-groups"],
+        desc: "Manage stashed session groups",
+        key: "",
+        requires_args: false,
+    },
+    Cmd {
+        name: cmd::BACKEND,
+        aliases: &["server"],
+        desc: "Switch backend connection",
         key: "",
         requires_args: false,
     },
     Cmd {
         name: cmd::CLOSE,
         aliases: &[],
-        desc: "Close this session (go to the next live one, or exit)",
+        desc: "Close this session",
         key: "ctrl+x k",
         requires_args: false,
     },
@@ -427,15 +500,13 @@ pub struct App {
     pub refused: Option<String>,
     pub backend_too_old: Option<u32>,
     pub quit: bool,
-    /// The last session was closed: exit once the backend confirmed the close.
-    pub quit_after_close: bool,
     pub ac: Option<Autocomplete>,
     pub watch: Watch,
     pub sidebar: bool,
+    pub draft: DraftConfig,
     init: Option<InitPlan>,
     pub shell_mode: bool,
     pub run_editor: bool,
-    pub dirty: bool,
     pub last_click: Option<(Instant, u16, u16, u8)>,
     pub last_mouse_pos: Option<(u16, u16)>,
     /// Session id whose transcript holds the active selection.
@@ -490,8 +561,15 @@ pub struct App {
     pub sidebar_mcp_rows: Vec<(u16, String)>,
     /// Sidebar visibility at the last housekeeping pass (refresh MCP when it appears).
     sidebar_was_shown: bool,
+    /// Stash groups synced from the server.
+    pub groups: Vec<StashGroup>,
+    pub groups_loaded: bool,
+    /// Active backend target and how it was selected.
+    pub backend_target: BackendTarget,
+    pub backend_source: BackendSource,
+    /// Clickable `"Switch Backend..."` regions on banners / connect screen.
+    pub switch_backend_rects: Vec<Rect>,
 }
-
 /// Poll interval for MCP status while any server is connecting.
 const MCP_POLL: Duration = Duration::from_secs(5);
 /// Redraw interval while something animates (spinners, pulsing dots).
@@ -581,6 +659,11 @@ impl App {
             (toasts, history)
         };
         let mode = if init.watch { Mode::Watch } else { Mode::Chat };
+        let draft = DraftConfig {
+            agent: init.agent.clone(),
+            variant: init.model.as_ref().and_then(|m| m.variant.clone()),
+            model: init.model.clone(),
+        };
         App {
             client,
             cwd,
@@ -599,7 +682,6 @@ impl App {
             perm: None,
             question: None,
             toasts,
-            details: false,
             thinking: false,
             start: Instant::now(),
             leader: None,
@@ -615,10 +697,10 @@ impl App {
             refused: None,
             backend_too_old: None,
             quit: false,
-            quit_after_close: false,
             ac: None,
             watch: Watch::default(),
             sidebar: true,
+            draft,
             init: Some(init),
             shell_mode: false,
             run_editor: false,
@@ -658,7 +740,18 @@ impl App {
             mcp_poll_at: None,
             sidebar_mcp_rows: Vec::new(),
             sidebar_was_shown: false,
+            groups: Vec::new(),
+            groups_loaded: false,
+            backend_target: BackendTarget::Auto,
+            backend_source: BackendSource::Auto,
+            switch_backend_rects: Vec::new(),
         }
+    }
+
+    pub fn with_backend(mut self, target: BackendTarget, source: BackendSource) -> Self {
+        self.backend_target = target;
+        self.backend_source = source;
+        self
     }
 
     pub fn tick(&self) -> u64 {
@@ -703,12 +796,11 @@ impl App {
             Request::Attach {
                 session_id: sid.clone(),
                 foreground: fg,
-                limit: None,
+                limit: Some(PAGE_SIZE as u32),
             },
             Pending::Attach { sid, fg },
         );
     }
-
     /// Fire-and-forget request; errors are toasted.
     pub fn send(&mut self, req: Request) {
         self.req(req, Pending::Simple { ok: String::new() });
@@ -902,6 +994,7 @@ impl App {
                     },
                 );
                 self.req(Request::ListSessions, Pending::LiveList);
+                self.req(Request::ListGroups, Pending::Groups { ok: None });
                 self.refresh_mcp();
                 self.update_autocomplete();
                 if reconnect {
@@ -944,9 +1037,6 @@ impl App {
                 self.sessions_due = None;
                 self.mcp_inflight = false;
                 self.mcp_poll_at = None;
-                if self.quit_after_close {
-                    self.quit = true;
-                }
             }
             NetEvent::Refused(reason) => {
                 if self.connected {
@@ -969,11 +1059,7 @@ impl App {
                 self.sessions_due = None;
                 self.mcp_inflight = false;
                 self.mcp_poll_at = None;
-                if self.quit_after_close {
-                    self.quit = true;
-                }
             }
-            NetEvent::Frame(f) => self.on_frame(f),
         }
     }
 
@@ -999,20 +1085,10 @@ impl App {
             );
         } else if plan.watch {
             self.mode = Mode::Watch;
-        } else {
-            let prompt = plan.prompt.map(|p| (p, Vec::new()));
-            self.req(
-                Request::CreateSession {
-                    cwd: self.cwd.clone(),
-                    agent: plan.agent,
-                    model: plan.model,
-                    name: None,
-                },
-                Pending::Created { prompt },
-            );
+        } else if let Some(p) = plan.prompt {
+            self.create_session(Some(PostCreate::Prompt(p, Vec::new())));
         }
     }
-
     fn on_frame(&mut self, f: ServerFrame) {
         match f {
             ServerFrame::Response {
@@ -1063,20 +1139,21 @@ impl App {
                     self.refresh_mcp();
                 }
             }
+            ServerFrame::GroupsChanged { groups } => {
+                self.groups = groups;
+                self.groups_loaded = true;
+                self.sync_stash_dialog();
+            }
         }
     }
 
     fn on_error(&mut self, p: Pending, err: ReplyError) {
-        if matches!(p, Pending::Closed { .. }) && self.quit_after_close {
-            self.quit = true;
-            return;
-        }
         match p {
             Pending::Attach { sid, fg } => {
                 self.attaching.remove(&sid);
                 if fg && self.current.as_deref() == Some(sid.as_str()) {
                     // E.g. an empty session that didn't survive a backend restart.
-                    let empty = self.views.get(&sid).is_none_or(|v| v.messages.is_empty());
+                    let empty = self.views.get(&sid).is_none_or(|v| v.is_empty());
                     if let Some(v) = self.views.get_mut(&sid) {
                         v.closed = true;
                         v.info.live = false;
@@ -1085,9 +1162,7 @@ impl App {
                     if empty {
                         self.views.remove(&sid);
                         self.current = None;
-                        self.toasts
-                            .warn("Session is gone (backend restarted) — started a new one");
-                        self.create_session(None);
+                        self.toasts.warn("Session is gone (backend restarted)");
                     } else {
                         self.toasts.error(format!(
                             "Cannot open session: {err} — your next prompt starts a new session"
@@ -1099,7 +1174,7 @@ impl App {
                     self.views.remove(&sid);
                 }
             }
-            Pending::Older {
+            Pending::MessagesRange {
                 sid, generation, ..
             } => {
                 // Stop asking until the next snapshot / reset (no retry loop); keep the rest.
@@ -1108,8 +1183,8 @@ impl App {
                     .get_mut(&sid)
                     .filter(|v| v.history_gen == generation)
                 {
-                    v.older_pending = false;
-                    v.more_before = false;
+                    v.range_pending = None;
+                    v.range_halted = true;
                 }
             }
             Pending::Prompt { sid, text, key, .. } => {
@@ -1162,10 +1237,9 @@ impl App {
                 self.switch_session_by_query(&query, true);
             }
             Pending::Continue => {
+                self.init = None;
                 self.toasts.warn(format!("No session to continue: {err}"));
-                self.create_session(None);
             }
-            Pending::Created { .. } => self.toasts.error(format!("Cannot create session: {err}")),
             Pending::Mcp => {
                 // Older backend ("unknown op" / deserialize error): use the GetConfig lines.
                 self.mcp_inflight = false;
@@ -1220,7 +1294,7 @@ impl App {
                     .toasts
                     .error(format!("Malformed sessions response: {e}")),
             },
-            Pending::Created { prompt } => {
+            Pending::Created { post } => {
                 let info = match session_info_of(&result) {
                     Ok(i) => i,
                     Err(e) => {
@@ -1234,8 +1308,16 @@ impl App {
                     .entry(sid.clone())
                     .or_insert_with(|| SessionView::new(info, true));
                 self.attach_fg(&sid);
-                if let Some((t, imgs)) = prompt {
-                    self.send_prompt(&sid, t, imgs);
+                match post {
+                    Some(PostCreate::Prompt(t, imgs)) => self.send_prompt(&sid, t, imgs),
+                    Some(PostCreate::Shell(cmd_str)) => self.req(
+                        Request::Shell {
+                            session_id: sid,
+                            command: cmd_str,
+                        },
+                        Pending::Simple { ok: String::new() },
+                    ),
+                    None => {}
                 }
             }
             Pending::Attach { sid, fg } => {
@@ -1320,16 +1402,18 @@ impl App {
                 self.toasts.info(what);
             }
             Pending::Closed { name } => {
-                if self.quit_after_close {
-                    self.quit = true;
-                    return;
-                }
                 if !name.is_empty() {
                     self.toasts.info(format!("Closed \"{name}\""));
                 }
                 if matches!(&self.dialog, Some(Dialog::List(d)) if d.kind == Kind::Sessions) {
                     // The closed session moves to History.
                     self.request_sessions_history();
+                }
+            }
+            Pending::DraftCd => {
+                let path = parse_field::<String>(&result, "path").unwrap_or_default();
+                if !path.is_empty() {
+                    self.apply_draft_cwd(path);
                 }
             }
             Pending::Expand { sid } => {
@@ -1346,7 +1430,7 @@ impl App {
                 }
                 match sid {
                     Some(s) => self.send_prompt(&s, t, Vec::new()),
-                    None => self.create_session(Some((t, Vec::new()))),
+                    None => self.create_session(Some(PostCreate::Prompt(t, Vec::new()))),
                 }
             }
             Pending::Files { query } => self.on_files_response(&query, &result),
@@ -1431,11 +1515,12 @@ impl App {
                 images,
                 key,
             } => self.on_prompt_sent(&sid, text, images, key, &result),
-            Pending::Older {
+            Pending::MessagesRange {
                 sid,
                 generation,
-                before,
-            } => self.on_older_response(&sid, generation, &before, &result),
+                start_seq,
+                ..
+            } => self.on_messages_range_response(&sid, generation, start_seq, &result),
             Pending::Unqueue { sid, key } => self.on_unqueue_response(&sid, key, &result),
             Pending::Mcp => {
                 self.mcp_inflight = false;
@@ -1462,9 +1547,60 @@ impl App {
                         .error(format!("Malformed config from backend: {e}")),
                 }
             }
+            Pending::RetryNow => {
+                if flag_of(&result, "retried") {
+                    self.toasts.info("Retrying now…");
+                } else {
+                    self.toasts.warn("Session is not waiting to retry");
+                }
+            }
+            Pending::Groups { ok } => self.on_groups_response(&result, ok),
+            Pending::StashAll => {
+                let count = result
+                    .get("group")
+                    .and_then(|g| g.get("members"))
+                    .and_then(Value::as_array)
+                    .map_or(0, Vec::len);
+                let msg = if count == 0 {
+                    Some("No live sessions to stash".to_string())
+                } else {
+                    Some(format!(
+                        "Stashed {count} session{}",
+                        if count == 1 { "" } else { "s" }
+                    ))
+                };
+                self.on_groups_response(&result, msg);
+            }
+            Pending::CreateGroup => {
+                self.on_groups_response(&result, Some("Created stash group".into()));
+            }
+            Pending::RestoreGroup => {
+                let n = parse_field::<Vec<String>>(&result, "restored_ids")
+                    .map(|v| v.len())
+                    .unwrap_or(0);
+                let msg = if n == 0 {
+                    Some("No restorable sessions in group".into())
+                } else {
+                    Some(format!(
+                        "Restored {n} session{}",
+                        if n == 1 { "" } else { "s" }
+                    ))
+                };
+                self.on_groups_response(&result, msg);
+                self.req(Request::ListSessions, Pending::LiveList);
+            }
+            Pending::RestoreGroupMember => {
+                let restored = flag_of(&result, "restored");
+                let msg = if restored {
+                    "Restored session".into()
+                } else {
+                    "Session is already live".into()
+                };
+                self.on_groups_response(&result, Some(msg));
+                self.req(Request::ListSessions, Pending::LiveList);
+            }
         }
     }
-
     fn on_config_response(&mut self, result: &Value, toast_warnings: bool) {
         let Some(c) = self.parse_and_apply_config(result) else {
             return;
@@ -1523,7 +1659,7 @@ impl App {
         self.update_autocomplete();
         Some(c)
     }
-    /// Answer to `--continue`: attach the newest session here, or start a new one.
+    /// Answer to `--continue`: attach the newest session here, or stay on empty startup.
     fn on_continue_response(&mut self, result: &Value) {
         let s = match sessions_of(result) {
             Ok(s) => s,
@@ -1534,20 +1670,8 @@ impl App {
             }
         };
         let Some(info) = s.first() else {
-            let plan = self.init.take().unwrap_or_default();
-            self.toasts
-                .info("No previous session here — started a new one");
-            self.req(
-                Request::CreateSession {
-                    cwd: self.cwd.clone(),
-                    agent: plan.agent,
-                    model: plan.model,
-                    name: None,
-                },
-                Pending::Created {
-                    prompt: plan.prompt.map(|p| (p, Vec::new())),
-                },
-            );
+            self.init = None;
+            self.toasts.warn("No previous session in this directory");
             return;
         };
         let sid = info.id.clone();
@@ -1634,14 +1758,23 @@ impl App {
         self.update_autocomplete();
     }
 
-    fn on_older_response(&mut self, sid: &str, generation: u64, before: &str, result: &Value) {
-        let parsed = (|| -> Result<(Vec<ref_proto::Message>, bool), String> {
-            Ok((
-                parse_field(result, "messages")?,
-                parse_field(result, "more_before")?,
-            ))
+    fn on_messages_range_response(
+        &mut self,
+        sid: &str,
+        generation: u64,
+        requested_start: usize,
+        result: &Value,
+    ) {
+        let parsed = (|| -> Result<(Vec<Message>, bool, usize), String> {
+            let msgs: Vec<Message> = parse_field(result, "messages")?;
+            let more: bool = parse_field(result, "more_before")?;
+            let actual_start = result
+                .get("start_seq")
+                .and_then(Value::as_u64)
+                .map_or(requested_start, |s| s as usize);
+            Ok((msgs, more, actual_start))
         })();
-        let (msgs, more) = match parsed {
+        let (msgs, more, actual_start) = match parsed {
             Ok(x) => x,
             Err(e) => {
                 if let Some(v) = self
@@ -1649,17 +1782,35 @@ impl App {
                     .get_mut(sid)
                     .filter(|v| v.history_gen == generation)
                 {
-                    v.older_pending = false;
+                    v.range_pending = None;
                 }
                 self.toasts.error(format!("Malformed history page: {e}"));
                 return;
             }
         };
         if let Some(v) = self.views.get_mut(sid)
-            && !v.prepend_older(generation, before, msgs, more)
+            && !v.apply_messages_range(generation, actual_start, msgs, more)
             && v.history_gen == generation
         {
-            v.older_pending = false;
+            v.range_pending = None;
+        }
+    }
+
+    fn on_groups_response(&mut self, result: &Value, ok: Option<String>) {
+        match parse_field::<Vec<StashGroup>>(result, "groups") {
+            Ok(groups) => {
+                self.groups = groups;
+                self.groups_loaded = true;
+                self.sync_stash_dialog();
+                if let Some(msg) = ok
+                    && !msg.is_empty()
+                {
+                    self.toasts.info(msg);
+                }
+            }
+            Err(e) => self
+                .toasts
+                .error(format!("Malformed stash groups response: {e}")),
         }
     }
 
@@ -1763,6 +1914,10 @@ impl App {
         v.apply(ev);
         if closed {
             if self.current.as_deref() == Some(sid.as_str()) {
+                self.views.remove(&sid);
+                self.current = None;
+                self.perm = None;
+                self.question = None;
                 self.toasts.warn("Session closed");
             } else if !self.views.get(&sid).is_some_and(|v| v.foreground) {
                 self.views.remove(&sid);
@@ -1782,17 +1937,31 @@ impl App {
         self.refresh_session_dialog();
     }
 
-    /// Background sessions shown in split view (excluding the current foreground session).
+    /// Background sessions shown in split view (excluding the current foreground session),
+    /// filtered by the direct-parent filter pill (`watch.filter`).
     pub fn tile_ids(&self) -> Vec<String> {
         let mut v: Vec<&SessionInfo> = self
             .live
             .iter()
-            .filter(|s| s.live && s.attached == 0 && self.current.as_deref() != Some(s.id.as_str()))
+            .filter(|s| {
+                s.live
+                    && s.attached == 0
+                    && self.current.as_deref() != Some(s.id.as_str())
+                    && self.matches_watch_filter(s)
+            })
             .collect();
         v.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id)));
         v.into_iter().map(|s| s.id.clone()).collect()
     }
 
+    fn matches_watch_filter(&self, s: &SessionInfo) -> bool {
+        let pid = s.parent.as_deref().filter(|p| !p.is_empty());
+        match &self.watch.filter {
+            CreatorFilter::All => true,
+            CreatorFilter::UserCreated => pid.is_none(),
+            CreatorFilter::ByCreator { id, .. } => pid == Some(id.as_str()),
+        }
+    }
     /// In watch mode: watch-attach new background sessions, drop ones that left.
     pub fn sync_watch(&mut self) {
         if !self.connected {
@@ -1854,6 +2023,7 @@ impl App {
         {
             if let Some(v) = self.views.get_mut(&old) {
                 v.foreground = false;
+                v.trim_to_tail(TAIL_KEEP_MESSAGES);
             }
             self.views.remove(&old);
             self.client.notify(Request::Detach { session_id: old });
@@ -1888,15 +2058,41 @@ impl App {
         self.clear_selection();
     }
 
-    pub fn create_session(&mut self, prompt: Option<(String, Vec<ImageData>)>) {
+    /// Detaches from the current foreground session and returns to `current = None`.
+    pub fn detach_current(&mut self) {
+        let Some(sid) = self.current.take() else {
+            self.toasts.info("No active session");
+            return;
+        };
+        if let Some(v) = self.views.get_mut(&sid) {
+            v.foreground = false;
+            v.trim_to_tail(TAIL_KEEP_MESSAGES);
+        }
+        self.views.remove(&sid);
+        if let Some(info) = self.live.iter_mut().find(|s| s.id == sid) {
+            info.attached = info.attached.saturating_sub(1);
+        }
+        if self.connected {
+            self.client.notify(Request::Detach { session_id: sid });
+        }
+        self.perm = None;
+        self.question = None;
+        self.exit_shell_mode();
+        self.clear_selection();
+        self.sync_watch();
+        self.refresh_session_dialog();
+    }
+
+    pub fn create_session(&mut self, post: Option<PostCreate>) {
+        let model = self.effective_draft_model_for_create();
         self.req(
             Request::CreateSession {
                 cwd: self.cwd.clone(),
-                agent: None,
-                model: None,
+                agent: self.draft.agent.clone(),
+                model,
                 name: None,
             },
-            Pending::Created { prompt },
+            Pending::Created { post },
         );
     }
 
@@ -2053,7 +2249,7 @@ impl App {
             Some(sid) if self.views.get(&sid).is_some_and(|v| !v.closed) => {
                 self.send_prompt(&sid, text, images)
             }
-            _ => self.create_session(Some((text, images))),
+            _ => self.create_session(Some(PostCreate::Prompt(text, images))),
         }
     }
 
@@ -2186,7 +2382,8 @@ impl App {
         let raw = self
             .views
             .get(sid)
-            .and_then(|v| v.find(msg).map(|i| v.messages[i].raw_text()));
+            .and_then(|v| v.find(msg).and_then(|i| v.message_at(i)))
+            .map(ref_proto::Message::raw_text);
         match raw {
             Some(r) if !r.is_empty() => self.copy_text(&r, "raw message"),
             Some(_) => self.toasts.warn("Message has no text"),
@@ -2265,19 +2462,53 @@ impl App {
             v.chat.toggled.clear();
         }
     }
+
+    pub fn effective_draft_agent(&self) -> String {
+        self.draft
+            .agent
+            .clone()
+            .or_else(|| self.config.as_ref().map(|c| c.default_agent.clone()))
+            .unwrap_or_default()
+    }
+
+    pub fn effective_draft_model(&self) -> Option<ModelRef> {
+        let mut base = self.draft.model.clone().or_else(|| {
+            let agent_name = self.effective_draft_agent();
+            self.agents()
+                .iter()
+                .find(|a| a.name == agent_name)
+                .and_then(|a| a.model.clone())
+                .or_else(|| self.models().first().map(|m| m.model_ref(None)))
+        })?;
+        if let Some(var) = &self.draft.variant {
+            base.variant = (!var.is_empty()).then(|| var.clone());
+        }
+        Some(base)
+    }
+
+    fn effective_draft_model_for_create(&self) -> Option<ModelRef> {
+        if let Some(mut m) = self.draft.model.clone() {
+            if let Some(var) = &self.draft.variant {
+                m.variant = (!var.is_empty()).then(|| var.clone());
+            }
+            return Some(m);
+        }
+        let var = self.draft.variant.as_deref()?;
+        let mut m = self.effective_draft_model()?;
+        m.variant = (!var.is_empty()).then(|| var.to_string());
+        Some(m)
+    }
+
     pub fn cycle_agent(&mut self, dir: i32) {
-        let Some(sid) = self.active_target_session() else {
-            return;
-        };
         let agents: Vec<String> = self.agents().iter().map(|a| a.name.clone()).collect();
         if agents.is_empty() {
             return;
         }
-        let cur = self
-            .views
-            .get(&sid)
-            .map(|v| v.info.agent.clone())
-            .unwrap_or_default();
+        let target_sid = self.active_target_session();
+        let cur = match target_sid.as_deref().and_then(|id| self.views.get(id)) {
+            Some(v) => v.info.agent.clone(),
+            None => self.effective_draft_agent(),
+        };
         let i = agents
             .iter()
             .position(|a| *a == cur)
@@ -2285,7 +2516,7 @@ impl App {
             .unwrap_or(-1);
         let n = agents.len() as i32;
         let next = agents[((i + dir).rem_euclid(n)) as usize].clone();
-        self.apply_agent(&sid, &next, false);
+        self.apply_agent(target_sid.as_deref(), &next, false);
     }
 
     pub fn cycle_variant(&mut self) {
@@ -2297,7 +2528,35 @@ impl App {
                 },
                 Pending::Variant,
             );
+            return;
         }
+        let Some(m) = self.effective_draft_model() else {
+            return;
+        };
+        let variants = find_model(self.models(), &m)
+            .map(|x| x.variants.clone())
+            .unwrap_or_default();
+        if variants.is_empty() {
+            self.toasts.info("This model has no variants");
+            return;
+        }
+        let cur = m.variant.as_deref();
+        let pos = cur.and_then(|v| variants.iter().position(|x| x == v));
+        let next = match pos {
+            None => variants.first().cloned(),
+            Some(i) if i + 1 < variants.len() => Some(variants[i + 1].clone()),
+            Some(_) => None,
+        };
+        self.apply_draft_variant(next);
+    }
+
+    fn apply_draft_variant(&mut self, next: Option<String>) {
+        let label = next.as_deref().unwrap_or("default").to_string();
+        if let Some(m) = self.draft.model.as_mut() {
+            m.variant = next.clone();
+        }
+        self.draft.variant = Some(next.unwrap_or_default());
+        self.toasts.info(format!("Variant: {label}"));
     }
 
     // -----------------------------------------------------------------------
@@ -2615,7 +2874,8 @@ impl App {
             .as_deref()
             .and_then(|id| self.views.get(id))
             .or_else(|| self.cur())
-            .map(|v| v.info.model.clone());
+            .map(|v| v.info.model.clone())
+            .or_else(|| self.effective_draft_model());
         let items: Vec<Item> = cfg
             .models
             .iter()
@@ -2653,8 +2913,12 @@ impl App {
                 }
             })
             .collect();
-        let mut d = ListDialog::new(Kind::Models, "Switch model · this session only", items)
-            .for_session(target_sid);
+        let title = if target_sid.is_some() {
+            "Switch model · this session only"
+        } else {
+            "Select model · next session"
+        };
+        let mut d = ListDialog::new(Kind::Models, title, items).for_session(target_sid);
         if let Some(q) = filter.filter(|q| !q.is_empty()) {
             d.filter.set_text(q);
             d.refilter();
@@ -2670,7 +2934,7 @@ impl App {
             .and_then(|id| self.views.get(id))
             .or_else(|| self.cur())
             .map(|v| v.info.agent.clone())
-            .unwrap_or_default();
+            .unwrap_or_else(|| self.effective_draft_agent());
         let agents = self.agents().to_vec();
         let items: Vec<Item> = agents
             .iter()
@@ -2695,12 +2959,13 @@ impl App {
     }
 
     fn open_variants_for(&mut self, target_sid: Option<String>) {
-        let view = target_sid
+        let m = target_sid
             .as_deref()
             .and_then(|id| self.views.get(id))
-            .or_else(|| self.cur());
-        let Some(v) = view else { return };
-        let m = v.info.model.clone();
+            .or_else(|| self.cur())
+            .map(|v| v.info.model.clone())
+            .or_else(|| self.effective_draft_model());
+        let Some(m) = m else { return };
         let variants = find_model(self.models(), &m)
             .map(|x| x.variants.clone())
             .unwrap_or_default();
@@ -2728,12 +2993,12 @@ impl App {
         self.dialog = Some(Dialog::List(d));
     }
 
-    /// Opens the interactive `/cd` directory picker for `sid`.
-    pub fn open_cd(&mut self, sid: &str) {
-        let base_cwd = self.cwd_of(Some(sid));
+    /// Opens the interactive `/cd` directory picker for `sid` (or draft cwd when `None`).
+    pub fn open_cd(&mut self, sid: Option<&str>) {
+        let base_cwd = self.cwd_of(sid);
         let initial = format_cd_dir(&base_cwd);
         let mut d = ListDialog::new(Kind::Cd, "Change working directory", Vec::new())
-            .for_session(Some(sid.to_string()))
+            .for_session(sid.map(str::to_string))
             .with_hint("↑↓ select · tab open dir · backspace up · enter confirm · esc");
         d.cd_base_cwd = base_cwd.clone();
         d.cd_resolved_dir = base_cwd;
@@ -2888,9 +3153,15 @@ impl App {
             .clone()
             .or_else(|| self.active_target_session());
         self.dialog = None;
-        if let Some(sid) = target_sid {
-            let path = normalize_cd_target(&raw);
-            self.send_set_cwd(&sid, &path);
+        match target_sid {
+            Some(sid) => {
+                let path = normalize_cd_target(&raw);
+                self.send_set_cwd(&sid, &path);
+            }
+            None => {
+                let path = normalize_cd_target(&raw);
+                self.send_draft_cwd(&path);
+            }
         }
     }
 
@@ -2949,8 +3220,9 @@ impl App {
                 _ => return,
             };
             self.dialog = None;
-            if let Some(sid) = target_sid.or_else(|| self.active_target_session()) {
-                self.send_set_cwd(&sid, &chosen);
+            match target_sid.or_else(|| self.active_target_session()) {
+                Some(sid) => self.send_set_cwd(&sid, &chosen),
+                None => self.send_draft_cwd(&chosen),
             }
             return;
         }
@@ -3001,28 +3273,31 @@ impl App {
                 self.switch_to_session(&sid);
             }
             Kind::Models => {
-                if let (Some(sid), Some(m)) = (
-                    target_sid.or_else(|| self.active_target_session()),
-                    ModelRef::parse(&key),
-                ) {
-                    self.apply_model(&sid, m, None);
+                if let Some(m) = ModelRef::parse(&key) {
+                    let sid = target_sid.or_else(|| self.active_target_session());
+                    self.apply_model(sid.as_deref(), m, None);
                 }
             }
             Kind::Agents => {
-                if let Some(sid) = target_sid.or_else(|| self.active_target_session()) {
-                    self.apply_agent(&sid, &key, false);
-                }
+                let sid = target_sid.or_else(|| self.active_target_session());
+                self.apply_agent(sid.as_deref(), &key, false);
             }
             Kind::Variants => {
-                if let Some(sid) = target_sid.or_else(|| self.active_target_session()) {
-                    // Empty `key` is "default": send `Some("")` to clear variant (`None` cycles).
-                    self.req(
-                        Request::SetVariant {
-                            session_id: sid,
-                            variant: Some(key),
-                        },
-                        Pending::Variant,
-                    );
+                match target_sid.or_else(|| self.active_target_session()) {
+                    Some(sid) => {
+                        // Empty `key` is "default": send `Some("")` to clear variant (`None` cycles).
+                        self.req(
+                            Request::SetVariant {
+                                session_id: sid,
+                                variant: Some(key),
+                            },
+                            Pending::Variant,
+                        );
+                    }
+                    None => {
+                        let next = (!key.is_empty()).then_some(key);
+                        self.apply_draft_variant(next);
+                    }
                 }
             }
             Kind::CloseSessions | Kind::Cd => {}
@@ -3139,7 +3414,7 @@ impl App {
             self.perm = None;
             self.question = None;
             if self.mode == Mode::Chat {
-                self.leave_closed_session(sid, true);
+                self.leave_closed_session(sid);
             } else {
                 self.views.remove(sid);
                 self.watch.inputs.remove(sid);
@@ -3163,41 +3438,25 @@ impl App {
         self.refresh_session_dialog();
     }
 
-    /// The current session `sid` was closed: switch to the first live session (sidebar order),
-    /// or exit when none is left. `wait`: a Close request is in flight; exit once it is answered
-    /// so the backend unloads the session before this frontend disconnects.
-    fn leave_closed_session(&mut self, sid: &str, wait: bool) {
-        let mut rest: Vec<&SessionInfo> =
-            self.live.iter().filter(|s| s.live && s.id != sid).collect();
-        rest.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id)));
-        match rest.first().map(|s| s.id.clone()) {
-            Some(next) => {
-                self.views.remove(sid);
-                self.current = None;
-                self.attach_fg(&next);
-            }
-            None => {
-                // Keep the view for the exit screen (how to resume it from history).
-                if let Some(v) = self.views.get_mut(sid) {
-                    v.closed = true;
-                    v.info.live = false;
-                }
-                if wait {
-                    self.quit_after_close = true;
-                } else {
-                    self.quit = true;
-                }
-            }
-        }
+    /// The current session `sid` was closed: deselect to `current = None` without quitting
+    /// or auto-creating a replacement session.
+    fn leave_closed_session(&mut self, sid: &str) {
+        self.views.remove(sid);
+        self.current = None;
+        self.exit_shell_mode();
+        self.clear_selection();
     }
-    /// `/cd [PATH]` on `sid`; without a path opens the interactive directory picker.
-    pub fn change_dir(&mut self, sid: &str, args: &str) {
+    /// `/cd [PATH]` on `sid` (or draft cwd when `None`); without a path opens the directory picker.
+    pub fn change_dir(&mut self, sid: Option<&str>, args: &str) {
         let path = args.trim().trim_matches(|c| c == '"' || c == '\'');
         if path.is_empty() {
             self.open_cd(sid);
             return;
         }
-        self.send_set_cwd(sid, path);
+        match sid {
+            Some(s) => self.send_set_cwd(s, path),
+            None => self.send_draft_cwd(path),
+        }
     }
 
     fn send_set_cwd(&mut self, sid: &str, path: &str) {
@@ -3216,6 +3475,43 @@ impl App {
         );
     }
 
+    fn send_draft_cwd(&mut self, path: &str) {
+        let path = path.trim().trim_matches(|c| c == '"' || c == '\'');
+        if path.is_empty() {
+            return;
+        }
+        if !self.connected {
+            self.apply_draft_cwd(path.to_string());
+            return;
+        }
+        self.req(
+            Request::ListDirs {
+                path: path.to_string(),
+                cwd: Some(self.cwd.clone()),
+                include_files: false,
+            },
+            Pending::DraftCd,
+        );
+    }
+
+    fn apply_draft_cwd(&mut self, path: String) {
+        self.cwd = path;
+        self.toasts
+            .info(format!("Working directory: {}", text::tilde(&self.cwd)));
+        self.dir_cache.clear();
+        let cwd = self.current_cwd();
+        if self.connected {
+            self.req(
+                Request::GetConfig { cwd },
+                Pending::Config {
+                    toast_warnings: true,
+                },
+            );
+            self.mcp_inflight = false;
+            self.refresh_mcp();
+        }
+        self.update_autocomplete();
+    }
     /// Directory of the active session/tile (falls back to the frontend's).
     fn session_cwd(&self) -> String {
         self.current_cwd().unwrap_or_else(|| self.cwd.clone())
@@ -3312,11 +3608,10 @@ impl App {
         self.close_session(&sid);
     }
 
-    /// Undo button on a human prompt: removes it and everything after it (confirm while busy).
     pub fn undo_message(&mut self, sid: &str, msg: &str) {
         let Some(v) = self.views.get(sid) else { return };
         let Some(i) = v.find(msg) else { return };
-        let count = v.messages.len() - i;
+        let count = v.slots.len() - i;
         let busy = v.is_busy();
         let armed = self
             .undo_armed
@@ -3370,7 +3665,7 @@ impl App {
     /// Text printed to stdout after the TUI exits (logo + resume hint), if any.
     pub fn epilogue(&self) -> Option<String> {
         let v = self.cur()?;
-        let resumable = !v.messages.is_empty();
+        let resumable = !v.is_empty();
         Some(epilogue_text(&v.info, resumable))
     }
 
@@ -3409,13 +3704,12 @@ impl App {
         let needs_config = matches!(canonical, cmd::MODELS | cmd::AGENTS | cmd::VARIANT);
         let needs_session = matches!(
             canonical,
-            cmd::CD
-                | cmd::VARIANT
-                | cmd::COMPACT
+            cmd::COMPACT
                 | cmd::UNDO
                 | cmd::RENAME
                 | cmd::EXPORT
                 | cmd::COPY
+                | cmd::RETRY
                 | cmd::PEERS
                 | cmd::PEERS_NAME
                 | cmd::PEERS_INBOX
@@ -3467,8 +3761,8 @@ impl App {
             cmd::VARIANT => {
                 if args.is_empty() {
                     self.open_variants_for(target_sid);
-                } else if let Some(sid) = target_sid {
-                    self.set_variant_by_query(&sid, args);
+                } else {
+                    self.set_variant_by_query(target_sid.as_deref(), args);
                 }
             }
             cmd::COMPACT => {
@@ -3543,13 +3837,23 @@ impl App {
                 Some(sid) if self.views.get(&sid).is_some_and(|v| !v.closed) => {
                     self.close_session(&sid)
                 }
-                Some(sid) => self.leave_closed_session(&sid, false),
-                None => self.quit = true,
+                Some(sid) => self.leave_closed_session(&sid),
+                None => self.toasts.info("No session to close"),
             },
-            cmd::CD => {
+            cmd::DETACH => self.detach_current(),
+            cmd::RETRY => {
                 if let Some(sid) = target_sid {
-                    self.change_dir(&sid, args);
+                    self.retry_now(&sid);
                 }
+            }
+            cmd::STASH => {
+                let name = (!args.is_empty()).then(|| args.to_string());
+                self.stash_all(name);
+            }
+            cmd::STASHED => self.open_stash(),
+            cmd::BACKEND => self.open_backend_with_args(args),
+            cmd::CD => {
+                self.change_dir(target_sid.as_deref(), args);
             }
             cmd::CLOSE_SESSION => self.close_by_name(args),
             cmd::EXPORT => {
@@ -3582,8 +3886,7 @@ impl App {
                     .as_deref()
                     .and_then(|id| self.views.get(id))
                     .and_then(|v| {
-                        v.messages
-                            .iter()
+                        v.materialized_iter()
                             .rev()
                             .find(|m| {
                                 m.role == ref_proto::Role::Assistant && !m.raw_text().is_empty()
@@ -3619,24 +3922,403 @@ impl App {
         }
     }
 
-    fn apply_model(&mut self, sid: &str, mut m: ModelRef, explicit_variant: Option<String>) {
+    pub fn retry_now(&mut self, sid: &str) {
+        self.req(
+            Request::RetryNow {
+                session_id: sid.to_string(),
+            },
+            Pending::RetryNow,
+        );
+    }
+
+    pub fn stash_all(&mut self, name: Option<String>) {
+        self.req(Request::StashAll { name }, Pending::StashAll);
+    }
+
+    pub fn open_stash(&mut self) {
+        let mut d = StashDialog::new();
+        d.sync(&self.groups);
+        self.dialog = Some(Dialog::Stash(d));
+        if self.connected {
+            self.req(Request::ListGroups, Pending::Groups { ok: None });
+        }
+    }
+
+    pub fn sync_stash_dialog(&mut self) {
+        if let Some(Dialog::Stash(d)) = self.dialog.as_mut() {
+            d.sync(&self.groups);
+        }
+    }
+
+    pub fn handle_stash_command(&mut self, command: StashCommand) {
+        match command {
+            StashCommand::Close => self.dialog = None,
+            StashCommand::Refresh => {
+                self.req(Request::ListGroups, Pending::Groups { ok: None });
+            }
+            StashCommand::StashAll { name } => self.stash_all(name),
+            StashCommand::CreateGroup { name } => {
+                self.req(
+                    Request::CreateGroup {
+                        name,
+                        session_ids: Vec::new(),
+                        stash_live: false,
+                    },
+                    Pending::CreateGroup,
+                );
+            }
+            StashCommand::RenameGroup { group_id, name } => {
+                self.req(
+                    Request::RenameGroup { group_id, name },
+                    Pending::Groups {
+                        ok: Some("Renamed group".into()),
+                    },
+                );
+            }
+            StashCommand::SetLocked { group_id, locked } => {
+                self.req(
+                    Request::SetGroupLocked { group_id, locked },
+                    Pending::Groups {
+                        ok: Some(if locked {
+                            "Locked group".into()
+                        } else {
+                            "Unlocked group".into()
+                        }),
+                    },
+                );
+            }
+            StashCommand::DeleteGroup { group_id } => {
+                self.req(
+                    Request::DeleteGroup { group_id },
+                    Pending::Groups {
+                        ok: Some("Deleted group".into()),
+                    },
+                );
+            }
+            StashCommand::RestoreGroup { group_id } => {
+                self.req(Request::RestoreGroup { group_id }, Pending::RestoreGroup);
+            }
+            StashCommand::RestoreMember {
+                group_id,
+                session_id,
+            } => {
+                self.req(
+                    Request::RestoreGroupMember {
+                        group_id,
+                        session_id,
+                    },
+                    Pending::RestoreGroupMember,
+                );
+            }
+            StashCommand::RemoveMember {
+                group_id,
+                session_id,
+            } => {
+                self.req(
+                    Request::RemoveFromGroup {
+                        group_id,
+                        session_id,
+                    },
+                    Pending::Groups {
+                        ok: Some("Removed from group".into()),
+                    },
+                );
+            }
+            StashCommand::MoveMember {
+                from_group_id,
+                to_group_id,
+                session_id,
+                position,
+            } => {
+                self.req(
+                    Request::MoveGroupMember {
+                        from_group_id: Some(from_group_id),
+                        to_group_id,
+                        session_id,
+                        position,
+                        stash_live: true,
+                    },
+                    Pending::Groups {
+                        ok: Some("Moved member".into()),
+                    },
+                );
+            }
+            StashCommand::MergeGroups {
+                source_group_id,
+                target_group_id,
+            } => {
+                self.req(
+                    Request::MergeGroups {
+                        source_group_id,
+                        target_group_id,
+                    },
+                    Pending::Groups {
+                        ok: Some("Merged groups".into()),
+                    },
+                );
+            }
+            StashCommand::AddToGroup {
+                group_id,
+                session_id,
+            } => {
+                self.req(
+                    Request::AddToGroup {
+                        group_id,
+                        session_id,
+                        position: None,
+                        stash_live: true,
+                    },
+                    Pending::Groups {
+                        ok: Some("Added session to group".into()),
+                    },
+                );
+            }
+        }
+    }
+
+    pub fn backend_summary(&self) -> String {
+        let src = match self.backend_source {
+            BackendSource::Cli => "CLI override",
+            BackendSource::Saved => "saved default",
+            BackendSource::Auto => "local auto",
+            BackendSource::Temporary => "temporary",
+        };
+        match &self.backend_target {
+            BackendTarget::Auto => format!("Local auto-discovery ({src})"),
+            BackendTarget::Explicit { url, .. } => format!("{url} ({src})"),
+            BackendTarget::Mock => format!("Mock backend ({src})"),
+        }
+    }
+
+    pub fn open_backend(&mut self) {
+        let (url, token) = match &self.backend_target {
+            BackendTarget::Explicit { url, token } => (Some(url.as_str()), token.as_deref()),
+            _ => (None, None),
+        };
+        self.dialog = Some(Dialog::Backend(BackendDialog::new(
+            url,
+            token,
+            self.backend_summary(),
+        )));
+    }
+
+    fn open_backend_with_args(&mut self, args: &str) {
+        if args.is_empty() {
+            self.open_backend();
+            return;
+        }
+        let tokens = text::split_shell_words(args);
+        if tokens.is_empty() {
+            self.open_backend();
+            return;
+        }
+        if matches!(tokens[0].as_str(), "auto" | "local") {
+            self.switch_backend(BackendTarget::Auto, BackendSource::Temporary);
+            return;
+        }
+        let url = tokens[0].trim().to_string();
+        if let Err(e) = ref_client::validate_explicit_url(&url) {
+            self.toasts.error(e.to_string());
+            return;
+        }
+        let token = tokens
+            .get(1)
+            .and_then(|t| crate::prefs::normalize_token(Some(t)));
+        self.switch_backend(
+            BackendTarget::Explicit { url, token },
+            BackendSource::Temporary,
+        );
+    }
+
+    pub fn handle_backend_action(&mut self, action: BackendAction) {
+        match action {
+            BackendAction::Close => self.dialog = None,
+            BackendAction::ConnectTemporary { url, token } => {
+                self.dialog = None;
+                self.switch_backend(
+                    BackendTarget::Explicit { url, token },
+                    BackendSource::Temporary,
+                );
+            }
+            BackendAction::SaveDefault { url, token } => {
+                let prefs = TuiPrefs {
+                    backend_url: Some(url.clone()),
+                    backend_token: token.clone(),
+                };
+                if let Err(e) = crate::prefs::save_prefs(&prefs) {
+                    self.toasts.error(format!("Cannot save preferences: {e}"));
+                    return;
+                }
+                self.dialog = None;
+                self.toasts.info("Saved default backend");
+                self.switch_backend(BackendTarget::Explicit { url, token }, BackendSource::Saved);
+            }
+            BackendAction::RestoreLocal => {
+                if let Err(e) = crate::prefs::save_prefs(&TuiPrefs::default()) {
+                    self.toasts.error(format!("Cannot save preferences: {e}"));
+                    return;
+                }
+                self.dialog = None;
+                self.toasts.info("Restored local backend default");
+                self.switch_backend(BackendTarget::Auto, BackendSource::Auto);
+            }
+        }
+    }
+
+    pub fn switch_backend(&mut self, target: BackendTarget, source: BackendSource) {
+        let label = match &target {
+            BackendTarget::Auto => "local backend".to_string(),
+            BackendTarget::Explicit { url, .. } => url.clone(),
+            BackendTarget::Mock => "mock backend".to_string(),
+        };
+        self.current = None;
+        self.views.clear();
+        self.live.clear();
+        self.history_list.clear();
+        self.history_loaded = false;
+        self.history_inflight = false;
+        self.history_filtered = None;
+        self.sessions_due = None;
+        self.attaching.clear();
+        self.groups.clear();
+        self.groups_loaded = false;
+        self.config = None;
+        self.pending.clear();
+        self.perm = None;
+        self.question = None;
+        self.mcp.clear();
+        self.mcp_loaded = false;
+        self.mcp_fallback = false;
+        self.mcp_inflight = false;
+        self.mcp_poll_at = None;
+        self.dir_cache.clear();
+        self.dirs_inflight.clear();
+        self.bin_cache.clear();
+        self.bins_inflight.clear();
+        self.shell_complete_cache.clear();
+        self.shell_complete_inflight.clear();
+        self.shell_complete_errors.clear();
+        self.files_inflight = false;
+        self.files_want = None;
+        self.files_due = None;
+        self.deferred = None;
+        self.watch = Watch::default();
+        self.mode = Mode::Chat;
+        self.clear_autocomplete();
+        self.exit_shell_mode();
+        self.clear_selection();
+        self.connected = false;
+        self.ever_connected = false;
+        self.refused = None;
+        self.backend_too_old = None;
+        self.net_status = Some(format!("Connecting to {label}…"));
+        self.backend_target = target.clone();
+        self.backend_source = source;
+        self.client.switch_target(target);
+    }
+
+    pub fn cycle_watch_filter(&mut self) {
+        let parents = self.watch_direct_parents();
+        match &self.watch.filter {
+            CreatorFilter::All => {
+                let focus_parent = self
+                    .watch
+                    .focus
+                    .as_deref()
+                    .and_then(|id| self.live.iter().find(|s| s.id == id))
+                    .and_then(|s| {
+                        crate::ui::split::direct_parent(s, &self.live, &self.history_list)
+                    });
+                self.watch.pending_parent = focus_parent;
+                self.watch.filter = CreatorFilter::UserCreated;
+            }
+            CreatorFilter::UserCreated => {
+                let picked = self
+                    .watch
+                    .pending_parent
+                    .take()
+                    .or_else(|| parents.into_iter().next());
+                self.watch.filter = match picked {
+                    Some((id, label)) => CreatorFilter::ByCreator { id, label },
+                    None => CreatorFilter::All,
+                };
+            }
+            CreatorFilter::ByCreator { id, .. } => {
+                let pos = parents.iter().position(|(pid, _)| pid == id);
+                let next = pos.and_then(|i| parents.get(i + 1).cloned());
+                self.watch.filter = match next {
+                    Some((pid, label)) => CreatorFilter::ByCreator { id: pid, label },
+                    None => CreatorFilter::All,
+                };
+            }
+        }
+        self.watch.page = 0;
+        self.sync_watch();
+    }
+
+    pub fn watch_filter_pill(&self) -> (String, bool) {
+        match &self.watch.filter {
+            CreatorFilter::All => (" All ".to_string(), false),
+            CreatorFilter::UserCreated => (" User-created ".to_string(), true),
+            CreatorFilter::ByCreator { label, .. } => {
+                (format!(" By {} ", text::truncate(label, 16)), true)
+            }
+        }
+    }
+
+    fn watch_direct_parents(&self) -> Vec<(String, String)> {
+        let mut seen = HashSet::new();
+        let mut out = Vec::new();
+        for s in &self.live {
+            if !s.live || s.attached != 0 || self.current.as_deref() == Some(s.id.as_str()) {
+                continue;
+            }
+            if let Some((pid, label)) =
+                crate::ui::split::direct_parent(s, &self.live, &self.history_list)
+                && seen.insert(pid.clone())
+            {
+                out.push((pid, label));
+            }
+        }
+        out.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)));
+        out
+    }
+
+    fn apply_model(
+        &mut self,
+        sid: Option<&str>,
+        mut m: ModelRef,
+        explicit_variant: Option<String>,
+    ) {
         if let Some(v) = explicit_variant {
             m.variant = (!v.is_empty()).then_some(v);
         } else {
-            let cur_var = self
-                .views
-                .get(sid)
-                .and_then(|v| v.info.model.variant.clone());
+            let cur_var = match sid.and_then(|id| self.views.get(id)) {
+                Some(v) => v.info.model.variant.clone(),
+                None => self
+                    .draft
+                    .variant
+                    .as_deref()
+                    .filter(|v| !v.is_empty())
+                    .map(str::to_string)
+                    .or_else(|| self.draft.model.as_ref().and_then(|dm| dm.variant.clone())),
+            };
             let supports = find_model(self.models(), &m)
                 .is_some_and(|x| cur_var.as_ref().is_some_and(|v| x.variants.contains(v)));
             if supports {
                 m.variant = cur_var;
             }
         }
+        let name = self.model_display(&m);
+        let Some(sid) = sid else {
+            self.draft.variant = Some(m.variant.clone().unwrap_or_default());
+            self.draft.model = Some(m);
+            self.toasts.info(format!("Model: {name}"));
+            return;
+        };
         if let Some(v) = self.views.get_mut(sid) {
             v.info.model = m.clone();
         }
-        let name = self.model_display(&m);
         self.req(
             Request::SetModel {
                 session_id: sid.to_string(),
@@ -3648,15 +4330,25 @@ impl App {
         );
     }
 
-    fn apply_agent(&mut self, sid: &str, agent: &str, toast: bool) {
+    fn apply_agent(&mut self, sid: Option<&str>, agent: &str, toast: bool) {
+        let agent_model = self
+            .config
+            .as_ref()
+            .and_then(|c| c.agents.iter().find(|a| a.name == agent))
+            .and_then(|a| a.model.clone());
+        let Some(sid) = sid else {
+            self.draft.agent = Some(agent.to_string());
+            if let Some(m) = agent_model {
+                self.draft.model = Some(m);
+            }
+            if toast {
+                self.toasts.info(format!("Agent: {agent}"));
+            }
+            return;
+        };
         if let Some(v) = self.views.get_mut(sid) {
             v.info.agent = agent.to_string();
-            if let Some(m) = self
-                .config
-                .as_ref()
-                .and_then(|c| c.agents.iter().find(|a| a.name == agent))
-                .and_then(|a| a.model.clone())
-            {
+            if let Some(m) = agent_model {
                 v.info.model = m;
             }
         }
@@ -3673,7 +4365,6 @@ impl App {
             Pending::Simple { ok },
         );
     }
-
     fn switch_model_by_query(&mut self, target_sid: Option<String>, raw_args: &str) {
         let (q, explicit_var) = match raw_args.split_once('#') {
             Some((a, b)) => (a.trim(), Some(b.trim())),
@@ -3728,14 +4419,12 @@ impl App {
                     },
                     None => None,
                 };
-                if let Some(sid) = target_sid {
-                    let mref = ModelRef {
-                        provider: m.provider.clone(),
-                        model: m.id.clone(),
-                        variant: None,
-                    };
-                    self.apply_model(&sid, mref, var);
-                }
+                let mref = ModelRef {
+                    provider: m.provider.clone(),
+                    model: m.id.clone(),
+                    variant: None,
+                };
+                self.apply_model(target_sid.as_deref(), mref, var);
             }
             [] => self.toasts.warn(format!("No model matching \"{q}\"")),
             _ => self.open_models_for(target_sid, Some(q)),
@@ -3746,9 +4435,7 @@ impl App {
         let lq = q.trim().to_lowercase();
         let agents = self.agents().to_vec();
         if let Some(a) = agents.iter().find(|a| a.name.eq_ignore_ascii_case(&lq)) {
-            if let Some(sid) = target_sid {
-                self.apply_agent(&sid, &a.name, true);
-            }
+            self.apply_agent(target_sid.as_deref(), &a.name, true);
             return;
         }
         let pfx: Vec<&ref_proto::AgentInfo> = agents
@@ -3757,18 +4444,47 @@ impl App {
             .collect();
         match pfx.as_slice() {
             [a] => {
-                if let Some(sid) = target_sid {
-                    self.apply_agent(&sid, &a.name, true);
-                }
+                self.apply_agent(target_sid.as_deref(), &a.name, true);
             }
             [] => self.toasts.warn(format!("Unknown agent \"{}\"", q.trim())),
             _ => self.open_agents_for(target_sid, Some(q.trim())),
         }
     }
 
-    fn set_variant_by_query(&mut self, sid: &str, raw: &str) {
+    fn set_variant_by_query(&mut self, target_sid: Option<&str>, raw: &str) {
         let q = raw.trim();
-        if q.eq_ignore_ascii_case("default") || q.eq_ignore_ascii_case("none") {
+        let is_default = q.eq_ignore_ascii_case("default") || q.eq_ignore_ascii_case("none");
+        let Some(sid) = target_sid else {
+            if is_default {
+                self.apply_draft_variant(None);
+                return;
+            }
+            let cur_model = self.effective_draft_model();
+            let variant = if let Some(m) = cur_model
+                .as_ref()
+                .and_then(|m| find_model(self.models(), m))
+            {
+                if m.variants.is_empty() {
+                    self.toasts.info("This model has no variants");
+                    return;
+                }
+                match m.variants.iter().find(|v| v.eq_ignore_ascii_case(q)) {
+                    Some(v) => v.clone(),
+                    None => {
+                        self.toasts.warn(format!(
+                            "Unknown variant \"{q}\" (available: default, {})",
+                            m.variants.join(", ")
+                        ));
+                        return;
+                    }
+                }
+            } else {
+                q.to_string()
+            };
+            self.apply_draft_variant(Some(variant));
+            return;
+        };
+        if is_default {
             self.req(
                 Request::SetVariant {
                     session_id: sid.to_string(),
@@ -4015,14 +4731,17 @@ impl App {
             self.push_history(&format!("!{cmd}"));
             self.editor.clear();
             self.exit_shell_mode();
-            if let Some(sid) = self.current.clone() {
-                self.req(
-                    Request::Shell {
-                        session_id: sid,
-                        command: cmd,
-                    },
-                    Pending::Simple { ok: String::new() },
-                );
+            match self.current.clone() {
+                Some(sid) if self.views.get(&sid).is_some_and(|v| !v.closed) => {
+                    self.req(
+                        Request::Shell {
+                            session_id: sid,
+                            command: cmd,
+                        },
+                        Pending::Simple { ok: String::new() },
+                    );
+                }
+                _ => self.create_session(Some(PostCreate::Shell(cmd))),
             }
             return;
         }
@@ -4678,7 +5397,8 @@ impl App {
         let cur_model = self
             .active_target_session()
             .and_then(|id| self.views.get(&id))
-            .map(|v| v.info.model.clone());
+            .map(|v| v.info.model.clone())
+            .or_else(|| self.effective_draft_model());
         let variants = cur_model
             .as_ref()
             .and_then(|m| find_model(self.models(), m))
@@ -5074,35 +5794,57 @@ impl App {
     // Housekeeping
     // -----------------------------------------------------------------------
 
-    /// Requests the previous page of history for shown transcripts scrolled to within one
-    /// screen of their top (history arrives page by page). Called after each draw.
-    pub fn load_older(&mut self) {
-        let shown: Vec<String> = match self.mode {
+    fn shown_session_ids(&self) -> Vec<String> {
+        match self.mode {
             Mode::Chat => self.current.iter().cloned().collect(),
             Mode::Watch => self.watch.tiles.iter().map(|(s, _)| s.clone()).collect(),
-        };
-        for sid in shown {
+        }
+    }
+
+    /// Schedules a 80ms debounced `Request::Messages` range fetch when placeholders are visible.
+    pub fn schedule_history_window(&mut self) {
+        let now = Instant::now();
+        for sid in self.shown_session_ids() {
             let Some(v) = self.views.get_mut(&sid) else {
                 continue;
             };
-            let h = v.chat.area.height as usize;
-            if h == 0 || v.chat.top() > h {
-                continue;
-            }
-            let Some((generation, before)) = v.older_request() else {
+            let Some((start, end)) = v.desired_range() else {
+                v.range_due = None;
                 continue;
             };
-            v.older_pending = true;
+            let keep_deadline = v.range_due.is_some_and(|(_, s, e)| s == start && e == end);
+            if !keep_deadline {
+                v.range_due = Some((now + RANGE_DEBOUNCE, start, end));
+            }
+        }
+    }
+
+    /// Requests missing message ranges immediately for shown transcripts whose viewport overlaps
+    /// unloaded placeholders (or is within one screen of the top of the materialized window).
+    pub fn load_older(&mut self) {
+        for sid in self.shown_session_ids() {
+            let Some(v) = self.views.get_mut(&sid) else {
+                continue;
+            };
+            let Some((start, end)) = v.desired_range() else {
+                continue;
+            };
+            v.range_due = None;
+            let generation = v.history_gen;
+            v.range_pending = Some((generation, start, end));
             self.req(
                 Request::Messages {
                     session_id: sid.clone(),
-                    before: before.clone(),
-                    limit: None,
+                    before: None,
+                    start_seq: Some(start as u64),
+                    end_seq: Some(end as u64),
+                    limit: Some(PAGE_SIZE as u32),
                 },
-                Pending::Older {
+                Pending::MessagesRange {
                     sid,
                     generation,
-                    before,
+                    start_seq: start,
+                    end_seq: end,
                 },
             );
         }
@@ -5128,6 +5870,17 @@ impl App {
         }
         if self.deferred.is_some() {
             return Some(DEFERRED_POLL);
+        }
+        if let Some(at) = self
+            .views
+            .values()
+            .filter_map(|v| v.range_due.map(|(at, _, _)| at))
+            .min()
+        {
+            return Some(
+                at.saturating_duration_since(Instant::now())
+                    .max(MIN_DEADLINE_WAIT),
+            );
         }
         if let Some((at, _)) = &self.files_due {
             return Some(
@@ -5185,14 +5938,15 @@ impl App {
     }
 
     /// Whether the chat-mode sidebar is drawn at the current screen size.
-    fn sidebar_shown(&self) -> bool {
+    pub fn sidebar_shown(&self) -> bool {
         self.mode == Mode::Chat
             && self.sidebar
             && self.screen.width >= crate::render::SIDEBAR_MIN_SCREEN
-            && self.current.is_some()
+            && (self.current.is_some()
+                || (self.connected && (!self.live.is_empty() || !self.mcp.is_empty())))
     }
 
-    /// Expires timers (hints, leader, armed keys).
+    /// Expires timers (hints, leader, armed keys) and fires debounced range loads.
     pub fn housekeeping(&mut self) {
         if let Some((target_sid, name, args, at)) = self.deferred.take() {
             let target = target_sid.or_else(|| self.active_target_session());
@@ -5227,6 +5981,15 @@ impl App {
             .is_some_and(|l| l.elapsed() > ARMED_KEY_TIMEOUT)
         {
             self.ctrlc_armed = None;
+        }
+        let now = Instant::now();
+        let range_ready = self.shown_session_ids().into_iter().any(|sid| {
+            self.views
+                .get(&sid)
+                .is_some_and(|v| v.range_due.is_some_and(|(at, _, _)| now >= at))
+        });
+        if range_ready {
+            self.load_older();
         }
         if let Some((at, _)) = &self.files_due
             && Instant::now() >= *at

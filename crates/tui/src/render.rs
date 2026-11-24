@@ -45,15 +45,18 @@ pub struct Layout {
 }
 
 pub fn chat_layout(app: &App, area: Rect) -> Layout {
-    let sidebar =
-        (app.sidebar && area.width >= SIDEBAR_MIN_SCREEN && app.current.is_some()).then(|| {
-            Rect::new(
-                area.x + area.width - SIDEBAR_W,
-                area.y,
-                SIDEBAR_W,
-                area.height,
-            )
-        });
+    let show_sidebar = app.sidebar
+        && area.width >= SIDEBAR_MIN_SCREEN
+        && (app.current.is_some()
+            || (app.connected && (!app.live.is_empty() || !app.mcp.is_empty())));
+    let sidebar = show_sidebar.then(|| {
+        Rect::new(
+            area.x + area.width - SIDEBAR_W,
+            area.y,
+            SIDEBAR_W,
+            area.height,
+        )
+    });
     let main_w = area
         .width
         .saturating_sub(sidebar.map(|s| s.width + 1).unwrap_or(0));
@@ -95,10 +98,11 @@ pub fn chat_layout(app: &App, area: Rect) -> Layout {
 pub fn draw(f: &mut Frame<'_>, app: &mut App) {
     let area = f.area();
     app.screen = area;
+    app.switch_backend_rects.clear();
+    app.watch.filter_pill_rect = None;
     if area.width == 0 || area.height == 0 {
         return;
     }
-    let now = ref_proto::now_ms();
     let tick = app.tick();
     let buf = f.buffer_mut();
     let banner_h = draw_top_notice(buf, area, app);
@@ -174,6 +178,14 @@ fn draw_overlays(
             d.draw(buf, area, &app.mcp, tick, app.mcp_loaded);
             None
         }
+        Some(Dialog::Backend(d)) => {
+            d.draw(buf, area);
+            d.cursor()
+        }
+        Some(Dialog::Stash(d)) => {
+            d.draw(buf, area, &app.groups);
+            d.cursor_at
+        }
         None => cursor,
     }
 }
@@ -237,7 +249,7 @@ fn draw_top_notice(buf: &mut Buffer, area: Rect, app: &App) -> u16 {
 }
 
 /// Top full-width banner shown when the connection dropped after we had one.
-fn draw_disconnected_banner(buf: &mut Buffer, area: Rect, app: &App, tick: u64) {
+fn draw_disconnected_banner(buf: &mut Buffer, area: Rect, app: &mut App, tick: u64) {
     if app.connected
         || !app.ever_connected
         || app.refused.is_some()
@@ -247,21 +259,46 @@ fn draw_disconnected_banner(buf: &mut Buffer, area: Rect, app: &App, tick: u64) 
         return;
     }
     let msg = format!(" {} Disconnected — reconnecting… ", theme::spinner(tick));
+    let btn = " Switch Backend… ";
+    let btn_w = width(btn) as u16;
     let r = Rect::new(area.x, area.y, area.width, 1);
     fill(buf, r, Style::new().bg(theme::ERROR));
-    let w = width(&msg) as u16;
-    let x = area.x + area.width.saturating_sub(w) / 2;
+    let msg_w = width(&msg) as u16;
+    let gap = if area.width >= msg_w + btn_w + 2 {
+        2
+    } else {
+        0
+    };
+    let total_w = msg_w + gap + if gap > 0 { btn_w } else { 0 };
+    let x = area.x + area.width.saturating_sub(total_w) / 2;
     let max_w = (area.x + area.width - x) as usize;
     buf.set_stringn(
         x,
         area.y,
-        msg,
+        &msg,
         max_w,
         Style::new()
             .fg(theme::PANEL)
             .bg(theme::ERROR)
             .add_modifier(Modifier::BOLD),
     );
+    if gap > 0 {
+        let bx = x + msg_w + gap;
+        if bx + btn_w <= area.x + area.width {
+            buf.set_stringn(
+                bx,
+                area.y,
+                btn,
+                btn_w as usize,
+                Style::new()
+                    .fg(theme::TEXT)
+                    .bg(theme::ELEMENT)
+                    .add_modifier(Modifier::BOLD),
+            );
+            app.switch_backend_rects
+                .push(Rect::new(bx, area.y, btn_w, 1));
+        }
+    }
 }
 fn env<'a>(app: &'a App, now: i64, tick: u64) -> Env<'a> {
     Env {
@@ -296,7 +333,7 @@ fn draw_chat_mode(
             }
             app.views.insert(c, v);
         }
-        None => draw_center(buf, lay.chat, &connect_text(app, lay.chat.width as usize)),
+        None => draw_empty_chat(buf, lay.chat, app),
     }
     // Sidebar.
     if let Some(sb) = lay.sidebar {
@@ -331,9 +368,65 @@ fn draw_chat_mode(
         watch_count: 0,
         watch_focused: false,
         page: None,
+        watch_filter_pill: None,
     };
-    footer::draw_status(buf, lay.status, &sc);
+    let _ = footer::draw_status(buf, lay.status, &sc);
     cursor
+}
+
+fn draw_empty_chat(buf: &mut Buffer, area: Rect, app: &mut App) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let mut lines = if app.connected && app.refused.is_none() {
+        let mut l = Vec::new();
+        for row in crate::app::LOGO {
+            let split = row.char_indices().nth(10).map(|x| x.0).unwrap_or(row.len());
+            let (a, b) = row.split_at(split);
+            l.push(Line::from(vec![
+                Span::styled(a.to_string(), theme::bold(theme::PRIMARY)),
+                Span::styled(b.trim_end().to_string(), theme::muted()),
+            ]));
+        }
+        l.push(Line::default());
+        l.push(Line::from(vec![
+            Span::styled(text::tilde(&app.cwd), theme::text()),
+            Span::styled(text::SEPARATOR, theme::muted()),
+            Span::styled(app.backend_summary(), theme::muted()),
+        ]));
+        l.push(Line::default());
+        l.push(Line::from(Span::styled(
+            "Type a message to start a session · /sessions · /agent · /model · /backend",
+            theme::fg(theme::DIM),
+        )));
+        l
+    } else {
+        connect_text(app, area.width as usize)
+    };
+    let btn_label = " Switch Backend… ";
+    let btn_w = width(btn_label) as u16;
+    let show_btn = area.width >= btn_w + 2;
+    if show_btn {
+        lines.push(Line::default());
+        lines.push(Line::from(Span::styled(
+            btn_label,
+            Style::new()
+                .fg(theme::TEXT)
+                .bg(theme::ELEMENT)
+                .add_modifier(Modifier::BOLD),
+        )));
+    }
+    let h = lines.len() as u16;
+    let y0 = area.y + area.height.saturating_sub(h) / 2;
+    draw_center(buf, area, &lines);
+    if show_btn {
+        let btn_y = y0 + h.saturating_sub(1);
+        if btn_y >= area.y && btn_y < area.y + area.height {
+            let bx = area.x + area.width.saturating_sub(btn_w) / 2;
+            app.switch_backend_rects
+                .push(Rect::new(bx, btn_y, btn_w, 1));
+        }
+    }
 }
 
 fn connect_text(app: &App, max_w: usize) -> Vec<Line<'static>> {
@@ -399,12 +492,14 @@ fn draw_prompt(buf: &mut Buffer, lay: &Layout, app: &mut App, focused: bool) -> 
     }
     let bg = theme::PANEL;
     let view = app.cur();
-    let agent = view.map(|v| v.info.agent.clone()).unwrap_or_default();
+    let agent = view
+        .map(|v| v.info.agent.clone())
+        .unwrap_or_else(|| app.effective_draft_agent());
     let busy = view.is_some_and(|v| v.is_busy());
     let view_model = view
         .map(|v| v.info.model.clone())
-        .filter(|m| !m.model.is_empty());
-    let queued = view.map(|v| v.queued.len()).unwrap_or(0);
+        .filter(|m| !m.model.is_empty())
+        .or_else(|| app.effective_draft_model());
     let todos = view.map(|v| v.info.todos.clone()).unwrap_or_default();
     let bar_color = if app.shell_mode {
         theme::WARNING
@@ -592,7 +687,7 @@ fn draw_sidebar(buf: &mut Buffer, r: Rect, app: &mut App, now: i64, tick: u64) {
     app.sidebar_rows.clear();
     app.sidebar_mcp_rows.clear();
     app.sidebar_rect = r;
-    let Some(v) = app.cur() else { return };
+    let v = app.cur();
     // Separator.
     if r.x > 0 {
         for y in r.y..r.y + r.height {
@@ -605,22 +700,26 @@ fn draw_sidebar(buf: &mut Buffer, r: Rect, app: &mut App, now: i64, tick: u64) {
     }
     let h = (r.height - 1) as usize; // top margin
 
-    let (full, compact) = session_info_rows(app, v, w);
     // Display order: MCP, Todo, Live (rows are dropped by priority: Todo, MCP, Live).
     let secs: Vec<SbSection> = [
         mcp_section(app, w, tick),
-        todo_section(&v.info.todos, w),
+        v.and_then(|cur| todo_section(&cur.info.todos, w)),
         live_section(app, v, w, now, tick),
     ]
     .into_iter()
     .flatten()
     .collect();
-    // Full session info when everything fits; otherwise the compact form.
-    let sec_len: usize = secs.iter().map(SbSection::len).sum();
-    let mut rows = if full.len() + sec_len <= h {
-        full
+    let mut rows = if let Some(cur) = v {
+        let (full, compact) = session_info_rows(app, cur, w);
+        // Full session info when everything fits; otherwise the compact form.
+        let sec_len: usize = secs.iter().map(SbSection::len).sum();
+        if full.len() + sec_len <= h {
+            full
+        } else {
+            compact
+        }
     } else {
-        compact
+        vec![sb(vec![Span::styled("No active session", theme::muted())])]
     };
     for s in secs {
         rows.extend(s.render());
@@ -739,7 +838,13 @@ fn mcp_section(app: &App, w: usize, tick: u64) -> Option<SbSection> {
     })
 }
 
-fn live_section(app: &App, v: &SessionView, w: usize, now: i64, tick: u64) -> Option<SbSection> {
+fn live_section(
+    app: &App,
+    v: Option<&SessionView>,
+    w: usize,
+    now: i64,
+    tick: u64,
+) -> Option<SbSection> {
     let mut live: Vec<_> = app.live.iter().filter(|s| s.live).collect();
     if live.is_empty() {
         return None;
@@ -752,7 +857,7 @@ fn live_section(app: &App, v: &SessionView, w: usize, now: i64, tick: u64) -> Op
     let items = live
         .iter()
         .map(|s| {
-            let me = s.id == v.info.id;
+            let me = v.is_some_and(|cur| s.id == cur.info.id);
             let dot = if !s.status.is_idle() {
                 theme::spinner(tick).to_string()
             } else {
@@ -776,7 +881,11 @@ fn live_section(app: &App, v: &SessionView, w: usize, now: i64, tick: u64) -> Op
             ];
             // Right-aligned: todo count, then the working time of the current run (same source
             // as the status line). `compose` truncates the name first, these stay whole.
-            let todos = if me { &v.info.todos } else { &s.todos };
+            let todos = if let Some(cur) = v.filter(|_| me) {
+                &cur.info.todos
+            } else {
+                &s.todos
+            };
             let mut right: Vec<Span<'static>> = crate::ui::todo::badge(todos).into_iter().collect();
             if let Some(ms) = crate::state::busy_ms(s, now) {
                 if !right.is_empty() {
@@ -933,7 +1042,7 @@ fn draw_watch_mode(
             let content = Rect::new(inner.x + 1, inner.y, inner.width - 2, inner.height);
             let e = env(app, now, tick);
             chat::draw_tile(buf, content, r.x + r.width - 1, &mut v, &e);
-            if v.messages.is_empty() {
+            if v.is_empty() {
                 draw_center(
                     buf,
                     content,
@@ -993,7 +1102,8 @@ fn draw_watch_mode(
         watch_count: ids.len(),
         watch_focused: app.watch.focus.is_some(),
         page: Some((app.watch.page, pages)),
+        watch_filter_pill: Some(app.watch_filter_pill()),
     };
-    footer::draw_status(buf, status, &sc);
+    app.watch.filter_pill_rect = footer::draw_status(buf, status, &sc);
     cursor
 }

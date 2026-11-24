@@ -431,16 +431,18 @@ pub struct Channel {
     pub ws: Ws,
     sealer: Sealer,
     opener: Opener,
-    /// Sealed frame 0: version, cwd, mock.
+    /// Sealed frame 0: version, cwd, mock, cli_server, channel_control.
     pub info: serde_json::Value,
+    /// Detailed upstream connection error from `upstream_error`, if any.
+    pub upstream_error: Option<String>,
 }
 
 /// Close code and reason.
 pub type Closed = (u16, String);
 
 impl Channel {
-    /// Reads the hello and answers it. `Err` holds the close the server answered with.
-    pub async fn sign_in(mut ws: Ws, key: &str) -> Result<Channel, Closed> {
+    /// Reads hello, proves key, and receives frame 0 (before `connect_upstream`).
+    pub async fn sign_in_only(mut ws: Ws, key: &str) -> Result<Channel, Closed> {
         let (root, sn, cn) = Self::start_handshake(&mut ws, key).await;
         let mac = root.auth_mac(&sn, &cn);
         ws.send(Message::text(channel::auth_json(&cn, &mac)))
@@ -452,6 +454,7 @@ impl Channel {
             sealer,
             opener,
             info: serde_json::Value::Null,
+            upstream_error: None,
         };
         match channel.next_event().await {
             Event::Text(frame_zero) => {
@@ -463,6 +466,45 @@ impl Channel {
         }
     }
 
+    /// Sends the sealed `connect_upstream` control frame and awaits `upstream_ready`.
+    pub async fn connect_upstream(
+        &mut self,
+        mode: &str,
+        url: Option<&str>,
+        token: Option<&str>,
+    ) -> Result<(), Closed> {
+        let mut payload = serde_json::json!({ "op": "connect_upstream", "mode": mode });
+        if let Some(url) = url {
+            payload["url"] = serde_json::Value::String(url.to_string());
+        }
+        if let Some(token) = token {
+            payload["token"] = serde_json::Value::String(token.to_string());
+        }
+        let bytes = serde_json::to_vec(&payload).unwrap();
+        self.send_binary(&bytes).await;
+        match self.next_event().await {
+            Event::Binary(data) => {
+                let msg: serde_json::Value = serde_json::from_slice(&data).unwrap();
+                match msg["op"].as_str() {
+                    Some("upstream_ready") => Ok(()),
+                    Some("upstream_error") => {
+                        self.upstream_error = msg["error"].as_str().map(str::to_string);
+                        Err(self.next_close().await)
+                    }
+                    other => panic!("unexpected control response op: {other:?}"),
+                }
+            }
+            Event::Close(code, reason) => Err((code, reason)),
+            other => panic!("expected binary control response or close, got {other:?}"),
+        }
+    }
+
+    /// Reads the hello, answers it, and connects to the CLI default upstream.
+    pub async fn sign_in(ws: Ws, key: &str) -> Result<Channel, Closed> {
+        let mut channel = Self::sign_in_only(ws, key).await?;
+        channel.connect_upstream("cli_default", None, None).await?;
+        Ok(channel)
+    }
     /// Reads the hello; returns the root for `key` and both nonces (the client's is fixed).
     pub async fn start_handshake(ws: &mut Ws, key: &str) -> (Root, Nonce, Nonce) {
         let hello = next_text(ws).await;

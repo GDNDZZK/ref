@@ -28,8 +28,9 @@ pub struct StatusCtx<'a> {
     /// Split view: a tile is focused.
     pub watch_focused: bool,
     pub page: Option<(usize, usize)>,
+    /// Split view direct-parent filter pill: `(label, active)`.
+    pub watch_filter_pill: Option<(String, bool)>,
 }
-
 fn status_label(v: &SessionView, tick: u64, now: i64) -> (String, Color) {
     use ref_proto::SessionStatus::*;
     let el = v.busy_ms(now).map(text::fmt_elapsed).unwrap_or_default();
@@ -87,12 +88,13 @@ pub fn context_spans(v: &SessionView) -> Vec<Span<'static>> {
     )]
 }
 
-pub fn draw_status(buf: &mut Buffer, area: Rect, cx: &StatusCtx<'_>) {
+pub fn draw_status(buf: &mut Buffer, area: Rect, cx: &StatusCtx<'_>) -> Option<Rect> {
     if area.height == 0 || area.width == 0 {
-        return;
+        return None;
     }
     let now = ref_proto::now_ms();
     let mut left: Vec<Span<'static>> = vec![Span::raw(" ")];
+    let mut pill_candidate: Option<(u16, u16)> = None;
     if !cx.connected {
         let label = if cx.refused {
             "● disconnected"
@@ -116,6 +118,23 @@ pub fn draw_status(buf: &mut Buffer, area: Rect, cx: &StatusCtx<'_>) {
                 format!(" · page {}/{n}", p + 1),
                 theme::muted(),
             ));
+        }
+        if let Some((label, active)) = &cx.watch_filter_pill {
+            left.push(Span::raw("  "));
+            let x = area.x + text::spans_width(&left) as u16;
+            let w = text::width(label) as u16;
+            let st = if *active {
+                Style::new()
+                    .fg(theme::PANEL)
+                    .bg(theme::ACCENT)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::new().fg(theme::MUTED).bg(theme::ELEMENT)
+            };
+            left.push(Span::styled(label.clone(), st));
+            if w > 0 {
+                pill_candidate = Some((x, w));
+            }
         }
     } else {
         left.push(Span::styled(text::tilde(cx.cwd), theme::muted()));
@@ -144,7 +163,7 @@ pub fn draw_status(buf: &mut Buffer, area: Rect, cx: &StatusCtx<'_>) {
         left.push(Span::styled("   esc exit shell mode", theme::muted()));
     } else if cx.watch_mode && cx.watch_count > 0 && !cx.watch_focused {
         left.push(Span::styled(
-            "   click or tab to focus a session · wheel scrolls a tile",
+            "   click or tab to focus · f filter · wheel scrolls",
             theme::fg(theme::DIM),
         ));
     } else if cx.watch_mode && cx.watch_count > 0 {
@@ -165,8 +184,13 @@ pub fn draw_status(buf: &mut Buffer, area: Rect, cx: &StatusCtx<'_>) {
     }
     right.push(Span::styled("ctrl+p ", theme::text()));
     right.push(Span::styled("commands ", theme::muted()));
+    let rw = text::spans_width(&right) as u16;
     let (line, _) = compose(left, right, area.width as usize);
     buf.set_line(area.x, area.y, &line, area.width);
+    pill_candidate.and_then(|(x, w)| {
+        let right_edge = area.x + area.width.saturating_sub(rw.saturating_add(1));
+        (x.saturating_add(w) <= right_edge).then_some(Rect::new(x, area.y, w, 1))
+    })
 }
 
 /// Prompt metadata row: `Agent · Model provider · variant`.

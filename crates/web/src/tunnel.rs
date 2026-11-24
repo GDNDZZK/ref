@@ -12,7 +12,7 @@ use axum::http::header::{HOST, ORIGIN};
 use axum::response::Response;
 use futures_util::{SinkExt as _, StreamExt as _};
 use ref_client::Ws;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::OwnedSemaphorePermit;
 use tokio::time::{Instant, MissedTickBehavior};
 use tokio_tungstenite::tungstenite::Error as WsError;
@@ -24,8 +24,8 @@ use crate::channel::{self, BadFrame, Kind, NONCE_LEN, Opener, Sealer};
 use crate::guard::{origin_matches_host, text_response};
 use crate::routes::AppState;
 use crate::token;
+use crate::upstream::UpstreamRequest;
 use crate::ws::{self, BrowserSocket};
-
 /// Same limit as ref-server applies to client messages (prompts carry pasted images).
 const MAX_BROWSER_MESSAGE: usize = 64 << 20;
 /// Pre-auth WebSocket buffer sizes; widened to `MAX_BROWSER_MESSAGE` after the key handshake.
@@ -122,6 +122,112 @@ struct Info {
     version: &'static str,
     cwd: String,
     mock: bool,
+    cli_server: bool,
+    channel_control: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+enum ControlRequest {
+    ConnectUpstream {
+        mode: ConnectMode,
+        #[serde(default)]
+        url: Option<String>,
+        #[serde(default)]
+        token: Option<String>,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ConnectMode {
+    Auto,
+    Explicit,
+    CliDefault,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+enum ControlResponse {
+    UpstreamReady,
+    UpstreamError { error: String },
+}
+
+enum ControlOutcome {
+    Request(UpstreamRequest),
+    BrowserClosed,
+    BadFrame,
+    Shutdown,
+}
+
+fn seal_control(sealer: &mut Sealer, response: &ControlResponse) -> UpMessage {
+    let bytes = serde_json::to_vec(response).expect("plain data serialises");
+    UpMessage::Binary(sealer.seal(Kind::Binary, &bytes).into())
+}
+
+fn parse_control_frame(opener: &mut Opener, wire: &[u8]) -> Result<UpstreamRequest, BadFrame> {
+    let (kind, plain) = opener.open(wire)?;
+    if kind != Kind::Binary {
+        return Err(BadFrame);
+    }
+    let ControlRequest::ConnectUpstream { mode, url, token } =
+        serde_json::from_slice(&plain).map_err(|_| BadFrame)?;
+    Ok(match mode {
+        ConnectMode::CliDefault => UpstreamRequest::CliDefault,
+        ConnectMode::Auto => UpstreamRequest::Auto,
+        ConnectMode::Explicit => UpstreamRequest::Explicit {
+            url: url.unwrap_or_default(),
+            token,
+        },
+    })
+}
+
+async fn await_upstream_request(
+    state: &AppState,
+    browser: &mut BrowserSocket,
+    opener: &mut Opener,
+) -> ControlOutcome {
+    let heartbeat = state.heartbeat;
+    let mut ticker = tokio::time::interval_at(
+        Instant::now() + heartbeat.ping_interval,
+        heartbeat.ping_interval,
+    );
+    ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let mut last_heard = Instant::now();
+    loop {
+        tokio::select! {
+            _ = state.shutdown.cancelled() => return ControlOutcome::Shutdown,
+            _ = ticker.tick() => {
+                if last_heard.elapsed() >= heartbeat.pong_timeout {
+                    tracing::debug!("browser went silent before connect_upstream, dropping it");
+                    return ControlOutcome::BrowserClosed;
+                }
+                if !send_to_browser(browser, UpMessage::Ping(Bytes::new()), heartbeat).await {
+                    return ControlOutcome::BrowserClosed;
+                }
+            }
+            frame = browser.recv() => {
+                let message = match frame {
+                    Some(Ok(UpMessage::Close(_))) | None => return ControlOutcome::BrowserClosed,
+                    Some(Err(e)) => {
+                        tracing::debug!("browser read failed before connect_upstream: {e}");
+                        return ControlOutcome::BrowserClosed;
+                    }
+                    Some(Ok(message)) => message,
+                };
+                last_heard = Instant::now();
+                match message {
+                    UpMessage::Ping(_) | UpMessage::Pong(_) | UpMessage::Frame(_) => continue,
+                    UpMessage::Text(_) => return ControlOutcome::BadFrame,
+                    UpMessage::Close(_) => return ControlOutcome::BrowserClosed,
+                    UpMessage::Binary(wire) => match parse_control_frame(opener, &wire) {
+                        Ok(req) => return ControlOutcome::Request(req),
+                        Err(BadFrame) => return ControlOutcome::BadFrame,
+                    },
+                }
+            }
+        }
+    }
 }
 
 async fn tunnel(
@@ -134,8 +240,35 @@ async fn tunnel(
     };
     drop(handshake_slot);
     browser.set_config(|config| *config = post_auth_config());
+
+    let info = Info {
+        version: env!("CARGO_PKG_VERSION"),
+        cwd: state.cwd.clone(),
+        mock: state.upstream.is_mock(),
+        cli_server: state.upstream.is_cli_server(),
+        channel_control: true,
+    };
+    let info = serde_json::to_vec(&info).expect("plain data serialises");
+    let frame_zero = UpMessage::Binary(sealer.seal(Kind::Text, &info).into());
+    if !send_to_browser(&mut browser, frame_zero, state.heartbeat).await {
+        return;
+    }
+
+    let request = match await_upstream_request(&state, &mut browser, &mut opener).await {
+        ControlOutcome::Request(req) => req,
+        ControlOutcome::BrowserClosed => return,
+        ControlOutcome::BadFrame => {
+            close_browser(&mut browser, CLOSE_BAD_MESSAGE, REASON_BAD_FRAME).await;
+            return;
+        }
+        ControlOutcome::Shutdown => {
+            close_browser(&mut browser, CLOSE_GOING_AWAY, SHUTDOWN_REASON).await;
+            return;
+        }
+    };
+
     let upstream = tokio::select! {
-        r = state.upstream.connect() => r,
+        r = state.upstream.connect_for(request) => r,
         _ = state.shutdown.cancelled() => {
             close_browser(&mut browser, CLOSE_GOING_AWAY, SHUTDOWN_REASON).await;
             return;
@@ -145,6 +278,13 @@ async fn tunnel(
         Ok(ws) => ws,
         Err(e) => {
             tracing::warn!("backend connection failed: {e}");
+            let err_frame = seal_control(
+                &mut sealer,
+                &ControlResponse::UpstreamError {
+                    error: e.to_string(),
+                },
+            );
+            let _ = send_to_browser(&mut browser, err_frame, state.heartbeat).await;
             close_browser(
                 &mut browser,
                 CLOSE_BACKEND_UNAVAILABLE,
@@ -154,28 +294,21 @@ async fn tunnel(
             return;
         }
     };
-    let info = Info {
-        version: env!("CARGO_PKG_VERSION"),
-        cwd: state.cwd.clone(),
-        mock: state.upstream.is_mock(),
-    };
-    let info = serde_json::to_vec(&info).expect("plain data serialises");
-    let frame_zero = UpMessage::Binary(sealer.seal(Kind::Text, &info).into());
-    if send_to_browser(&mut browser, frame_zero, state.heartbeat).await {
-        let ended = pump(
-            &state,
-            &mut browser,
-            &mut upstream,
-            &mut sealer,
-            &mut opener,
-        )
-        .await;
-        finish(&mut browser, &mut upstream, ended).await;
-    } else {
+    let ready = seal_control(&mut sealer, &ControlResponse::UpstreamReady);
+    if !send_to_browser(&mut browser, ready, state.heartbeat).await {
         close_upstream(&mut upstream).await;
+        return;
     }
+    let ended = pump(
+        &state,
+        &mut browser,
+        &mut upstream,
+        &mut sealer,
+        &mut opener,
+    )
+    .await;
+    finish(&mut browser, &mut upstream, ended).await;
 }
-
 async fn finish(browser: &mut BrowserSocket, upstream: &mut Ws, ended: Ended) {
     match ended {
         Ended::BrowserClosed => {
@@ -529,8 +662,8 @@ mod tests {
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
     >;
 
-    /// A tab that has signed in; `Sealer` seals what it sends.
-    async fn open_tab(address: &str) -> (Tab, Sealer) {
+    /// A tab that has signed in and read `frame_zero`, before sending `connect_upstream`.
+    async fn sign_in_control(address: &str) -> (Tab, Sealer, Opener, serde_json::Value) {
         let mut request = format!("ws://{address}/ws").into_client_request().unwrap();
         request
             .headers_mut()
@@ -543,7 +676,43 @@ mod tests {
         tab.send(UpMessage::text(auth_json(&cn, &root.auth_mac(&sn, &cn))))
             .await
             .unwrap();
-        let (sealer, _) = root.client_channel(&sn, &cn);
+        let (sealer, mut opener) = root.client_channel(&sn, &cn);
+        let frame_zero = loop {
+            match tab.next().await.unwrap().unwrap() {
+                UpMessage::Binary(wire) => {
+                    let (kind, plain) = opener.open(&wire).unwrap();
+                    assert_eq!(kind, Kind::Text);
+                    break serde_json::from_slice(&plain).unwrap();
+                }
+                UpMessage::Ping(_) | UpMessage::Pong(_) => continue,
+                other => panic!("expected frame_zero, got {other:?}"),
+            }
+        };
+        (tab, sealer, opener, frame_zero)
+    }
+
+    /// A tab that has signed in and completed the `connect_upstream` handshake;
+    /// `Sealer` seals what it sends.
+    async fn open_tab(address: &str) -> (Tab, Sealer) {
+        let (mut tab, mut sealer, mut opener, _) = sign_in_control(address).await;
+        let wire = sealer.seal(
+            Kind::Binary,
+            br#"{"op":"connect_upstream","mode":"cli_default"}"#,
+        );
+        tab.send(UpMessage::Binary(wire.into())).await.unwrap();
+        loop {
+            match tab.next().await.unwrap().unwrap() {
+                UpMessage::Binary(wire) => {
+                    let (kind, plain) = opener.open(&wire).unwrap();
+                    assert_eq!(kind, Kind::Binary);
+                    let reply: serde_json::Value = serde_json::from_slice(&plain).unwrap();
+                    assert_eq!(reply["op"], "upstream_ready");
+                    break;
+                }
+                UpMessage::Ping(_) | UpMessage::Pong(_) => continue,
+                other => panic!("expected upstream_ready, got {other:?}"),
+            }
+        }
         (tab, sealer)
     }
 
@@ -595,5 +764,102 @@ mod tests {
             tokio::time::sleep(BUSY_TAB_SENDS_EVERY).await;
         }
         assert!(closed.try_recv().is_err(), "the tab was dropped while busy");
+    }
+
+    #[tokio::test]
+    async fn control_handshake_waits_before_connecting_upstream() {
+        let listener = TcpListener::bind(format!("{LOOPBACK}:0")).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (accepted_tx, mut accepted_rx) = oneshot::channel();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let _ = accepted_tx.send(());
+            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            while ws.next().await.is_some() {}
+        });
+
+        let address = serve_tunnel(format!("ws://{addr}/")).await;
+        let (mut tab, mut sealer, mut opener, frame_zero) = sign_in_control(&address).await;
+        assert_eq!(frame_zero["cli_server"], true);
+        assert_eq!(frame_zero["channel_control"], true);
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(
+            accepted_rx.try_recv().is_err(),
+            "upstream must not be connected before connect_upstream"
+        );
+
+        let wire = sealer.seal(
+            Kind::Binary,
+            br#"{"op":"connect_upstream","mode":"cli_default"}"#,
+        );
+        tab.send(UpMessage::Binary(wire.into())).await.unwrap();
+        timeout(WAIT, accepted_rx)
+            .await
+            .expect("upstream was not connected after connect_upstream")
+            .unwrap();
+        loop {
+            match tab.next().await.unwrap().unwrap() {
+                UpMessage::Binary(wire) => {
+                    let (kind, plain) = opener.open(&wire).unwrap();
+                    assert_eq!(kind, Kind::Binary);
+                    let reply: serde_json::Value = serde_json::from_slice(&plain).unwrap();
+                    assert_eq!(reply["op"], "upstream_ready");
+                    break;
+                }
+                UpMessage::Ping(_) | UpMessage::Pong(_) => continue,
+                other => panic!("expected upstream_ready, got {other:?}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn control_handshake_invalid_explicit_url_sends_error_and_closes() {
+        let address = serve_tunnel(format!("ws://{LOOPBACK}:1/")).await;
+        let (mut tab, mut sealer, mut opener, _) = sign_in_control(&address).await;
+        let wire = sealer.seal(
+            Kind::Binary,
+            br#"{"op":"connect_upstream","mode":"explicit","url":"http://127.0.0.1:1234"}"#,
+        );
+        tab.send(UpMessage::Binary(wire.into())).await.unwrap();
+        let err_msg = loop {
+            match tab.next().await.unwrap().unwrap() {
+                UpMessage::Binary(wire) => {
+                    let (kind, plain) = opener.open(&wire).unwrap();
+                    assert_eq!(kind, Kind::Binary);
+                    let reply: serde_json::Value = serde_json::from_slice(&plain).unwrap();
+                    assert_eq!(reply["op"], "upstream_error");
+                    break reply["error"].as_str().unwrap().to_string();
+                }
+                UpMessage::Ping(_) | UpMessage::Pong(_) => continue,
+                other => panic!("expected upstream_error, got {other:?}"),
+            }
+        };
+        assert!(err_msg.contains("ws:// or wss://"), "{err_msg}");
+        let close = loop {
+            match tab.next().await.unwrap().unwrap() {
+                UpMessage::Close(Some(frame)) => break frame,
+                UpMessage::Ping(_) | UpMessage::Pong(_) => continue,
+                other => panic!("expected close after upstream_error, got {other:?}"),
+            }
+        };
+        assert_eq!(u16::from(close.code), CLOSE_BACKEND_UNAVAILABLE);
+        assert_eq!(close.reason.as_str(), REASON_BACKEND_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn control_handshake_rejects_text_frame_before_connect_upstream() {
+        let address = serve_tunnel(format!("ws://{LOOPBACK}:1/")).await;
+        let (mut tab, mut sealer, _, _) = sign_in_control(&address).await;
+        let wire = sealer.seal(Kind::Text, br#"{"id":1,"op":"hello"}"#);
+        tab.send(UpMessage::Binary(wire.into())).await.unwrap();
+        let close = loop {
+            match tab.next().await.unwrap().unwrap() {
+                UpMessage::Close(Some(frame)) => break frame,
+                UpMessage::Ping(_) | UpMessage::Pong(_) => continue,
+                other => panic!("expected close 4400, got {other:?}"),
+            }
+        };
+        assert_eq!(u16::from(close.code), CLOSE_BAD_MESSAGE);
+        assert_eq!(close.reason.as_str(), REASON_BAD_FRAME);
     }
 }

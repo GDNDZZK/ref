@@ -10,7 +10,7 @@ use ref_proto::{ClientFrame, PROTOCOL_VERSION, Request, ServerFrame};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message as WsMsg;
 
-use ref_client::{Endpoint, Target, Ws};
+use ref_client::{BackendTarget, ConnectedBackend, Target, Ws};
 
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
@@ -30,15 +30,26 @@ pub enum NetEvent {
     Warn(String),
     Frame(ServerFrame),
 }
-/// Handle used by the app to send frames.
+/// Handle used by the app to send frames and switch backend targets.
 #[derive(Clone)]
 pub struct Client {
     tx: mpsc::UnboundedSender<ClientFrame>,
+    ctrl: Option<mpsc::UnboundedSender<BackendTarget>>,
 }
 
 impl Client {
     pub fn new(tx: mpsc::UnboundedSender<ClientFrame>) -> Self {
-        Client { tx }
+        Client { tx, ctrl: None }
+    }
+
+    pub fn with_control(
+        tx: mpsc::UnboundedSender<ClientFrame>,
+        ctrl: mpsc::UnboundedSender<BackendTarget>,
+    ) -> Self {
+        Client {
+            tx,
+            ctrl: Some(ctrl),
+        }
     }
 
     /// Sends a frame. Returns false if the transport task is gone.
@@ -51,8 +62,12 @@ impl Client {
     pub fn notify(&self, req: Request) {
         self.send(None, req);
     }
-}
 
+    /// Asks the transport task to drop the current connection and connect to `target`.
+    pub fn switch_target(&self, target: BackendTarget) -> bool {
+        self.ctrl.as_ref().is_some_and(|tx| tx.send(target).is_ok())
+    }
+}
 const HELLO_ID: u64 = u64::MAX;
 const RECONNECT_DELAY: Duration = Duration::from_secs(1);
 
@@ -72,20 +87,21 @@ enum PumpExit {
     Lost(String),
     /// Server refused this client's protocol version; stop retrying.
     Fatal(String),
+    /// The user requested a switch to another backend target.
+    Switch(BackendTarget),
 }
 /// Connects to the backend, reporting progress while one is being started.
 async fn connect(
-    target: &Target,
+    target: &BackendTarget,
     events: &mpsc::UnboundedSender<NetEvent>,
-) -> Result<(Ws, Endpoint), String> {
-    ref_client::connect_target(target, || {
+) -> Result<ConnectedBackend, String> {
+    ref_client::discover_or_connect(target, || {
         // Progress text only; a closed receiver is noticed by the next event that matters.
         let _ = events.send(NetEvent::Status("starting backend…".into()));
     })
     .await
     .map_err(|e| e.to_string())
 }
-
 /// Parses a server text frame; unknown frame kinds are ignored (forward compat).
 fn classify_text_frame(text: &str) -> Result<Option<Incoming>, String> {
     let raw: serde_json::Value =
@@ -126,10 +142,20 @@ fn classify_text_frame(text: &str) -> Result<Option<Incoming>, String> {
 async fn pump(
     ws: &mut Ws,
     out: &mut mpsc::UnboundedReceiver<ClientFrame>,
+    switch_rx: &mut mpsc::UnboundedReceiver<BackendTarget>,
     events: &mpsc::UnboundedSender<NetEvent>,
 ) -> PumpExit {
     loop {
         tokio::select! {
+            biased;
+            sw = switch_rx.recv() => {
+                let Some(next_target) = sw else {
+                    let _ = ws.close(None).await;
+                    return PumpExit::Stop;
+                };
+                let _ = ws.close(None).await;
+                return PumpExit::Switch(next_target);
+            }
             f = out.recv() => {
                 let Some(f) = f else {
                     // Closing a socket we are about to drop; a failure changes nothing.
@@ -139,7 +165,6 @@ async fn pump(
                 let txt = match serde_json::to_string(&f) {
                     Ok(t) => t,
                     Err(e) => {
-                        let msg = format!("cannot encode request: {e}");
                         if let Some(id) = f.id {
                             let frame = ServerFrame::Response {
                                 id,
@@ -206,20 +231,53 @@ async fn pump(
 pub async fn run(
     target: Target,
     cwd: String,
+    out: mpsc::UnboundedReceiver<ClientFrame>,
+    events: mpsc::UnboundedSender<NetEvent>,
+) {
+    let (_switch_tx, switch_rx) = mpsc::unbounded_channel();
+    run_with_control(target.into(), cwd, out, switch_rx, events).await;
+}
+
+/// Runs the transport with runtime backend hot-switching support.
+pub async fn run_with_control(
+    mut target: BackendTarget,
+    cwd: String,
     mut out: mpsc::UnboundedReceiver<ClientFrame>,
+    mut switch_rx: mpsc::UnboundedReceiver<BackendTarget>,
     events: mpsc::UnboundedSender<NetEvent>,
 ) {
     loop {
-        let conn = connect(&target, &events).await;
-        let (mut ws, ep) = match conn {
+        let conn = tokio::select! {
+            biased;
+            sw = switch_rx.recv() => {
+                let Some(next_target) = sw else {
+                    return;
+                };
+                target = next_target;
+                while out.try_recv().is_ok() {}
+                continue;
+            }
+            res = connect(&target, &events) => res,
+        };
+        let mut backend = match conn {
             Ok(c) => c,
             Err(e) => {
                 if events.send(NetEvent::Disconnected(e)).is_err() {
                     return;
                 }
-                // Drain (fail) frames sent while disconnected: the app fails their callbacks.
                 while out.try_recv().is_ok() {}
-                tokio::time::sleep(RECONNECT_DELAY).await;
+                tokio::select! {
+                    biased;
+                    sw = switch_rx.recv() => {
+                        let Some(next_target) = sw else {
+                            return;
+                        };
+                        target = next_target;
+                        while out.try_recv().is_ok() {}
+                        continue;
+                    }
+                    _ = tokio::time::sleep(RECONNECT_DELAY) => {}
+                }
                 if events.is_closed() {
                     return;
                 }
@@ -232,32 +290,75 @@ pub async fn run(
                 client: "ref-tui".into(),
                 version: PROTOCOL_VERSION,
                 cwd: cwd.clone(),
-                token: ep.token.clone(),
+                token: backend.endpoint.token.clone(),
                 notify: Vec::new(),
             },
         };
         let txt = match serde_json::to_string(&hello) {
             Ok(t) => t,
             Err(e) => {
+                if let Some(mock) = backend.mock.take() {
+                    let _ = mock.shutdown().await;
+                }
                 let _ = events.send(NetEvent::Disconnected(format!("cannot encode hello: {e}")));
                 return;
             }
         };
-        if let Err(e) = ws.send(WsMsg::text(txt)).await {
+        if let Err(e) = backend.ws.send(WsMsg::text(txt)).await {
+            if let Some(mock) = backend.mock.take() {
+                let _ = mock.shutdown().await;
+            }
             if events.send(NetEvent::Disconnected(e.to_string())).is_err() {
                 return;
             }
-            tokio::time::sleep(RECONNECT_DELAY).await;
+            tokio::select! {
+                biased;
+                sw = switch_rx.recv() => {
+                    let Some(next_target) = sw else {
+                        return;
+                    };
+                    target = next_target;
+                    while out.try_recv().is_ok() {}
+                    continue;
+                }
+                _ = tokio::time::sleep(RECONNECT_DELAY) => {}
+            }
             continue;
         }
-        let reason = match pump(&mut ws, &mut out, &events).await {
+        let exit = pump(&mut backend.ws, &mut out, &mut switch_rx, &events).await;
+        if let Some(mock) = backend.mock.take() {
+            let _ = mock.shutdown().await;
+        }
+        let reason = match exit {
             PumpExit::Stop => return,
+            PumpExit::Switch(next_target) => {
+                target = next_target;
+                while out.try_recv().is_ok() {}
+                continue;
+            }
             PumpExit::Fatal(reason) => {
                 let _ = events.send(NetEvent::Refused(reason));
                 while out.try_recv().is_ok() {}
-                // Stay alive without reconnecting until the app exits and drops `Client`.
-                while out.recv().await.is_some() {}
-                return;
+                // Stay alive without reconnecting until the app exits or switches backend.
+                loop {
+                    tokio::select! {
+                        biased;
+                        sw = switch_rx.recv() => {
+                            let Some(next_target) = sw else {
+                                return;
+                            };
+                            target = next_target;
+                            while out.try_recv().is_ok() {}
+                            break;
+                        }
+                        f = out.recv() => {
+                            if f.is_none() {
+                                return;
+                            }
+                        }
+                    }
+                }
+                continue;
             }
             PumpExit::Lost(reason) => reason,
         };
@@ -265,10 +366,19 @@ pub async fn run(
             return;
         }
         while out.try_recv().is_ok() {}
-        tokio::time::sleep(RECONNECT_DELAY).await;
+        tokio::select! {
+            biased;
+            sw = switch_rx.recv() => {
+                let Some(next_target) = sw else {
+                    return;
+                };
+                target = next_target;
+                while out.try_recv().is_ok() {}
+            }
+            _ = tokio::time::sleep(RECONNECT_DELAY) => {}
+        }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

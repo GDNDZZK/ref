@@ -11,10 +11,10 @@ pub mod permission;
 pub mod question;
 pub mod selection;
 pub mod split;
+pub mod stash;
 pub mod theme;
 pub mod toast;
 pub mod todo;
-
 use ratatui::text::{Line, Span};
 
 use crate::text;
@@ -57,13 +57,19 @@ pub enum Hit {
     Undo { msg: String },
     /// Remove a queued prompt (`Queued::key`) before it is sent.
     Unqueue { key: u64 },
+    /// Immediately end retry backoff wait and trigger the next attempt.
+    RetryNow,
 }
 
 impl Hit {
     pub fn is_button(&self) -> bool {
         matches!(
             self,
-            Hit::Copy { .. } | Hit::ShowAll { .. } | Hit::Undo { .. } | Hit::Unqueue { .. }
+            Hit::Copy { .. }
+                | Hit::ShowAll { .. }
+                | Hit::Undo { .. }
+                | Hit::Unqueue { .. }
+                | Hit::RetryNow
         )
     }
 }

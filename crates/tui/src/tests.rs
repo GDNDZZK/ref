@@ -265,10 +265,15 @@ pub fn test_app_with_requests(streaming: bool) -> (App, mpsc::UnboundedReceiver<
         i.status = SessionStatus::Running;
     }
     let mut v = SessionView::new(i.clone(), true);
+    let msgs = transcript(streaming);
+    let total = msgs.len() as u64;
     v.load_snapshot(SessionSnapshot {
         info: i,
-        messages: transcript(streaming),
+        messages: msgs,
         more_before: false,
+        total_messages: total,
+        start_seq: 0,
+        layout_metas: vec![],
         pending_permissions: vec![],
         pending_questions: vec![],
         queued: vec![],
@@ -357,7 +362,8 @@ fn streaming_snapshot() {
 fn reasoning_tail_fits_line_cjk() {
     let mut app = test_app(false);
     if let Some(v) = app.views.get_mut(TEST_SESSION)
-        && let Part::Reasoning { text, .. } = &mut v.messages[1].parts[0]
+        && let Some(m) = v.message_at_mut(1)
+        && let Part::Reasoning { text, .. } = &mut m.parts[0]
     {
         *text = "思考过程：首先读取解析器，然后检查循环边界是否包含末尾元素，最后运行测试确认修复有效果".into();
         v.versions[1] += 1000;
@@ -474,10 +480,15 @@ fn split_view_snapshot() {
             SessionStatus::Idle
         };
         let mut v = SessionView::new(inf.clone(), false);
+        let msgs = transcript(i == 0);
+        let total = msgs.len() as u64;
         v.load_snapshot(SessionSnapshot {
             info: inf.clone(),
-            messages: transcript(i == 0),
+            messages: msgs,
             more_before: false,
+            total_messages: total,
+            start_seq: 0,
+            layout_metas: vec![],
             pending_permissions: vec![],
             pending_questions: vec![],
             queued: vec![],
@@ -498,35 +509,37 @@ fn split_view_snapshot() {
 fn empty_and_weird_data_no_panic() {
     let mut app = test_app(false);
     let v = app.views.get_mut(TEST_SESSION).unwrap();
-    v.messages.push(Message {
-        id: "e".into(),
-        role: Role::Assistant,
-        time: 0,
-        time_end: Some(0),
-        source: MessageSource::Human,
-        parts: vec![],
-        model: None,
-        agent: None,
-        usage: None,
-        error: Some("boom\x1b[31m\nsecond".into()),
-    });
-    v.messages.push(Message {
-        id: "e2".into(),
-        role: Role::User,
-        time: -5,
-        time_end: None,
-        source: MessageSource::Compaction,
-        parts: vec![Part::Text {
-            text: String::new(),
+    v.apply(SessionEvent::Message {
+        message: Message {
+            id: "e".into(),
+            role: Role::Assistant,
             time: 0,
-        }],
-        model: None,
-        agent: None,
-        usage: None,
-        error: None,
+            time_end: Some(0),
+            source: MessageSource::Human,
+            parts: vec![],
+            model: None,
+            agent: None,
+            usage: None,
+            error: Some("boom\x1b[31m\nsecond".into()),
+        },
     });
-    v.versions.push(1);
-    v.versions.push(2);
+    v.apply(SessionEvent::Message {
+        message: Message {
+            id: "e2".into(),
+            role: Role::User,
+            time: -5,
+            time_end: None,
+            source: MessageSource::Compaction,
+            parts: vec![Part::Text {
+                text: String::new(),
+                time: 0,
+            }],
+            model: None,
+            agent: None,
+            usage: None,
+            error: None,
+        },
+    });
     for (w, h) in [(100u16, 30u16), (20, 8), (5, 3), (1, 1), (300, 80)] {
         render(&mut app, w, h);
     }
@@ -630,7 +643,10 @@ impl MockApp {
     async fn wait_for_turn_end(&mut self) {
         for _ in 0..120 {
             let v = &self.app.views[&self.sid];
-            if v.messages.iter().any(|m| m.raw_text().contains("Got it")) && !v.is_busy() {
+            if v.materialized_iter()
+                .any(|m| m.raw_text().contains("Got it"))
+                && !v.is_busy()
+            {
                 break;
             }
             self.pump(PUMP_POLL_MS).await;
@@ -667,7 +683,7 @@ async fn mock_first_turn_streams_and_asks_permission() {
     {
         let v = &m.app.views[&m.sid];
         assert!(v.loaded, "snapshot loaded");
-        assert!(v.messages.len() >= 2, "user + assistant");
+        assert!(v.slots.len() >= 2, "user + assistant");
     }
     let (_, s) = render(&mut m.app, 100, 30);
     println!("--- streaming ---\n{s}");
@@ -756,8 +772,7 @@ async fn mock_queued_prompt_survives_reattach_and_can_be_removed() {
     assert!(!v.is_busy(), "turn finished");
     assert!(v.queued.is_empty(), "queued prompt delivered");
     assert!(
-        !v.messages
-            .iter()
+        !v.materialized_iter()
             .any(|m| m.raw_text().contains("never send this")),
         "removed prompt never sent"
     );
@@ -1182,12 +1197,16 @@ fn long_transcript_render_perf() {
                 msgs.push(m);
             }
         }
+        let total = msgs.len() as u64;
         v.apply(SessionEvent::Reset {
             more_before: false,
             messages: msgs,
+            total_messages: total,
+            start_seq: 0,
+            layout_metas: vec![],
         });
     }
-    let total = app.views[TEST_SESSION].messages.len();
+    let total = app.views[TEST_SESSION].slots.len();
     let laid_out = |app: &App| app.views[TEST_SESSION].chat.laid_out;
     let t0 = std::time::Instant::now();
     render(&mut app, 120, 40);
@@ -1202,7 +1221,7 @@ fn long_transcript_render_perf() {
     for k in 0..30 {
         let before = laid_out(&app);
         let v = app.views.get_mut(TEST_SESSION).unwrap();
-        let id = v.messages.last().unwrap().id.clone();
+        let id = v.last_message().unwrap().id.clone();
         v.apply(SessionEvent::Delta {
             message_id: id,
             index: 1,
@@ -1270,13 +1289,14 @@ fn drag_selection_across_wrapped_cjk_lines() {
     let mut app = test_app(false);
     {
         let v = app.views.get_mut(TEST_SESSION).unwrap();
-        if let Part::Text { text, .. } = &mut v.messages[0].parts[0] {
+        if let Some(m) = v.message_at_mut(0)
+            && let Part::Text { text, .. } = &mut m.parts[0]
+        {
             *text =
                 "alpha beta gamma delta 中文字符测试中文字符测试中文字符测试 epsilon zeta".into();
         }
         v.versions[0] += 1000;
     }
-    let (w, h) = (40u16, 30u16);
     let (_, s) = render(&mut app, w, h);
     app.screen = ratatui::layout::Rect::new(0, 0, w, h);
     let lines: Vec<&str> = s.lines().collect();
@@ -1375,7 +1395,7 @@ fn copy_button_copies_raw_markdown() {
         &mut app,
         mouse(MouseEventKind::Up(MouseButton::Left), x + 2, y),
     );
-    let raw = app.views[TEST_SESSION].messages[1].raw_text();
+    let raw = app.views[TEST_SESSION].message_at(1).unwrap().raw_text();
     assert!(raw.contains("```rust"), "raw markdown, not rendered text");
     assert_eq!(crate::clipboard::take_last_copy(), Some(raw));
     assert!(!app.has_selection());
@@ -1425,7 +1445,7 @@ fn fail_pending(app: &mut App, pred: impl Fn(&crate::app::Pending) -> bool, err:
 }
 
 #[test]
-fn reattach_failure_of_empty_session_starts_new_one() {
+fn reattach_failure_of_empty_session_deselects_without_creating() {
     use crate::app::Pending;
     let mut app = test_app(false);
     app.views
@@ -1434,6 +1454,9 @@ fn reattach_failure_of_empty_session_starts_new_one() {
         .apply(SessionEvent::Reset {
             more_before: false,
             messages: vec![],
+            total_messages: 0,
+            start_seq: 0,
+            layout_metas: vec![],
         });
     app.on_net(crate::net::NetEvent::Disconnected(
         "connection closed".into(),
@@ -1446,10 +1469,10 @@ fn reattach_failure_of_empty_session_starts_new_one() {
     );
     assert!(app.current.is_none());
     assert!(
-        app.pending
+        !app.pending
             .values()
             .any(|p| matches!(p, Pending::Created { .. })),
-        "a fresh session is requested"
+        "no session auto-created"
     );
 }
 
@@ -2330,7 +2353,7 @@ fn close_session_picker_lists_live_sessions_and_stays_open() {
 }
 
 #[test]
-fn close_session_picker_closing_the_current_one_switches_to_the_remaining() {
+fn close_session_picker_closing_the_current_one_deselects() {
     use crate::app::Pending;
     let mut app = close_session_app();
     app.live.retain(|s| s.id == TEST_SESSION);
@@ -2340,13 +2363,13 @@ fn close_session_picker_closing_the_current_one_switches_to_the_remaining() {
 
     select_in_list_dialog(&mut app, "live:ses_test");
     press(&mut app, KeyCode::Enter);
-    assert_eq!(app.current.as_deref(), Some("ses_y"));
+    assert!(app.current.is_none());
     assert!(
         !app.pending
             .values()
             .any(|p| matches!(p, Pending::Created { .. }))
     );
-    assert!(!app.quit && !app.quit_after_close);
+    assert!(!app.quit);
 }
 
 #[test]
@@ -2484,10 +2507,9 @@ fn leader_k_closes_current_and_focused_tile() {
             .any(|p| matches!(p, Pending::Closed { .. }))
     );
     assert!(
-        app.quit_after_close && !app.quit,
-        "last session: exit once the close is confirmed"
+        app.current.is_none() && !app.quit,
+        "last session: deselects without quitting"
     );
-    assert!(app.hint.is_none(), "confirmation hint cleared");
     // Watch mode: closes the focused tile.
     let mut app = test_app(false);
     app.mode = Mode::Watch;
@@ -2605,10 +2627,15 @@ fn running_tool_spinner_animates_in_tiles() {
     let mut inf = bg_session("ses_bg", "worker-1", SessionStatus::Running, 0);
     inf.created_at = 1;
     let mut v = SessionView::new(inf.clone(), false);
+    let msgs = transcript(true);
+    let total = msgs.len() as u64;
     v.load_snapshot(SessionSnapshot {
         info: inf.clone(),
-        messages: transcript(true),
+        messages: msgs,
         more_before: false,
+        total_messages: total,
+        start_seq: 0,
+        layout_metas: vec![],
         pending_permissions: vec![],
         pending_questions: vec![],
         queued: vec![],
@@ -2644,10 +2671,15 @@ fn split_tile_shows_queue_and_expands_tools() {
         0,
         "then update the docs",
     )];
+    let msgs = transcript(false);
+    let total = msgs.len() as u64;
     v.load_snapshot(SessionSnapshot {
         info: inf.clone(),
-        messages: transcript(false),
+        messages: msgs,
         more_before: false,
+        total_messages: total,
+        start_seq: 0,
+        layout_metas: vec![],
         pending_permissions: vec![],
         pending_questions: vec![],
         queued,
@@ -2699,10 +2731,15 @@ fn split_view_expand_collapse_releases_hold_in_busy_tile() {
     app.mode = Mode::Watch;
     let inf = bg_session("ses_bg", "worker-1", SessionStatus::Busy, 0);
     let mut v = SessionView::new(inf.clone(), false);
+    let msgs = transcript(false);
+    let total = msgs.len() as u64;
     v.load_snapshot(SessionSnapshot {
         info: inf.clone(),
-        messages: transcript(false),
+        messages: msgs,
         more_before: false,
+        total_messages: total,
+        start_seq: 0,
+        layout_metas: vec![],
         pending_permissions: vec![],
         pending_questions: vec![],
         queued: vec![],
@@ -2811,6 +2848,9 @@ fn exit_screen_text() {
         .apply(SessionEvent::Reset {
             more_before: false,
             messages: vec![],
+            total_messages: 0,
+            start_seq: 0,
+            layout_metas: vec![],
         });
     let t = strip_ansi(&app.epilogue().unwrap());
     assert!(t.contains("█▀▀▄") && !t.contains("Continue") && !t.contains("Session"));
@@ -2833,7 +2873,7 @@ fn todo_rendering_everywhere() {
     let mut app = test_app(false);
     {
         let v = app.views.get_mut(TEST_SESSION).unwrap();
-        v.messages[1].parts.push(tool(
+        v.message_at_mut(1).unwrap().parts.push(tool(
             "c9",
             "todo",
             "Plan the work",
@@ -2891,10 +2931,15 @@ fn todo_rendering_everywhere() {
     let mut inf = bg_session("ses_bg", "worker-1", SessionStatus::Busy, 0);
     inf.todos = crate::ui::todo::parse_todos(&todo_input());
     let mut v = SessionView::new(inf.clone(), false);
+    let msgs = transcript(false);
+    let total = msgs.len() as u64;
     v.load_snapshot(SessionSnapshot {
         info: inf.clone(),
-        messages: transcript(false),
+        messages: msgs,
         more_before: false,
+        total_messages: total,
+        start_seq: 0,
+        layout_metas: vec![],
         pending_permissions: vec![],
         pending_questions: vec![],
         queued: vec![],
@@ -3341,10 +3386,14 @@ fn compacted_app() -> App {
     ));
     let v = app.views.get_mut(TEST_SESSION).unwrap();
     let info = v.info.clone();
+    let total = msgs.len() as u64;
     v.load_snapshot(SessionSnapshot {
         info,
         messages: msgs,
         more_before: false,
+        total_messages: total,
+        start_seq: 0,
+        layout_metas: vec![],
         pending_permissions: vec![],
         pending_questions: vec![],
         queued: vec![],
@@ -3509,6 +3558,9 @@ fn transcript_starting_with_a_compaction_has_no_older_messages_hint() {
             "sum",
         )],
         more_before: false,
+        total_messages: 1,
+        start_seq: 0,
+        layout_metas: vec![],
         pending_permissions: vec![],
         pending_questions: vec![],
         queued: vec![],
@@ -3524,11 +3576,18 @@ fn compaction_divider_in_split_tile() {
     let inf = bg_session("ses_bg", "worker-1", SessionStatus::Idle, 0);
     let mut v = SessionView::new(inf.clone(), false);
     let src = compacted_app();
-    let msgs = src.views[TEST_SESSION].messages.clone();
+    let msgs: Vec<Message> = src.views[TEST_SESSION]
+        .materialized_iter()
+        .cloned()
+        .collect();
+    let total = msgs.len() as u64;
     v.load_snapshot(SessionSnapshot {
         info: inf.clone(),
         messages: msgs,
         more_before: false,
+        total_messages: total,
+        start_seq: 0,
+        layout_metas: vec![],
         pending_permissions: vec![],
         pending_questions: vec![],
         queued: vec![],
@@ -3568,23 +3627,23 @@ async fn mock_compact_keeps_history() {
         }
         if app
             .cur()
-            .is_some_and(|v| v.loaded && !v.is_busy() && v.messages.len() >= 2)
+            .is_some_and(|v| v.loaded && !v.is_busy() && v.slots.len() >= 2)
         {
             break;
         }
         pump(&mut app, &mut ev_rx, PUMP_POLL_MS).await;
     }
-    let before = app.cur().unwrap().messages.len();
+    let before = app.cur().unwrap().slots.len();
     assert!(before >= 2);
     app.run_command("compact", "");
     pump(&mut app, &mut ev_rx, PUMP_TURN_MS).await;
     let v = app.cur().unwrap();
     assert_eq!(
-        v.messages.len(),
+        v.slots.len(),
         before + 1,
         "old messages kept, compaction appended"
     );
-    assert_eq!(v.messages.last().unwrap().source, MessageSource::Compaction);
+    assert_eq!(v.last_message().unwrap().source, MessageSource::Compaction);
     let (_, s) = render(&mut app, 100, 40);
     assert!(
         s.contains("◇ Context compacted") && s.contains(crate::ui::message::CONTEXT_HINT),
@@ -3633,10 +3692,15 @@ fn watch_app() -> App {
         let mut inf = bg_session(id, name, SessionStatus::Idle, 0);
         inf.created_at = 10 + i as i64;
         let mut v = SessionView::new(inf.clone(), false);
+        let msgs = long_transcript(name, 30);
+        let total = msgs.len() as u64;
         v.load_snapshot(SessionSnapshot {
             info: inf.clone(),
-            messages: long_transcript(name, 30),
+            messages: msgs,
             more_before: false,
+            total_messages: total,
+            start_seq: 0,
+            layout_metas: vec![],
             pending_permissions: vec![],
             pending_questions: vec![],
             queued: vec![],
@@ -4101,6 +4165,9 @@ fn current_session_goes_background_in_split_view() {
         info: app.views[TEST_SESSION].info.clone(),
         messages: vec![],
         more_before: false,
+        total_messages: 0,
+        start_seq: 0,
+        layout_metas: vec![],
         pending_permissions: vec![],
         pending_questions: vec![],
         queued: vec![],
@@ -4114,10 +4181,10 @@ fn current_session_goes_background_in_split_view() {
 }
 
 #[test]
-fn close_current_goes_to_first_live_session_or_exits() {
+fn close_current_deselects_without_auto_switch_or_quit() {
     use crate::app::Pending;
     let enter = |app: &mut App| press(app, KeyCode::Enter);
-    // Other live sessions: switch to the oldest one (sidebar order), no new session.
+    // Other live sessions present: closing current deselects (no auto-switch, no new session, no quit).
     let mut app = test_app(false);
     let cur = app.views[TEST_SESSION].info.clone();
     let mut newer = bg_session("ses_new", "newer", SessionStatus::Idle, 0);
@@ -4132,46 +4199,41 @@ fn close_current_goes_to_first_live_session_or_exits() {
             .values()
             .any(|p| matches!(p, Pending::Closed { .. }))
     );
-    assert_eq!(app.current.as_deref(), Some("ses_old"));
-    assert!(
-        app.pending
-            .values()
-            .any(|p| matches!(p, Pending::Attach { sid, fg: true } if sid == "ses_old"))
-    );
+    assert!(app.current.is_none());
     assert!(!app.views.contains_key(TEST_SESSION));
     assert!(
         !app.pending
             .values()
             .any(|p| matches!(p, Pending::Created { .. }))
     );
-    assert!(!app.quit_after_close);
+    assert!(!app.quit);
 
-    // Nothing else live: exit after the backend confirmed the close; the exit screen still
-    // shows how to resume the closed session.
+    // Last session: deselects and stays running after Close confirms (never auto-quits).
     let mut app = test_app(false);
     app.live = vec![cur.clone()];
     type_text(&mut app, "/close");
     enter(&mut app);
-    assert!(!app.quit, "waits for the Close response");
+    assert!(app.current.is_none());
+    assert!(!app.quit);
     respond(&mut app, |p| matches!(p, Pending::Closed { .. }), json!({}));
-    assert!(app.quit);
-    assert!(app.epilogue().is_some_and(|t| t.contains(TEST_SESSION)));
+    assert!(!app.quit);
+    assert!(app.current.is_none());
 
-    // A failed close or a dropped connection exits as well.
+    // A failed close or a dropped connection does not quit either.
     let mut app = test_app(false);
     app.run_command("close", "");
     fail_pending(&mut app, |p| matches!(p, Pending::Closed { .. }), "boom");
-    assert!(app.quit);
+    assert!(!app.quit && app.current.is_none());
     let mut app = test_app(false);
     app.run_command("close", "");
     app.on_net(crate::net::NetEvent::Disconnected("gone".into()));
-    assert!(app.quit);
+    assert!(!app.quit && app.current.is_none());
 
-    // Session already gone on the server: exit right away.
+    // Session already gone on the server: deselects right away without Close request.
     let mut app = test_app(false);
     app.views.get_mut(TEST_SESSION).unwrap().closed = true;
     app.run_command("close", "");
-    assert!(app.quit);
+    assert!(app.current.is_none() && !app.quit);
     assert!(
         !app.pending
             .values()
@@ -4272,7 +4334,7 @@ fn split_tile_commands_act_on_that_session() {
     assert!(!app.views.contains_key("ses_bg"));
     assert_eq!(app.current.as_deref(), Some(TEST_SESSION));
     assert_eq!(app.mode, Mode::Watch);
-    assert!(!app.quit_after_close);
+    assert!(!app.quit);
 }
 
 /// An app whose live sessions all have todo lists of different shapes.
@@ -4477,12 +4539,20 @@ fn queue_event_shows_messages_from_other_sessions() {
     assert!(app.views[TEST_SESSION].queued.is_empty());
 }
 
-/// A session with the newest 40 of 120 messages loaded and more history before them.
-/// Returns the app with the 80 older messages and the 40 newest ones.
-fn history_app() -> (App, Vec<Message>, Vec<Message>) {
+fn history_app_with_count(
+    old_pairs: usize,
+    newest_pairs: usize,
+) -> (App, Vec<Message>, Vec<Message>) {
     let mut app = test_app(false);
-    let all = long_transcript("h", 60);
-    let (old, newest) = all.split_at(80);
+    let all = long_transcript("h", old_pairs + newest_pairs);
+    let old_count = old_pairs * 2;
+    let total = all.len() as u64;
+    let (old, newest) = all.split_at(old_count);
+    let metas: Vec<_> = old
+        .iter()
+        .enumerate()
+        .map(|(i, m)| crate::util::compute_layout_meta(i as u64, m))
+        .collect();
     let inf = app.views[TEST_SESSION].info.clone();
     app.views
         .get_mut(TEST_SESSION)
@@ -4490,7 +4560,10 @@ fn history_app() -> (App, Vec<Message>, Vec<Message>) {
         .load_snapshot(SessionSnapshot {
             info: inf,
             messages: newest.to_vec(),
-            more_before: true,
+            more_before: !old.is_empty(),
+            total_messages: total,
+            start_seq: old_count as u64,
+            layout_metas: metas,
             pending_permissions: vec![],
             pending_questions: vec![],
             queued: vec![],
@@ -4498,17 +4571,23 @@ fn history_app() -> (App, Vec<Message>, Vec<Message>) {
     (app, old.to_vec(), newest.to_vec())
 }
 
-/// The request id and `before` cursor of the pending older-page request, if any.
-fn older_request(app: &App) -> Option<(u64, String)> {
+/// A session with the newest 40 of 120 messages loaded and placeholders before them.
+fn history_app() -> (App, Vec<Message>, Vec<Message>) {
+    history_app_with_count(40, 20)
+}
+
+/// The request id and `[start_seq, end_seq)` of the pending range request, if any.
+fn range_request(app: &App) -> Option<(u64, usize, usize)> {
     app.pending.iter().find_map(|(id, p)| match p {
-        crate::app::Pending::Older { before, .. } => Some((*id, before.clone())),
+        crate::app::Pending::MessagesRange {
+            start_seq, end_seq, ..
+        } => Some((*id, *start_seq, *end_seq)),
         _ => None,
     })
 }
 
-/// Scrolls to the top of the transcript and asks the app to load older messages.
+/// Scrolls to the top of the transcript and asks the app to load missing visible ranges.
 fn scroll_to_top_and_load_older(app: &mut App) {
-    // Scrolling needs the laid out transcript.
     render(app, 100, 30);
     app.views
         .get_mut(TEST_SESSION)
@@ -4519,7 +4598,7 @@ fn scroll_to_top_and_load_older(app: &mut App) {
     app.load_older();
 }
 
-fn respond_to_older(app: &mut App, id: u64, result: serde_json::Value) {
+fn respond_to_range(app: &mut App, id: u64, result: serde_json::Value) {
     app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
         id,
         ok: true,
@@ -4530,96 +4609,98 @@ fn respond_to_older(app: &mut App, id: u64, result: serde_json::Value) {
 }
 
 #[test]
-fn history_page_is_requested_once_when_scrolled_to_the_top() {
+fn history_range_is_requested_once_when_scrolled_to_placeholders() {
     use crate::app::Pending;
     let (mut app, ..) = history_app();
     render(&mut app, 100, 30);
     app.load_older();
     assert!(
-        older_request(&app).is_none(),
+        range_request(&app).is_none(),
         "at the bottom nothing is requested"
     );
 
-    // Scrolled to the top: the page before the first loaded message is requested once.
+    // Scrolled to the top: the placeholder range [0, 80) is requested once.
     scroll_to_top_and_load_older(&mut app);
-    let (_, before) = older_request(&app).expect("older page requested");
-    assert_eq!(before, "hu40");
+    let (_, start_seq, end_seq) = range_request(&app).expect("range requested");
+    assert_eq!((start_seq, end_seq), (0, 80));
     app.load_older();
     assert_eq!(
         app.pending
             .values()
-            .filter(|p| matches!(p, Pending::Older { .. }))
+            .filter(|p| matches!(p, Pending::MessagesRange { .. }))
             .count(),
         1
     );
 }
 
 #[test]
-fn history_page_keeps_the_screen_and_the_next_one_needs_another_scroll() {
-    let (mut app, old, _) = history_app();
+fn history_range_materializes_slots_and_preserves_anchor() {
+    let (mut app, old, _) = history_app_with_count(100, 20);
     let sid = TEST_SESSION;
     scroll_to_top_and_load_older(&mut app);
-    let (id, _) = older_request(&app).expect("older page requested");
+    let (id, start_seq, end_seq) = range_request(&app).expect("range requested");
+    assert_eq!((start_seq, end_seq), (0, 100));
 
-    // Scrollbar column excluded: its thumb moves when content is added above.
-    let shown = |app: &mut App| {
-        render(app, 100, 30)
-            .1
-            .lines()
-            .filter(|l| l.contains("h question") || l.contains("h answer"))
-            .map(|l| l.trim_end().trim_end_matches(['│', '┃']).to_string())
-            .collect::<Vec<_>>()
-    };
-    let before_screen = shown(&mut app);
-    assert!(
-        before_screen.iter().any(|l| l.contains("h question 40")),
-        "{before_screen:?}"
-    );
-    respond_to_older(
+    respond_to_range(
         &mut app,
         id,
-        json!({ "messages": old[40..].to_vec(), "more_before": true }),
+        json!({
+            "messages": old[0..100].to_vec(),
+            "more_before": false,
+            "start_seq": 0,
+            "end_seq": 100,
+        }),
     );
-    assert_eq!(app.views[sid].messages.len(), 80);
-    assert_eq!(app.views[sid].messages[0].id, "hu20");
+    assert_eq!(app.views[sid].slots.len(), 240);
+    assert_eq!(app.views[sid].resident_count(), 140);
+    assert_eq!(app.views[sid].slots[0].id(), "hu0");
+    assert!(!app.views[sid].slots[100].is_materialized());
 
-    // The same content stays on screen; no new request until scrolled up again.
-    assert_eq!(shown(&mut app), before_screen);
+    // Rendering materializes the top and leaves no pending range while looking at 0..100.
+    let (_, s) = render(&mut app, 100, 30);
+    assert!(s.contains("h question 0"), "{s}");
     app.load_older();
-    assert!(older_request(&app).is_none());
-    scroll_to_top_and_load_older(&mut app);
-    let (_, before) = older_request(&app).expect("next page requested");
-    assert_eq!(before, "hu20");
+    assert!(range_request(&app).is_none());
 }
 
 #[test]
-fn history_page_answered_after_a_reset_is_dropped() {
+fn history_range_answered_after_a_reset_is_dropped() {
     let (mut app, old, newest) = history_app();
     let sid = TEST_SESSION;
     scroll_to_top_and_load_older(&mut app);
-    let (id, _) = older_request(&app).expect("older page requested");
+    let (id, ..) = range_request(&app).expect("range requested");
 
     // A reset in between makes the answer stale: it is dropped.
+    let total = newest.len() as u64;
     let v = app.views.get_mut(sid).unwrap();
     v.apply(SessionEvent::Reset {
         messages: newest,
-        more_before: true,
+        more_before: false,
+        total_messages: total,
+        start_seq: 0,
+        layout_metas: vec![],
     });
-    respond_to_older(
+    respond_to_range(
         &mut app,
         id,
-        json!({ "messages": old[..40].to_vec(), "more_before": false }),
+        json!({
+            "messages": old[..40].to_vec(),
+            "more_before": false,
+            "start_seq": 0,
+            "end_seq": 40,
+        }),
     );
-    assert_eq!(app.views[sid].messages.len(), 40);
+    assert_eq!(app.views[sid].slots.len(), 40);
+    assert_eq!(app.views[sid].resident_count(), 40);
 }
 
 #[test]
-fn history_page_error_stops_further_requests() {
+fn history_range_error_halts_further_requests() {
     let (mut app, ..) = history_app();
     scroll_to_top_and_load_older(&mut app);
-    let (id, _) = older_request(&app).expect("older page requested");
+    let (id, ..) = range_request(&app).expect("range requested");
 
-    // An error stops further requests (no retry loop).
+    // An error halts further requests until next snapshot/reset (no retry loop).
     app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
         id,
         ok: false,
@@ -4629,8 +4710,8 @@ fn history_page_error_stops_further_requests() {
     }));
     render(&mut app, 100, 30);
     app.load_older();
-    assert!(older_request(&app).is_none());
-    assert!(!app.views[TEST_SESSION].more_before);
+    assert!(range_request(&app).is_none());
+    assert!(app.views[TEST_SESSION].range_halted);
 }
 
 const EDITOR_TEXT: &str = "hello brave new world";
@@ -4754,12 +4835,17 @@ fn row_of(screen: &str, needle: &str) -> usize {
 
 fn long_session_app(pairs: usize) -> App {
     let mut app = test_app(false);
+    let msgs = long_transcript("a", pairs);
+    let total = msgs.len() as u64;
     app.views
         .get_mut(TEST_SESSION)
         .unwrap()
         .apply(SessionEvent::Reset {
             more_before: false,
-            messages: long_transcript("a", pairs),
+            messages: msgs,
+            total_messages: total,
+            start_seq: 0,
+            layout_metas: vec![],
         });
     app
 }
@@ -5196,18 +5282,19 @@ fn malformed_responses_toast_errors_without_fallback() {
             .any(|t| t.text.contains("Malformed continue"))
     );
 
-    // Malformed Older response must not clear more_before.
+    // Malformed MessagesRange response clears range_pending and preserves more_before.
     app.toasts.items.clear();
     let v = app.views.get_mut(TEST_SESSION).unwrap();
     v.more_before = true;
-    v.older_pending = true;
     let hist_gen = v.history_gen;
+    v.range_pending = Some((hist_gen, 0, 10));
     app.pending.insert(
         2,
-        Pending::Older {
+        Pending::MessagesRange {
             sid: TEST_SESSION.into(),
             generation: hist_gen,
-            before: "m1".into(),
+            start_seq: 0,
+            end_seq: 10,
         },
     );
     app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
@@ -5218,14 +5305,13 @@ fn malformed_responses_toast_errors_without_fallback() {
         code: None,
     }));
     let v = &app.views[TEST_SESSION];
-    assert!(v.more_before && !v.older_pending);
+    assert!(v.more_before && v.range_pending.is_none());
     assert!(
         app.toasts
             .items
             .iter()
             .any(|t| t.text.contains("Malformed history page"))
     );
-
     // Malformed ConfigMcp and Text responses toast errors and do not open empty dialog.
     app.toasts.items.clear();
     app.pending.insert(3, Pending::ConfigMcp);
@@ -6100,10 +6186,15 @@ fn tiny_terminal_bounds_safety_across_all_views_and_overlays() {
     let bg2 = bg_session("ses_t2", "worker-2", SessionStatus::WaitingPermission, 0);
     for inf in [&bg1, &bg2] {
         let mut v = SessionView::new(inf.clone(), false);
+        let msgs = transcript(true);
+        let total = msgs.len() as u64;
         v.load_snapshot(SessionSnapshot {
             info: inf.clone(),
-            messages: transcript(true),
+            messages: msgs,
             more_before: false,
+            total_messages: total,
+            start_seq: 0,
+            layout_metas: vec![],
             pending_permissions: vec![],
             pending_questions: vec![],
             queued: vec![],
@@ -6185,6 +6276,9 @@ fn split_view_border_priority_root_color_and_closed_history_root() {
             info: inf.clone(),
             messages: vec![],
             more_before: false,
+            total_messages: 0,
+            start_seq: 0,
+            layout_metas: vec![],
             pending_permissions: vec![],
             pending_questions: vec![],
             queued: vec![],
@@ -6232,10 +6326,15 @@ fn focused_tile_mouse_click_and_tile_slash_and_shell_commands() {
     app.mode = Mode::Watch;
     let bg = bg_session("ses_tile", "tile-worker", SessionStatus::Idle, 0);
     let mut v = SessionView::new(bg.clone(), false);
+    let msgs = transcript(false);
+    let total = msgs.len() as u64;
     v.load_snapshot(SessionSnapshot {
         info: bg.clone(),
-        messages: transcript(false),
+        messages: msgs,
         more_before: false,
+        total_messages: total,
+        start_seq: 0,
+        layout_metas: vec![],
         pending_permissions: vec![],
         pending_questions: vec![],
         queued: vec![],
@@ -6943,10 +7042,15 @@ fn watch_mode_autocomplete_and_shell_mode() {
     bg2.cwd = "/repo/worker2".into();
     for inf in [&bg1, &bg2] {
         let mut v = SessionView::new(inf.clone(), false);
+        let msgs = transcript(false);
+        let total = msgs.len() as u64;
         v.load_snapshot(SessionSnapshot {
             info: inf.clone(),
-            messages: transcript(false),
+            messages: msgs,
             more_before: false,
+            total_messages: total,
+            start_seq: 0,
+            layout_metas: vec![],
             pending_permissions: vec![],
             pending_questions: vec![],
             queued: vec![],
@@ -7978,4 +8082,199 @@ fn shell_arg_complete_shell_cache_accept_flag_suppression_and_listdirs_fallback(
         "stale dirs_inflight: {:?}",
         app.dirs_inflight
     );
+}
+
+#[test]
+fn empty_startup_welcome_draft_config_and_lazy_create() {
+    use crate::app::Pending;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut app = App::new(Client::new(tx), TEST_CWD.into(), InitPlan::default());
+    app.on_net(crate::net::NetEvent::Connected);
+    // Empty startup: no CreateSession sent on connect, current stays None.
+    let frames = drain_requests(&mut rx);
+    assert!(
+        !frames
+            .iter()
+            .any(|f| matches!(f.req, Request::CreateSession { .. })),
+        "no eager CreateSession on connect"
+    );
+    assert!(app.current.is_none());
+
+    // Provide config and edit draft agent / model / variant while current == None.
+    respond(
+        &mut app,
+        |p| matches!(p, Pending::Config { .. }),
+        json!({
+            "config": {
+                "agents": [{ "name": "plan", "description": "Planner", "model": null, "creatable": true, "can_spawn": false, "color": null }],
+                "default_agent": "plan",
+                "models": [{ "provider": "dgn", "provider_name": "DGN", "id": "opus", "name": "Opus", "context": 100_000, "output": 0, "images": true, "reasoning": true, "variants": ["low", "high"] }],
+                "commands": [],
+                "mcp": [],
+                "tui": null,
+                "warnings": []
+            }
+        }),
+    );
+    type_text(&mut app, "/agent plan");
+    press(&mut app, KeyCode::Enter);
+    type_text(&mut app, "/model opus");
+    press(&mut app, KeyCode::Enter);
+    type_text(&mut app, "/variant high");
+    press(&mut app, KeyCode::Enter);
+    assert!(app.current.is_none());
+
+    let (_, s) = render(&mut app, 110, 30);
+    assert!(s.contains("Switch Backend…"), "{s}");
+    assert!(s.contains("Plan · Opus DGN · high"), "{s}");
+    assert!(!app.switch_backend_rects.is_empty());
+
+    // Submitting first prompt lazily creates session with draft config.
+    type_text(&mut app, "hello draft");
+    press(&mut app, KeyCode::Enter);
+    let frames = drain_requests(&mut rx);
+    assert!(frames.iter().any(|f| matches!(
+        &f.req,
+        Request::CreateSession { agent, model: Some(m), .. }
+            if agent.as_deref() == Some("plan") && m.model == "opus" && m.variant.as_deref() == Some("high")
+    )));
+}
+
+#[test]
+fn continue_without_history_warns_and_stays_empty() {
+    use crate::app::Pending;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut app = App::new(
+        Client::new(tx),
+        TEST_CWD.into(),
+        InitPlan {
+            continue_last: true,
+            ..Default::default()
+        },
+    );
+    app.on_net(crate::net::NetEvent::Connected);
+    let _ = drain_requests(&mut rx);
+    respond(
+        &mut app,
+        |p| matches!(p, Pending::Continue),
+        json!({ "sessions": [] }),
+    );
+    assert!(app.current.is_none());
+    assert!(
+        !app.pending
+            .values()
+            .any(|p| matches!(p, Pending::Created { .. }))
+    );
+    assert!(
+        app.toasts
+            .items
+            .iter()
+            .any(|t| t.text.contains("No previous session"))
+    );
+}
+
+#[test]
+fn retry_now_banner_click_sends_retry_now_request() {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let (mut app, mut rx) = test_app_with_requests(false);
+    set_status(&mut app, TEST_SESSION, retrying());
+    let (term, s) = render(&mut app, 100, 30);
+    assert!(s.contains("↻ retry now"), "{s}");
+    let y = row_of(&s, "↻ retry now") as u16;
+    let x = find_col(&term, y, "↻").unwrap();
+    app.screen = ratatui::layout::Rect::new(0, 0, 100, 30);
+    let _ = drain_requests(&mut rx);
+    send_mouse(&mut app, MouseEventKind::Down(MouseButton::Left), x + 1, y);
+    send_mouse(&mut app, MouseEventKind::Up(MouseButton::Left), x + 1, y);
+    assert!(
+        drain_requests(&mut rx).iter().any(
+            |f| matches!(&f.req, Request::RetryNow { session_id } if session_id == TEST_SESSION)
+        )
+    );
+}
+
+#[test]
+fn watch_direct_parent_filter_pill_cycles_and_filters_tiles() {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let mut app = test_app(false);
+    app.mode = Mode::Watch;
+    let mut parent = bg_session("ses_p", "root-agent", SessionStatus::Idle, 0);
+    parent.created_at = 1;
+    let mut child_direct = bg_session("ses_c1", "sub-direct", SessionStatus::Idle, 0);
+    child_direct.parent = Some("ses_p".into());
+    child_direct.created_at = 2;
+    let mut grandchild = bg_session("ses_gc", "sub-grandchild", SessionStatus::Idle, 0);
+    grandchild.parent = Some("ses_c1".into());
+    grandchild.created_at = 3;
+    app.live = vec![parent, child_direct, grandchild];
+    for s in &app.live {
+        app.views
+            .insert(s.id.clone(), SessionView::new(s.clone(), false));
+    }
+
+    let (_, s0) = render(&mut app, 120, 30);
+    assert!(s0.contains(" All "), "{s0}");
+    assert_eq!(app.tile_ids(), vec!["ses_p", "ses_c1", "ses_gc"]);
+    let pill = app.watch.filter_pill_rect.expect("filter pill rect");
+
+    // Click pill: All -> User-created (only ses_p).
+    send_mouse(
+        &mut app,
+        MouseEventKind::Down(MouseButton::Left),
+        pill.x + 1,
+        pill.y,
+    );
+    let (_, s1) = render(&mut app, 120, 30);
+    assert!(s1.contains(" User-created "), "{s1}");
+    assert_eq!(app.tile_ids(), vec!["ses_p"]);
+
+    // Press `f` unfocused: User-created -> By root-agent (only direct child ses_c1, not grandchild).
+    press(&mut app, KeyCode::Char('f'));
+    let (_, s2) = render(&mut app, 120, 30);
+    assert!(s2.contains(" By root-agent "), "{s2}");
+    assert_eq!(app.tile_ids(), vec!["ses_c1"]);
+}
+
+#[test]
+fn stash_dialog_and_backend_switch_reset_state() {
+    let (mut app, mut rx) = test_app_with_requests(false);
+    let info = app.views[TEST_SESSION].info.clone();
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::GroupsChanged {
+        groups: vec![StashGroup {
+            id: "grp_1".into(),
+            name: "work".into(),
+            locked: false,
+            created_at: 10,
+            updated_at: 20,
+            members: vec![StashMember {
+                session_id: TEST_SESSION.into(),
+                position: 0,
+                info,
+            }],
+        }],
+    }));
+    app.run_command("stashed", "");
+    let (_, s) = render(&mut app, 110, 30);
+    assert!(s.contains("Stashed groups") && s.contains("work"), "{s}");
+    press(&mut app, KeyCode::Char('R'));
+    assert!(
+        drain_requests(&mut rx)
+            .iter()
+            .any(|f| matches!(&f.req, Request::RestoreGroup { group_id } if group_id == "grp_1"))
+    );
+    press(&mut app, KeyCode::Esc);
+    assert!(app.dialog.is_none());
+
+    // Backend switch clears current/views/groups and disconnects cleanly.
+    app.switch_backend(
+        ref_client::BackendTarget::Explicit {
+            url: "ws://127.0.0.1:9999".into(),
+            token: None,
+        },
+        crate::prefs::BackendSource::Temporary,
+    );
+    assert!(app.current.is_none());
+    assert!(app.views.is_empty());
+    assert!(app.groups.is_empty());
+    assert!(!app.connected);
 }

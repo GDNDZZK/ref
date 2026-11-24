@@ -118,6 +118,8 @@ async fn frame_zero_tells_the_page_version_cwd_and_mock() {
         std::env::current_dir().unwrap().to_str().unwrap()
     );
     assert_eq!(channel.info["mock"], false);
+    assert_eq!(channel.info["cli_server"], true);
+    assert_eq!(channel.info["channel_control"], true);
 }
 
 #[tokio::test]
@@ -265,12 +267,58 @@ async fn unreachable_backend_closes_the_tab_with_a_fixed_reason() {
     let env = Env::new("down");
     let dead = format!("ws://{LOOPBACK}:{}/", free_port());
     let web = env.start(&["--server", &dead]).await;
-    // The backend is contacted after the key check, so frame 0 never comes.
-    let closed = Channel::sign_in(web.ws().await, &web.key).await.err();
+    // The backend is contacted after connect_upstream, so frame 0 succeeds first.
+    let mut chan = Channel::sign_in_only(web.ws().await, &web.key)
+        .await
+        .unwrap();
+    let closed = chan.connect_upstream("cli_default", None, None).await.err();
+    assert!(chan.upstream_error.is_some());
     // The address of the backend is in the log, not in the close reason.
     assert_eq!(closed, Some((1011, "backend unavailable".to_string())));
 }
 
+#[tokio::test]
+async fn explicit_control_mode_connects_without_cli_server_or_local_instances() {
+    let env = Env::new("ctrl-explicit");
+    let upstream = fake_upstream().await;
+    let url = format!("ws://{LOOPBACK}:{}/", upstream.port);
+    let web = env.start(&[]).await;
+    let mut tab = Channel::sign_in_only(web.ws().await, &web.key)
+        .await
+        .unwrap();
+    assert_eq!(tab.info["mock"], false);
+    assert_eq!(tab.info["cli_server"], false);
+    assert_eq!(tab.info["channel_control"], true);
+    assert!(!env.state_dir().join("instances").exists());
+
+    tab.connect_upstream("explicit", Some(&url), Some(BACKEND_TOKEN))
+        .await
+        .unwrap();
+    tab.send_text("via-explicit").await;
+    assert_eq!(tab.next_text().await, "via-explicit");
+    let query = upstream.handshake_query.borrow().clone().unwrap();
+    assert_eq!(query, format!("token={BACKEND_TOKEN}"));
+    assert!(
+        !env.state_dir().join("instances").exists(),
+        "explicit mode must not scan or spawn local ref-server"
+    );
+}
+
+#[tokio::test]
+async fn invalid_explicit_url_in_control_frame_reports_error_and_closes() {
+    let env = Env::new("ctrl-bad-url");
+    let web = env.start(&[]).await;
+    let mut tab = Channel::sign_in_only(web.ws().await, &web.key)
+        .await
+        .unwrap();
+    let closed = tab
+        .connect_upstream("explicit", Some("http://127.0.0.1:1234"), None)
+        .await
+        .unwrap_err();
+    assert_eq!(closed, (1011, "backend unavailable".to_string()));
+    let err = tab.upstream_error.as_deref().unwrap();
+    assert!(err.contains("ws:// or wss://"), "{err}");
+}
 #[tokio::test]
 async fn a_real_backend_accepts_a_hello_without_token() {
     let env = Env::new("real");
