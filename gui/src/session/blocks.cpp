@@ -347,7 +347,7 @@ QString kindName(Block::Kind kind)
 
 bool isEnded(const MessageHeader& header)
 {
-	return header.timeEnd.has_value() || header.error.has_value();
+	return header.role == proto::Role::User || header.timeEnd.has_value() || header.error.has_value();
 }
 
 bool isPartStreaming(const MessageHeader& header, const proto::Part& part, bool isLast)

@@ -291,46 +291,51 @@ Item {
 			onActivated: Commands.run(CommandId.floating)
 		}
 
-		Rectangle {
-			id: ballFace
+		Item {
+			id: ballRoot
 			anchors.fill: parent
-			radius: width / 2
-			color: ballHover.hovered ? Theme.surfaceHover : Theme.surface
-			border.color: root.aggregateInfo.hasPermission ? Theme.warningBorder : (root.aggregateInfo.hasError ? Theme.danger : Theme.border)
-			border.width: root.aggregateInfo.hasPermission || root.aggregateInfo.hasError ? 2 : 1
-			scale: ballLeftTap.pressed && !ballDrag.active ? 0.94 : 1
 
-			Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
-			Behavior on scale { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+			Rectangle {
+				id: ballFace
+				anchors.fill: parent
+				radius: width / 2
+				color: ballHover.hovered ? Theme.surfaceHover : Theme.surface
+				border.color: root.aggregateInfo.hasPermission ? Theme.warningBorder : (root.aggregateInfo.hasError ? Theme.danger : Theme.border)
+				border.width: root.aggregateInfo.hasPermission || root.aggregateInfo.hasError ? 2 : 1
+				scale: ballLeftTap.pressed && !ballDrag.active ? 0.94 : 1
 
-			Image {
-				anchors.centerIn: parent
-				anchors.verticalCenterOffset: root.aggregateInfo.count > 0 ? root.ballIconCountOffset : 0
-				width: root.ballIconSize
-				height: root.ballIconSize
-				sourceSize: Qt.size(root.ballIconSourceSize, root.ballIconSourceSize)
-				source: "qrc:/app/ref-small.svg"
-				smooth: true
-				Accessible.role: Accessible.Graphic
-				Accessible.name: "ref"
-			}
+				Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+				Behavior on scale { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 
-			// Embedded running session count.
-			Text {
-				textFormat: Text.PlainText
-				visible: root.aggregateInfo.count > 0
-				anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: root.ballCountBottomMargin }
-				text: String(root.aggregateInfo.count)
-				color: Theme.textMuted
-				font { pixelSize: Theme.microFontSize; bold: true }
-			}
+				Image {
+					anchors.centerIn: parent
+					anchors.verticalCenterOffset: root.aggregateInfo.count > 0 ? root.ballIconCountOffset : 0
+					width: root.ballIconSize
+					height: root.ballIconSize
+					sourceSize: Qt.size(root.ballIconSourceSize, root.ballIconSourceSize)
+					source: "qrc:/app/ref-small.svg"
+					smooth: true
+					Accessible.role: Accessible.Graphic
+					Accessible.name: "ref"
+				}
 
-			// Breathing status dot badge.
-			SessionDot {
-				anchors { right: parent.right; top: parent.top; rightMargin: root.ballDotMargin; topMargin: root.ballDotMargin }
-				activity: root.aggregateInfo.activity
-				hasError: root.aggregateInfo.hasError
-				visible: root.aggregateInfo.count > 0
+				// Embedded running session count.
+				Text {
+					textFormat: Text.PlainText
+					visible: root.aggregateInfo.count > 0
+					anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: root.ballCountBottomMargin }
+					text: String(root.aggregateInfo.count)
+					color: Theme.textMuted
+					font { pixelSize: Theme.microFontSize; bold: true }
+				}
+
+				// Breathing status dot badge.
+				SessionDot {
+					anchors { right: parent.right; top: parent.top; rightMargin: root.ballDotMargin; topMargin: root.ballDotMargin }
+					activity: root.aggregateInfo.activity
+					hasError: root.aggregateInfo.hasError
+					visible: root.aggregateInfo.count > 0
+				}
 			}
 
 			HoverHandler {
@@ -352,6 +357,7 @@ Item {
 				id: ballDrag
 				target: null
 				dragThreshold: root.dragThreshold
+				grabPermissions: PointerHandler.CanTakeOverFromAnything
 				onActiveChanged: {
 					if (active) {
 						hoverOpenTimer.stop()
@@ -365,11 +371,14 @@ Item {
 			TapHandler {
 				id: ballLeftTap
 				acceptedButtons: Qt.LeftButton
+				gesturePolicy: TapHandler.ReleaseWithinBounds
+				grabPermissions: PointerHandler.CanTakeOverFromAnything | PointerHandler.ApprovesTakeOverByHandlersOfDifferentType
 				onTapped: root.expandPanel()
 			}
 
 			TapHandler {
 				acceptedButtons: Qt.RightButton
+				gesturePolicy: TapHandler.ReleaseWithinBounds
 				onTapped: point => ballMenu.openAt(point.position)
 			}
 

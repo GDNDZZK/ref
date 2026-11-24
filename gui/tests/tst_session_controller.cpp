@@ -703,7 +703,7 @@ void TestSessionController::rangeFetchSurfacesErrorAndRetries()
 			++rangeAttempts;
 			if(rangeAttempts == 1)
 			{
-				f.fake.fail(request, u"internal"_s, u"range read failed"_s);
+				f.fake.fail(request, u"range read failed"_s, u"internal"_s);
 				return;
 			}
 			const quint64 s = static_cast<quint64>(request.value(u"start_seq"_s).toInteger());

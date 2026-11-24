@@ -785,7 +785,7 @@ void TestWorkspace::firstConnectionAsksForTheListsBeforeAttaching()
 	{
 		ops.append(request.value(u"op"_s).toString());
 	}
-	const QStringList expected{u"hello"_s, u"list_sessions"_s, u"list_history"_s, u"get_config"_s, u"mcp_status"_s, u"attach"_s};
+	const QStringList expected{u"hello"_s, u"list_sessions"_s, u"list_history"_s, u"get_config"_s, u"mcp_status"_s, u"list_groups"_s, u"attach"_s};
 	QCOMPARE(ops.mid(0, expected.size()), expected);
 }
 

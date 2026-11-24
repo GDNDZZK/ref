@@ -2137,12 +2137,13 @@ void TestMainWindow::splitJumpToEndResizeBlurFadeAndSidebarDragWork()
 	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, jPos);
 	QTRY_VERIFY(chat->property("following").toBool());
 	QVERIFY(f.workspace->focusedTileId().isEmpty());
-	// 3) Window resize in split mode triggers blur-fade transition and settles cleanly.
+	// 3) Window resize in split mode updates layout and settles cleanly without blur/fade.
 	window->setWidth(window->width() + 140);
 	QTRY_VERIFY(tile->property("resizingLayout").toBool());
-	QTRY_VERIFY(pane->property("opacity").toReal() < 0.99);
+	QVERIFY(qFuzzyCompare(pane->property("opacity").toReal(), 1.0));
+	QVERIFY(!pane->property("resizeBlurAmount").isValid());
 	QTRY_VERIFY(!tile->property("resizingLayout").toBool() && qFuzzyCompare(pane->property("opacity").toReal(), 1.0));
-	QVERIFY2(warningSpy.isEmpty(), "Sidebar drag, jumpToEnd, or split resize blur-fade emitted QML warnings");
+	QVERIFY2(warningSpy.isEmpty(), "Sidebar drag, jumpToEnd, or split resize emitted QML warnings");
 }
 
 void TestMainWindow::sidebarSectionsCollapseExpandAndResizeWithoutOscillation()
@@ -3331,7 +3332,7 @@ void TestMainWindow::tileEnlargeKeepsResizingLayoutUntilWidthAnimationSettles()
 	QTRY_VERIFY(tileB->property("resizingLayout").toBool());
 	QTest::qWait(180);
 	QVERIFY(tileB->property("resizingLayout").toBool());
-	QVERIFY(pane->property("opacity").toReal() < 0.99);
+	QVERIFY(qFuzzyCompare(pane->property("opacity").toReal(), 1.0));
 
 	QTRY_VERIFY_WITH_TIMEOUT(!tileB->property("resizingLayout").toBool(), 2000);
 	QVERIFY(qFuzzyCompare(tileB->property("settledLayoutWidth").toReal(), tileB->property("paneTargetWidth").toReal()));
@@ -4038,32 +4039,32 @@ void TestMainWindow::splitViewSidebarToggleBlursFadesAndFreezesLayoutWidth()
 	const qreal initialSettledWidth = tile->property("settledLayoutWidth").toReal();
 	QVERIFY(initialSettledWidth > 100.0);
 
-	// Collapsing the sidebar triggers blur/fade, freezes layoutWidth, then settles to wider width.
+	// Collapsing the sidebar keeps opacity 1.0 (no blur/fade), freezes layoutWidth, then settles to wider width.
 	f.workspace->commands()->run(u"sidebar"_s);
 	QTRY_VERIFY(tile->property("resizingLayout").toBool());
-	QTRY_VERIFY(pane->property("opacity").toReal() < 0.99);
-	QTRY_VERIFY(pane->property("resizeBlurAmount").toReal() > 0.0);
+	QVERIFY(qFuzzyCompare(pane->property("opacity").toReal(), 1.0));
+	QVERIFY(!pane->property("resizeBlurAmount").isValid());
 	QCOMPARE(pane->property("layoutWidth").toReal(), initialSettledWidth);
 
 	QTRY_VERIFY_WITH_TIMEOUT(!tile->property("resizingLayout").toBool(), 2000);
 	const qreal collapsedSettledWidth = tile->property("settledLayoutWidth").toReal();
 	QVERIFY(collapsedSettledWidth > initialSettledWidth + 50.0);
 	QVERIFY(qFuzzyCompare(collapsedSettledWidth, tile->property("paneTargetWidth").toReal()));
-	QTRY_VERIFY(qFuzzyCompare(pane->property("opacity").toReal(), 1.0));
-	QTRY_VERIFY(qFuzzyIsNull(pane->property("resizeBlurAmount").toReal()));
+	QVERIFY(qFuzzyCompare(pane->property("opacity").toReal(), 1.0));
+	QVERIFY(!pane->property("resizeBlurAmount").isValid());
 	QTRY_VERIFY(qFuzzyCompare(pane->property("layoutWidth").toReal(), pane->width()));
 
-	// Expanding the sidebar triggers blur/fade, freezes layoutWidth, then settles back to initial width.
+	// Expanding the sidebar keeps opacity 1.0 (no blur/fade), freezes layoutWidth, then settles back to initial width.
 	f.workspace->commands()->run(u"sidebar"_s);
 	QTRY_VERIFY(tile->property("resizingLayout").toBool());
-	QTRY_VERIFY(pane->property("opacity").toReal() < 0.99);
-	QTRY_VERIFY(pane->property("resizeBlurAmount").toReal() > 0.0);
+	QVERIFY(qFuzzyCompare(pane->property("opacity").toReal(), 1.0));
+	QVERIFY(!pane->property("resizeBlurAmount").isValid());
 	QCOMPARE(pane->property("layoutWidth").toReal(), collapsedSettledWidth);
 
 	QTRY_VERIFY_WITH_TIMEOUT(!tile->property("resizingLayout").toBool(), 2000);
 	QVERIFY(qFuzzyCompare(tile->property("settledLayoutWidth").toReal(), initialSettledWidth));
-	QTRY_VERIFY(qFuzzyCompare(pane->property("opacity").toReal(), 1.0));
-	QTRY_VERIFY(qFuzzyIsNull(pane->property("resizeBlurAmount").toReal()));
+	QVERIFY(qFuzzyCompare(pane->property("opacity").toReal(), 1.0));
+	QVERIFY(!pane->property("resizeBlurAmount").isValid());
 	QTRY_VERIFY(qFuzzyCompare(pane->property("layoutWidth").toReal(), pane->width()));
 
 	// Rapid double-toggle of sidebar in split view settles cleanly to initial width without warnings.
@@ -4071,8 +4072,8 @@ void TestMainWindow::splitViewSidebarToggleBlursFadesAndFreezesLayoutWidth()
 	f.workspace->commands()->run(u"sidebar"_s);
 	QTRY_VERIFY_WITH_TIMEOUT(!tile->property("resizingLayout").toBool(), 2000);
 	QVERIFY(qFuzzyCompare(tile->property("settledLayoutWidth").toReal(), initialSettledWidth));
-	QTRY_VERIFY(qFuzzyCompare(pane->property("opacity").toReal(), 1.0));
-	QTRY_VERIFY(qFuzzyIsNull(pane->property("resizeBlurAmount").toReal()));
+	QVERIFY(qFuzzyCompare(pane->property("opacity").toReal(), 1.0));
+	QVERIFY(!pane->property("resizeBlurAmount").isValid());
 	QVERIFY2(warningSpy.isEmpty(), "Split-view sidebar toggle transition emitted QML warnings");
 }
 
@@ -4093,23 +4094,60 @@ void TestMainWindow::backendDialogSwitchAndStatusPillActionWorkWithoutWarnings()
 	auto* window = qobject_cast<QQuickWindow*>(created.get());
 	QVERIFY(window);
 	QVERIFY(QTest::qWaitForWindowExposed(window));
+	window->requestActivate();
+	QTRY_VERIFY(window->isActive());
 
 	// Open BackendDialog via SettingsDialog "Switch backend..." button.
 	f.workspace->openDialog(u"settings"_s);
+	QQuickItem* settingsDialog = nullptr;
+	QTRY_VERIFY([&] {
+		settingsDialog = findByTypePrefix(window->contentItem(), "SettingsDialog_QMLTYPE");
+		return settingsDialog != nullptr && settingsDialog->isVisible();
+	}());
+	QQuickItem* settingsPanel = findByTypePrefix(settingsDialog, "QQuickRectangle");
+	QVERIFY(settingsPanel);
+	QTRY_VERIFY(settingsPanel->property("shown").toBool()
+	            && qFuzzyCompare(settingsPanel->scale(), 1.0)
+	            && qFuzzyCompare(settingsPanel->property("dropOffset").toReal() + 1.0, 1.0));
+	QQuickItem* scroller = findByTypePrefix(settingsDialog, "QQuickFlickable");
+	QVERIFY(scroller);
 	QQuickItem* switchBtn = nullptr;
 	QTRY_VERIFY([&] {
-		switchBtn = findItem(window->contentItem(), [](QQuickItem* item) { return item->objectName() == u"settingsSwitchBackendButton"_s; });
+		switchBtn = findItem(settingsDialog, [](QQuickItem* item) { return item->objectName() == u"settingsSwitchBackendButton"_s; });
 		return switchBtn != nullptr && switchBtn->isVisible();
 	}());
-	const QPoint switchCenter = switchBtn->mapToScene(QPointF(switchBtn->width() / 2.0, switchBtn->height() / 2.0)).toPoint();
-	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, switchCenter);
+	QQuickItem* contentItem = scroller->property("contentItem").value<QQuickItem*>();
+	QVERIFY(contentItem);
+	QTRY_VERIFY(scroller->property("contentHeight").toReal() + 1.0
+	            >= switchBtn->mapToItem(contentItem, QPointF(0.0, 0.0)).y() + switchBtn->height());
+	const QPointF inContent = switchBtn->mapToItem(contentItem, QPointF(0.0, 0.0));
+	const qreal viewH = scroller->height();
+	const qreal maxY = std::max(0.0, scroller->property("contentHeight").toReal() - viewH);
+	scroller->setProperty("contentY", std::clamp(inContent.y() - viewH / 2.0 + switchBtn->height() / 2.0, 0.0, maxY));
+	QCoreApplication::processEvents();
+	const QPointF switchCenterF = switchBtn->mapToScene(QPointF(switchBtn->width() / 2.0, switchBtn->height() / 2.0));
+	const qreal scrollerTop = scroller->mapToScene(QPointF(0.0, 0.0)).y();
+	const qreal scrollerBottom = scrollerTop + viewH;
+	QVERIFY(switchCenterF.y() > scrollerTop && switchCenterF.y() < scrollerBottom);
+	QVERIFY(switchCenterF.y() >= 0.0 && switchCenterF.y() < window->height());
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, switchCenterF.toPoint());
 	QTRY_COMPARE(f.workspace->dialog(), u"backend"_s);
 
+	QQuickItem* backendDialog = nullptr;
+	QTRY_VERIFY([&] {
+		backendDialog = findByTypePrefix(window->contentItem(), "BackendDialog_QMLTYPE");
+		return backendDialog != nullptr && backendDialog->isVisible();
+	}());
+	QQuickItem* backendPanel = findByTypePrefix(backendDialog, "QQuickRectangle");
+	QVERIFY(backendPanel);
+	QTRY_VERIFY(backendPanel->property("shown").toBool()
+	            && qFuzzyCompare(backendPanel->scale(), 1.0)
+	            && qFuzzyCompare(backendPanel->property("dropOffset").toReal() + 1.0, 1.0));
 	QQuickItem* urlField = nullptr;
 	QQuickItem* tempBtn = nullptr;
 	QTRY_VERIFY([&] {
-		urlField = findItem(window->contentItem(), [](QQuickItem* item) { return item->objectName() == u"backendUrlField"_s; });
-		tempBtn = findItem(window->contentItem(), [](QQuickItem* item) { return item->objectName() == u"backendTemporaryButton"_s; });
+		urlField = findItem(backendDialog, [](QQuickItem* item) { return item->objectName() == u"backendUrlField"_s; });
+		tempBtn = findItem(backendDialog, [](QQuickItem* item) { return item->objectName() == u"backendTemporaryButton"_s; });
 		return urlField != nullptr && tempBtn != nullptr && tempBtn->isVisible();
 	}());
 
@@ -4227,6 +4265,8 @@ void TestMainWindow::floatingBallModeTransitionsBetweenBallHoverCardAndMiniPanel
 	auto* window = qobject_cast<QQuickWindow*>(created.get());
 	QVERIFY(window);
 	QVERIFY(QTest::qWaitForWindowExposed(window));
+	window->requestActivate();
+	QTRY_VERIFY(window->isActive());
 
 	// Enter floating ball mode via topbar button.
 	QQuickItem* floatBtn = findItem(window->contentItem(), [](QQuickItem* item) { return item->objectName() == u"floatingBallButton"_s; });
@@ -4245,12 +4285,17 @@ void TestMainWindow::floatingBallModeTransitionsBetweenBallHoverCardAndMiniPanel
 	QCOMPARE(ballWin->width(), 56);
 	QCOMPARE(ballWin->height(), 56);
 	QVERIFY(QTest::qWaitForWindowExposed(ballWin));
+	ballWin->requestActivate();
+	QCoreApplication::processEvents();
 
 	// Click ball to open mini panel.
+	QTest::mouseMove(ballWin, QPoint(28, 28));
 	QTest::mouseClick(ballWin, Qt::LeftButton, Qt::NoModifier, QPoint(28, 28));
 	QTRY_VERIFY(panelWin->isVisible());
 	QTRY_VERIFY(!ballWin->isVisible());
 	QVERIFY(QTest::qWaitForWindowExposed(panelWin));
+	panelWin->requestActivate();
+	QCoreApplication::processEvents();
 
 	// Return to full window from panel button.
 	QQuickItem* returnBtn = nullptr;
@@ -4258,7 +4303,9 @@ void TestMainWindow::floatingBallModeTransitionsBetweenBallHoverCardAndMiniPanel
 		returnBtn = findItem(panelWin->contentItem(), [](QQuickItem* item) { return item->objectName() == u"floatingReturnButton"_s; });
 		return returnBtn != nullptr && returnBtn->isVisible();
 	}());
-	QTest::mouseClick(panelWin, Qt::LeftButton, Qt::NoModifier, returnBtn->mapToScene(QPointF(returnBtn->width() / 2.0, returnBtn->height() / 2.0)).toPoint());
+	const QPoint returnCenter = returnBtn->mapToScene(QPointF(returnBtn->width() / 2.0, returnBtn->height() / 2.0)).toPoint();
+	QTest::mouseMove(panelWin, returnCenter);
+	QTest::mouseClick(panelWin, Qt::LeftButton, Qt::NoModifier, returnCenter);
 	QTRY_VERIFY(window->isVisible());
 
 	QVERIFY2(warningSpy.isEmpty(), "FloatingBallWindow emitted QML warnings");
