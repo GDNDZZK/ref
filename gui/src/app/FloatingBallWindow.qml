@@ -266,6 +266,8 @@ Item {
 	Window {
 		id: ballWindow
 		objectName: "floatingBallWindow"
+		// Independent of Main window, which is hidden while floating mode is active.
+		transientParent: null
 		visible: Workspace.floatingMode && !root.panelExpanded
 		width: root.ballSize
 		height: root.ballSize
@@ -409,6 +411,8 @@ Item {
 	Window {
 		id: hoverWindow
 		objectName: "floatingHoverCard"
+		// Independent of Main window, which is hidden while floating mode is active.
+		transientParent: null
 		readonly property var placed: Workspace.floatingBallHelper.computePanelGeometry(
 			root.ballX,
 			root.ballY,
@@ -550,6 +554,8 @@ Item {
 	Window {
 		id: panelWindow
 		objectName: "floatingPanelWindow"
+		// Independent of Main window, which is hidden while floating mode is active.
+		transientParent: null
 		readonly property var placed: Workspace.floatingBallHelper.computePanelGeometry(
 			root.ballX,
 			root.ballY,
