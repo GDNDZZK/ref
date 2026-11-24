@@ -74,7 +74,7 @@ Item {
 
 		anchors.fill: parent
 		active: dialogId !== "" && host.visible
-		enabled: !retired
+		enabled: host.open && !retired
 		opacity: retired ? 0 : 1
 		scale: retired ? Motion.popScale : 1
 		sourceComponent: dialogId === "" ? null : host.componentFor(dialogId) // an id without a component is a mistake and logs

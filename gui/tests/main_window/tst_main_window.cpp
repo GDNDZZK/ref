@@ -4175,7 +4175,12 @@ void TestMainWindow::backendDialogSwitchAndStatusPillActionWorkWithoutWarnings()
 	QQuickItem* pillBtn = nullptr;
 	QTRY_VERIFY([&] {
 		pillBtn = findItem(window->contentItem(), [](QQuickItem* item) { return item->objectName() == u"statusPillActionButton"_s; });
-		return pillBtn != nullptr && pillBtn->isVisible();
+		if(pillBtn == nullptr || !pillBtn->isVisible())
+		{
+			return false;
+		}
+		QQuickItem* pill = pillBtn->parentItem();
+		return pill != nullptr && pill->isVisible() && qFuzzyCompare(pill->opacity(), 1.0);
 	}());
 	const QPoint pillCenter = pillBtn->mapToScene(QPointF(pillBtn->width() / 2.0, pillBtn->height() / 2.0)).toPoint();
 	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, pillCenter);
@@ -4276,11 +4281,18 @@ void TestMainWindow::floatingBallModeTransitionsBetweenBallHoverCardAndMiniPanel
 	QTRY_VERIFY(!window->isVisible());
 
 	QQuickWindow* ballWin = nullptr;
+	QQuickWindow* hoverWin = nullptr;
 	QQuickWindow* panelWin = nullptr;
+	QQuickItem* ballRoot = nullptr;
 	QTRY_VERIFY([&] {
 		ballWin = window->findChild<QQuickWindow*>(u"floatingBallWindow"_s);
+		hoverWin = window->findChild<QQuickWindow*>(u"floatingHoverCard"_s);
 		panelWin = window->findChild<QQuickWindow*>(u"floatingPanelWindow"_s);
-		return ballWin != nullptr && panelWin != nullptr && ballWin->isVisible();
+		ballRoot = ballWin ? findItem(ballWin->contentItem(), [](QQuickItem* item) { return item->objectName() == u"floatingBallRoot"_s; }) : nullptr;
+		return ballWin != nullptr && hoverWin != nullptr && panelWin != nullptr
+		       && ballWin->isVisible()
+		       && ballRoot != nullptr && ballRoot->isVisible()
+		       && qRound(ballRoot->width()) == 56 && qRound(ballRoot->height()) == 56;
 	}());
 	QCOMPARE(ballWin->width(), 56);
 	QCOMPARE(ballWin->height(), 56);
@@ -4288,11 +4300,13 @@ void TestMainWindow::floatingBallModeTransitionsBetweenBallHoverCardAndMiniPanel
 	ballWin->requestActivate();
 	QCoreApplication::processEvents();
 
-	// Click ball to open mini panel.
+	// Hover ball to show super-mini card, then click ball to open mini panel.
 	QTest::mouseMove(ballWin, QPoint(28, 28));
-	QTest::mouseClick(ballWin, Qt::LeftButton, Qt::NoModifier, QPoint(28, 28));
+	QTRY_VERIFY(hoverWin->isVisible());
+	QTest::mouseClick(ballWin, Qt::LeftButton, Qt::NoModifier, QPoint(28, 28), 20);
 	QTRY_VERIFY(panelWin->isVisible());
 	QTRY_VERIFY(!ballWin->isVisible());
+	QTRY_VERIFY(!hoverWin->isVisible());
 	QVERIFY(QTest::qWaitForWindowExposed(panelWin));
 	panelWin->requestActivate();
 	QCoreApplication::processEvents();
@@ -4305,7 +4319,7 @@ void TestMainWindow::floatingBallModeTransitionsBetweenBallHoverCardAndMiniPanel
 	}());
 	const QPoint returnCenter = returnBtn->mapToScene(QPointF(returnBtn->width() / 2.0, returnBtn->height() / 2.0)).toPoint();
 	QTest::mouseMove(panelWin, returnCenter);
-	QTest::mouseClick(panelWin, Qt::LeftButton, Qt::NoModifier, returnCenter);
+	QTest::mouseClick(panelWin, Qt::LeftButton, Qt::NoModifier, returnCenter, 20);
 	QTRY_VERIFY(window->isVisible());
 
 	QVERIFY2(warningSpy.isEmpty(), "FloatingBallWindow emitted QML warnings");

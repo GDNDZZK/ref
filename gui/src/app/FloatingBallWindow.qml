@@ -293,6 +293,7 @@ Item {
 
 		Item {
 			id: ballRoot
+			objectName: "floatingBallRoot"
 			anchors.fill: parent
 
 			Rectangle {
@@ -302,7 +303,7 @@ Item {
 				color: ballHover.hovered ? Theme.surfaceHover : Theme.surface
 				border.color: root.aggregateInfo.hasPermission ? Theme.warningBorder : (root.aggregateInfo.hasError ? Theme.danger : Theme.border)
 				border.width: root.aggregateInfo.hasPermission || root.aggregateInfo.hasError ? 2 : 1
-				scale: ballLeftTap.pressed && !ballDrag.active ? 0.94 : 1
+				scale: ballMouse.pressed && !ballDrag.active ? 0.94 : 1
 
 				Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 				Behavior on scale { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
@@ -368,18 +369,16 @@ Item {
 				}
 			}
 
-			TapHandler {
-				id: ballLeftTap
-				acceptedButtons: Qt.LeftButton
-				gesturePolicy: TapHandler.ReleaseWithinBounds
-				grabPermissions: PointerHandler.CanTakeOverFromAnything | PointerHandler.ApprovesTakeOverByHandlersOfDifferentType
-				onTapped: root.expandPanel()
-			}
-
-			TapHandler {
-				acceptedButtons: Qt.RightButton
-				gesturePolicy: TapHandler.ReleaseWithinBounds
-				onTapped: point => ballMenu.openAt(point.position)
+			MouseArea {
+				id: ballMouse
+				anchors.fill: parent
+				acceptedButtons: Qt.LeftButton | Qt.RightButton
+				onClicked: mouse => {
+					if (mouse.button === Qt.RightButton)
+						ballMenu.openAt(Qt.point(mouse.x, mouse.y))
+					else
+						root.expandPanel()
+				}
 			}
 
 			ContextMenu {
