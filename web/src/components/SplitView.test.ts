@@ -1,3 +1,5 @@
+import splitTileSource from './SplitTile.vue?raw'
+import splitViewSource from './SplitView.vue?raw'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { describe, expect, it, vi } from 'vitest'
@@ -241,6 +243,14 @@ describe('SplitView', () => {
       wrapper.unmount()
     } finally {
       rafSpy.mockRestore()
+    }
+  })
+
+  it('uses no blur or filter transitions on split tiles or content', () => {
+    for (const source of [splitViewSource, splitTileSource]) {
+      const styleMatch = source.match(/<style[\s\S]*<\/style>/g)?.join('\n') ?? ''
+      expect(styleMatch).not.toMatch(/\bblur\s*\(/i)
+      expect(styleMatch).not.toMatch(/(?:^|[;\s])(?:backdrop-)?filter\s*:/i)
     }
   })
 })

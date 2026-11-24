@@ -7,6 +7,7 @@ import { useNow } from '../composables/useNow.ts'
 import type { ChatSession } from '../model/chatSession.ts'
 import { formatElapsed, formatTokens, secondsUntil } from '../model/format.ts'
 import { collapseWhitespace } from '../model/oneLine.ts'
+import { useNoticesStore } from '../stores/notices.ts'
 import Icon from './Icon.vue'
 import StatusDot from './StatusDot.vue'
 import StatusTodo from './StatusTodo.vue'
@@ -20,6 +21,11 @@ const PERCENT = 100
 const { t } = useI18n()
 const now = useNow()
 
+const notices = useNoticesStore()
+
+function retryNow(): void {
+  props.session.retryNow().catch((error) => notices.pushError(error))
+}
 const activity = computed(() => props.session.activity)
 const retry = computed(() => props.session.retry)
 const elapsed = computed(() => {
@@ -92,7 +98,15 @@ const contextTitle = computed(() => {
         <span class="label shimmer accent">{{ t('status.compacting') }}</span>
       </template>
       <template v-else-if="activity === 'retrying'">
-        <Icon icon="retry-16" class="warning" />
+        <button
+          type="button"
+          class="retry-button warning"
+          :title="t('status.retryNow')"
+          :aria-label="t('status.retryNow')"
+          @click="retryNow"
+        >
+          <Icon icon="retry-16" />
+        </button>
         <span class="label warning" :title="retry?.error || undefined">{{ retryText }}</span>
       </template>
       <span v-if="elapsed && activity !== 'idle'" class="elapsed">· {{ elapsed }}</span>
@@ -151,6 +165,28 @@ const contextTitle = computed(() => {
 
 .warning {
   color: var(--warning-text);
+}
+
+.retry-button {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: -3px 0 -3px -3px;
+  border-radius: var(--radius-small);
+  transition:
+    background-color var(--motion-quick) var(--motion-ease),
+    scale var(--motion-quick) var(--motion-ease);
+}
+
+.retry-button:hover {
+  background: var(--surface-hover);
+}
+
+.retry-button:active {
+  scale: 0.94;
 }
 
 /* A highlight three characters wide sweeps over the label once per period. */
