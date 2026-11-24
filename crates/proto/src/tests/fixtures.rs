@@ -117,8 +117,23 @@ fn requests() -> Samples<ClientFrame> {
                 7,
                 Request::Messages {
                     session_id: sid(),
-                    before: "msg_user_01".into(),
+                    before: Some("msg_user_01".into()),
+                    start_seq: None,
+                    end_seq: None,
                     limit: Some(100),
+                },
+            ),
+        ),
+        (
+            "messages_range",
+            frame(
+                45,
+                Request::Messages {
+                    session_id: sid(),
+                    before: None,
+                    start_seq: Some(0),
+                    end_seq: Some(50),
+                    limit: Some(50),
                 },
             ),
         ),
@@ -457,6 +472,124 @@ fn requests() -> Samples<ClientFrame> {
                 },
             ),
         ),
+        (
+            "retry_now",
+            frame(46, Request::RetryNow { session_id: sid() }),
+        ),
+        ("list_groups", frame(47, Request::ListGroups)),
+        (
+            "stash_all",
+            frame(
+                48,
+                Request::StashAll {
+                    name: Some("Parser investigation".into()),
+                },
+            ),
+        ),
+        (
+            "create_group",
+            frame(
+                49,
+                Request::CreateGroup {
+                    name: Some("Parser investigation".into()),
+                    session_ids: vec![sid()],
+                    stash_live: true,
+                },
+            ),
+        ),
+        (
+            "rename_group",
+            frame(
+                50,
+                Request::RenameGroup {
+                    group_id: "grp_a1b2c3d4".into(),
+                    name: "Parser fix".into(),
+                },
+            ),
+        ),
+        (
+            "set_group_locked",
+            frame(
+                51,
+                Request::SetGroupLocked {
+                    group_id: "grp_a1b2c3d4".into(),
+                    locked: true,
+                },
+            ),
+        ),
+        (
+            "delete_group",
+            frame(
+                52,
+                Request::DeleteGroup {
+                    group_id: "grp_a1b2c3d4".into(),
+                },
+            ),
+        ),
+        (
+            "add_to_group",
+            frame(
+                53,
+                Request::AddToGroup {
+                    group_id: "grp_a1b2c3d4".into(),
+                    session_id: sid(),
+                    position: Some(0),
+                    stash_live: true,
+                },
+            ),
+        ),
+        (
+            "move_group_member",
+            frame(
+                54,
+                Request::MoveGroupMember {
+                    from_group_id: Some("grp_a1b2c3d4".into()),
+                    to_group_id: "grp_e5f6a7b8".into(),
+                    session_id: sid(),
+                    position: 0,
+                    stash_live: true,
+                },
+            ),
+        ),
+        (
+            "remove_from_group",
+            frame(
+                55,
+                Request::RemoveFromGroup {
+                    group_id: "grp_a1b2c3d4".into(),
+                    session_id: sid(),
+                },
+            ),
+        ),
+        (
+            "merge_groups",
+            frame(
+                56,
+                Request::MergeGroups {
+                    source_group_id: "grp_e5f6a7b8".into(),
+                    target_group_id: "grp_a1b2c3d4".into(),
+                },
+            ),
+        ),
+        (
+            "restore_group",
+            frame(
+                57,
+                Request::RestoreGroup {
+                    group_id: "grp_a1b2c3d4".into(),
+                },
+            ),
+        ),
+        (
+            "restore_group_member",
+            frame(
+                58,
+                Request::RestoreGroupMember {
+                    group_id: "grp_a1b2c3d4".into(),
+                    session_id: sid(),
+                },
+            ),
+        ),
     ]
 }
 
@@ -531,7 +664,7 @@ fn server_frames() -> Samples<ServerFrame> {
             "response_messages",
             response(
                 7,
-                json!({"messages": [user_message()], "more_before": false}),
+                json!({"messages": [user_message()], "more_before": false, "start_seq": 0, "end_seq": 1}),
             ),
         ),
         ("response_get_image", response(8, json!({"image": image}))),
@@ -647,6 +780,58 @@ fn server_frames() -> Samples<ServerFrame> {
                 json!({"items": [{"value": "checkout", "description": "Switch branches or restore working tree files"}, {"value": "cherry-pick", "description": "Apply the changes introduced by some existing commits"}]}),
             ),
         ),
+        ("response_retry_now", response(46, json!({"retried": true}))),
+        (
+            "response_list_groups",
+            response(47, json!({"groups": [stash_group()]})),
+        ),
+        (
+            "response_stash_all",
+            response(
+                48,
+                json!({"group": stash_group(), "groups": [stash_group()]}),
+            ),
+        ),
+        (
+            "response_create_group",
+            response(
+                49,
+                json!({"group": stash_group(), "groups": [stash_group()]}),
+            ),
+        ),
+        (
+            "response_rename_group",
+            response(50, json!({"groups": [stash_group()]})),
+        ),
+        (
+            "response_set_group_locked",
+            response(51, json!({"groups": [stash_group()]})),
+        ),
+        ("response_delete_group", response(52, json!({"groups": []}))),
+        (
+            "response_add_to_group",
+            response(53, json!({"groups": [stash_group()]})),
+        ),
+        (
+            "response_move_group_member",
+            response(54, json!({"groups": [stash_group()]})),
+        ),
+        (
+            "response_remove_from_group",
+            response(55, json!({"groups": [stash_group()]})),
+        ),
+        (
+            "response_merge_groups",
+            response(56, json!({"groups": [stash_group()]})),
+        ),
+        (
+            "response_restore_group",
+            response(57, json!({"restored_ids": [SESSION_ID], "groups": []})),
+        ),
+        (
+            "response_restore_group_member",
+            response(58, json!({"restored": true, "groups": []})),
+        ),
         (
             "event",
             ServerFrame::Event {
@@ -713,6 +898,12 @@ fn server_frames() -> Samples<ServerFrame> {
             "config_changed",
             ServerFrame::ConfigChanged {
                 warnings: vec!["default_agent \"custom\" not found".into()],
+            },
+        ),
+        (
+            "groups_changed",
+            ServerFrame::GroupsChanged {
+                groups: vec![stash_group()],
             },
         ),
     ]
@@ -812,6 +1003,9 @@ fn session_events() -> Samples<SessionEvent> {
             SessionEvent::Reset {
                 messages: vec![user_message(), assistant_message()],
                 more_before: true,
+                total_messages: 3,
+                start_seq: 1,
+                layout_metas: layout_metas(),
             },
         ),
         (

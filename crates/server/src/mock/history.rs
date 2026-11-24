@@ -183,6 +183,8 @@ pub fn save(store: &Store, cfg: &Config, cwd: &str) -> Result<(), String> {
             reported: false,
             context_notice: false,
             model_explicit: false,
+            window_start_seq: 0,
+            force_persist: false,
         });
     }
     store.flush()

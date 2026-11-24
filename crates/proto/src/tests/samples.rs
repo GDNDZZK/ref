@@ -428,11 +428,36 @@ pub fn failed_message() -> Message {
     }
 }
 
+pub fn layout_metas() -> Vec<MessageLayoutMeta> {
+    vec![MessageLayoutMeta {
+        seq: 0,
+        id: "msg_older_00".into(),
+        role: Role::User,
+        source_kind: "human".into(),
+        has_error: false,
+        parts: vec![PartLayoutMeta {
+            kind: "text".into(),
+            chars: 42,
+            lines: 2,
+            code_blocks: 0,
+            code_lines: 0,
+            tables: 0,
+            tool: None,
+            tool_lines: 0,
+            width: None,
+            height: None,
+        }],
+    }]
+}
+
 pub fn snapshot() -> SessionSnapshot {
     SessionSnapshot {
         info: info(),
         messages: vec![user_message(), assistant_message()],
         more_before: true,
+        total_messages: 3,
+        start_seq: 1,
+        layout_metas: layout_metas(),
         pending_permissions: vec![permission_request()],
         pending_questions: vec![question_request()],
         queued: vec![peer_message()],
@@ -564,4 +589,19 @@ pub fn mcp_servers() -> Vec<McpServerStatus> {
             tools: vec![],
         },
     ]
+}
+
+pub fn stash_group() -> StashGroup {
+    StashGroup {
+        id: "grp_a1b2c3d4".into(),
+        name: "Parser investigation".into(),
+        locked: false,
+        created_at: T0,
+        updated_at: T0 + 95 * SECOND,
+        members: vec![StashMember {
+            session_id: SESSION_ID.into(),
+            position: 0,
+            info: failed_info(),
+        }],
+    }
 }

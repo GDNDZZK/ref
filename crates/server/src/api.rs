@@ -213,16 +213,10 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> Reply {
         Request::Messages {
             session_id,
             before,
+            start_seq,
+            end_seq,
             limit,
-        } => {
-            let s = live(hub, &session_id)?;
-            let st = s.lock();
-            let end = st
-                .find_message(&before)
-                .ok_or_else(|| "That message is no longer in the conversation.".to_string())?;
-            let (messages, more_before) = crate::session::page(&st.messages, end, limit);
-            Ok(json!({ "messages": messages, "more_before": more_before }))
-        }
+        } => messages(hub, session_id, before, start_seq, end_seq, limit).await,
         Request::GetImage {
             session_id,
             image_id,
@@ -398,10 +392,16 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> Reply {
             if let Some(s) = hub.session(&session_id) {
                 crate::ops::close_session(hub, &s).await;
             }
+            let _guard = hub.stash_lock.lock().await;
             let store = hub.store.clone();
-            tokio::task::spawn_blocking(move || store.delete(&session_id))
-                .await
-                .map_err(|e| e.to_string())??;
+            let groups_changed =
+                tokio::task::spawn_blocking(move || store.delete_session(&session_id))
+                    .await
+                    .map_err(|e| e.to_string())??;
+            if groups_changed {
+                let groups = crate::stash::list_groups_hydrated(hub).await?;
+                hub.broadcast_groups_changed(groups);
+            }
             Ok(json!({}))
         }
         Request::ExpandCommand { name, args, cwd } => {
@@ -426,6 +426,60 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> Reply {
             Ok(json!({ "files": res }))
         }
         Request::Export { session_id, path } => export(hub, session_id, path).await,
+        Request::RetryNow { session_id } => {
+            let s = live(hub, &session_id)?;
+            Ok(json!({ "retried": crate::engine::retry_now(&s) }))
+        }
+        Request::ListGroups => crate::stash::list_groups(hub).await,
+        Request::StashAll { name } => crate::stash::stash_all(hub, name).await,
+        Request::CreateGroup {
+            name,
+            session_ids,
+            stash_live,
+        } => crate::stash::create_group(hub, name, session_ids, stash_live).await,
+        Request::RenameGroup { group_id, name } => {
+            crate::stash::rename_group(hub, group_id, name).await
+        }
+        Request::SetGroupLocked { group_id, locked } => {
+            crate::stash::set_group_locked(hub, group_id, locked).await
+        }
+        Request::DeleteGroup { group_id } => crate::stash::delete_group(hub, group_id).await,
+        Request::AddToGroup {
+            group_id,
+            session_id,
+            position,
+            stash_live,
+        } => crate::stash::add_to_group(hub, group_id, session_id, position, stash_live).await,
+        Request::MoveGroupMember {
+            from_group_id,
+            to_group_id,
+            session_id,
+            position,
+            stash_live,
+        } => {
+            crate::stash::move_group_member(
+                hub,
+                from_group_id,
+                to_group_id,
+                session_id,
+                position,
+                stash_live,
+            )
+            .await
+        }
+        Request::RemoveFromGroup {
+            group_id,
+            session_id,
+        } => crate::stash::remove_from_group(hub, group_id, session_id).await,
+        Request::MergeGroups {
+            source_group_id,
+            target_group_id,
+        } => crate::stash::merge_groups(hub, source_group_id, target_group_id).await,
+        Request::RestoreGroup { group_id } => crate::stash::restore_group(hub, group_id).await,
+        Request::RestoreGroupMember {
+            group_id,
+            session_id,
+        } => crate::stash::restore_group_member(hub, group_id, session_id).await,
     }
 }
 
@@ -437,112 +491,127 @@ async fn list_history(
     query: Option<String>,
     limit: Option<usize>,
 ) -> Reply {
-    let store = hub.store.clone();
     let cwd = crate::store::normalize_filter(cwd);
     let creator = crate::store::normalize_filter(creator);
     let query = crate::store::normalize_filter(query);
     let limit = limit.unwrap_or(HISTORY_DEFAULT_LIMIT);
     let live: Vec<SessionInfo> = hub.infos();
-    let fetch_limit = limit.saturating_add(live.len());
-    let (cwd_q, creator_q, query_q) = (cwd.clone(), creator.clone(), query.clone());
+    let exclude_ids: Vec<String> = live.iter().map(|i| i.id.clone()).collect();
+
+    let extra_creator_ids: Vec<String> = match creator.as_deref() {
+        Some(cr) if cr != CREATOR_USER => {
+            let cr_lower = cr.to_lowercase();
+            live.iter()
+                .filter(|s| s.name == cr || s.name.to_lowercase() == cr_lower)
+                .map(|s| s.id.clone())
+                .collect()
+        }
+        _ => Vec::new(),
+    };
+
+    let matched_live = filter_live_sessions(
+        hub,
+        &live,
+        cwd.as_deref(),
+        creator.as_deref(),
+        query.as_deref(),
+    )
+    .await?;
+
+    let store = hub.store.clone();
     let mut list = tokio::task::spawn_blocking(move || {
-        store.list_for(cwd_q, creator_q, query_q, Some(fetch_limit))
+        store.list_for_excluding(
+            cwd,
+            creator,
+            extra_creator_ids,
+            query,
+            Some(limit),
+            exclude_ids,
+        )
     })
     .await
     .map_err(|e| e.to_string())?;
-    for i in &mut list {
-        if let Some(l) = live.iter().find(|l| l.id == i.id) {
-            *i = l.clone();
-        }
-    }
-    for l in live {
-        if !list.iter().any(|i| i.id == l.id) {
-            list.push(l);
-        }
-    }
-    if cwd.is_some() || creator.is_some() || query.is_some() {
-        let mut by_id: std::collections::HashMap<String, SessionInfo> =
-            list.iter().map(|s| (s.id.clone(), s.clone())).collect();
-        if creator.is_some() || query.is_some() {
-            let missing_parents: Vec<String> = list
-                .iter()
-                .filter_map(|s| s.parent.as_deref())
-                .filter(|pid| !pid.is_empty() && !by_id.contains_key(*pid))
-                .map(str::to_string)
-                .collect::<std::collections::HashSet<_>>()
-                .into_iter()
-                .collect();
-            if !missing_parents.is_empty() {
-                let store = hub.store.clone();
-                let parents = tokio::task::spawn_blocking(move || store.infos(missing_parents))
-                    .await
-                    .map_err(|e| e.to_string())?;
-                for p in parents {
-                    by_id.entry(p.id.clone()).or_insert(p);
-                }
-            }
-        }
-        let creator_lower = creator.as_deref().map(str::to_lowercase);
-        let query_lower = query.as_deref().map(str::to_lowercase);
-        list.retain(|s| {
-            matches_history_filter(
-                s,
-                &by_id,
-                cwd.as_deref(),
-                creator.as_deref(),
-                creator_lower.as_deref(),
-                query_lower.as_deref(),
-            )
-        });
-    }
+
+    list.extend(matched_live);
     list.sort_by_key(|i| std::cmp::Reverse(i.updated_at));
     list.truncate(limit);
     Ok(json!({ "sessions": list }))
 }
 
-fn matches_history_filter(
-    s: &SessionInfo,
-    by_id: &std::collections::HashMap<String, SessionInfo>,
+async fn filter_live_sessions(
+    hub: &Arc<Hub>,
+    live: &[SessionInfo],
     cwd: Option<&str>,
     creator: Option<&str>,
-    creator_lower: Option<&str>,
-    query_lower: Option<&str>,
-) -> bool {
-    if let Some(c) = cwd
-        && s.cwd != c
-    {
-        return false;
+    query: Option<&str>,
+) -> Result<Vec<SessionInfo>, ApiError> {
+    if cwd.is_none() && creator.is_none() && query.is_none() {
+        return Ok(live.to_vec());
     }
-    let parent_id = s.parent.as_deref().filter(|p| !p.is_empty());
-    let parent = parent_id.and_then(|pid| by_id.get(pid));
-    if let Some(cr) = creator {
-        if cr == CREATOR_USER {
-            if parent_id.is_some() {
-                return false;
-            }
-        } else {
-            let cr_lower = creator_lower.unwrap_or(cr);
-            let matched = parent_id.is_some_and(|pid| {
-                pid == cr || parent.is_some_and(|p| p.name.to_lowercase() == cr_lower)
-            });
-            if !matched {
-                return false;
+    let mut by_id: std::collections::HashMap<String, SessionInfo> =
+        live.iter().map(|s| (s.id.clone(), s.clone())).collect();
+    if creator.is_some() || query.is_some() {
+        let missing_parents: Vec<String> = live
+            .iter()
+            .filter_map(|s| s.parent.as_deref())
+            .filter(|pid| !pid.is_empty() && !by_id.contains_key(*pid))
+            .map(str::to_string)
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+        if !missing_parents.is_empty() {
+            let store = hub.store.clone();
+            let parents = tokio::task::spawn_blocking(move || store.infos(missing_parents))
+                .await
+                .map_err(|e| e.to_string())?;
+            for p in parents {
+                by_id.entry(p.id.clone()).or_insert(p);
             }
         }
     }
-    if let Some(q) = query_lower {
-        let contains = |hay: &str| hay.to_lowercase().contains(q);
-        let hit = contains(&s.title)
-            || contains(&s.name)
-            || contains(&s.cwd)
-            || contains(&s.id)
-            || parent_id.is_some_and(contains)
-            || parent.is_some_and(|p| contains(&p.name) || contains(&p.title));
-        if !hit {
-            return false;
-        }
-    }
-    true
+    let creator_lower = creator.map(str::to_lowercase);
+    let query_lower = query.map(str::to_lowercase);
+    Ok(live
+        .iter()
+        .filter(|s| {
+            if let Some(c) = cwd
+                && s.cwd != c
+            {
+                return false;
+            }
+            let parent_id = s.parent.as_deref().filter(|p| !p.is_empty());
+            let parent = parent_id.and_then(|pid| by_id.get(pid));
+            if let Some(cr) = creator {
+                if cr == CREATOR_USER {
+                    if parent_id.is_some() {
+                        return false;
+                    }
+                } else {
+                    let cr_lower = creator_lower.as_deref().unwrap_or(cr);
+                    let matched = parent_id.is_some_and(|pid| {
+                        pid == cr || parent.is_some_and(|p| p.name.to_lowercase() == cr_lower)
+                    });
+                    if !matched {
+                        return false;
+                    }
+                }
+            }
+            if let Some(q) = query_lower.as_deref() {
+                let contains = |hay: &str| hay.to_lowercase().contains(q);
+                let hit = contains(&s.title)
+                    || contains(&s.name)
+                    || contains(&s.cwd)
+                    || contains(&s.id)
+                    || parent_id.is_some_and(contains)
+                    || parent.is_some_and(|p| contains(&p.name) || contains(&p.title));
+                if !hit {
+                    return false;
+                }
+            }
+            true
+        })
+        .cloned()
+        .collect())
 }
 
 /// Attaches the connection to a session (loading it if needed) and returns its snapshot.
@@ -568,13 +637,20 @@ async fn attach(
             }
         }
         hub.emit_info(&st);
-        let (messages, more_before) = crate::session::page(&st.messages, st.messages.len(), limit);
+        let total_messages = st.window_start_seq + st.messages.len() as u64;
+        let (messages, _) = crate::session::page(&st.messages, st.messages.len(), limit);
+        let start_seq = total_messages.saturating_sub(messages.len() as u64);
+        let more_before = start_seq > 0;
+        let layout_metas = st.layout_metas_before(&hub.store, start_seq);
         let mut queued: Vec<Message> = st.queue.iter().cloned().collect();
         queued.iter_mut().for_each(Message::strip_image_data);
         SessionSnapshot {
             info: st.info.clone(),
             messages,
             more_before,
+            total_messages,
+            start_seq,
+            layout_metas,
             pending_permissions: st.perms.iter().map(|p| p.request.clone()).collect(),
             pending_questions: st.questions.iter().map(|p| p.request.clone()).collect(),
             queued,
@@ -583,37 +659,187 @@ async fn attach(
     Ok(json!({ "snapshot": snapshot }))
 }
 
+async fn messages(
+    hub: &Arc<Hub>,
+    session_id: String,
+    before: Option<String>,
+    start_seq: Option<u64>,
+    end_seq: Option<u64>,
+    limit: Option<u32>,
+) -> Reply {
+    let s = live(hub, &session_id)?;
+    let effective_limit = limit.map_or(crate::session::PAGE_DEFAULT, |l| {
+        (l as usize).clamp(1, crate::session::PAGE_MAX)
+    });
+
+    if let Some(before_id) = before {
+        enum BeforePlan {
+            Memory(Vec<Message>, u64, u64),
+            DiskBefore(u64),
+            LookupDisk,
+        }
+        let plan = {
+            let st = s.lock();
+            match st.find_message(&before_id) {
+                Some(idx) if idx > 0 => {
+                    let before_seq = st.window_start_seq + idx as u64;
+                    let (msgs, _) = crate::session::page(&st.messages, idx, limit);
+                    let start = before_seq.saturating_sub(msgs.len() as u64);
+                    BeforePlan::Memory(msgs, start, before_seq)
+                }
+                Some(_) => {
+                    if st.window_start_seq == 0 {
+                        BeforePlan::Memory(Vec::new(), 0, 0)
+                    } else {
+                        BeforePlan::DiskBefore(st.window_start_seq)
+                    }
+                }
+                None => {
+                    if st.window_start_seq == 0 {
+                        return Err("That message is no longer in the conversation.".into());
+                    }
+                    BeforePlan::LookupDisk
+                }
+            }
+        };
+        let (msgs, start, end) = match plan {
+            BeforePlan::Memory(msgs, start, end) => (msgs, start, end),
+            BeforePlan::DiskBefore(before_seq) => {
+                let store = hub.store.clone();
+                let sid = session_id.clone();
+                tokio::task::spawn_blocking(move || {
+                    store.load_messages_before(
+                        &sid,
+                        before_seq,
+                        effective_limit,
+                        crate::session::PAGE_BYTES,
+                    )
+                })
+                .await
+                .map_err(|e| e.to_string())??
+            }
+            BeforePlan::LookupDisk => {
+                let store = hub.store.clone();
+                let sid = session_id.clone();
+                let bid = before_id.clone();
+                let before_seq = tokio::task::spawn_blocking(move || store.message_seq(&sid, &bid))
+                    .await
+                    .map_err(|e| e.to_string())??
+                    .ok_or_else(|| "That message is no longer in the conversation.".to_string())?;
+                let store = hub.store.clone();
+                let sid = session_id.clone();
+                tokio::task::spawn_blocking(move || {
+                    store.load_messages_before(
+                        &sid,
+                        before_seq,
+                        effective_limit,
+                        crate::session::PAGE_BYTES,
+                    )
+                })
+                .await
+                .map_err(|e| e.to_string())??
+            }
+        };
+        return Ok(json!({
+            "messages": msgs,
+            "more_before": start > 0,
+            "start_seq": start,
+            "end_seq": end,
+        }));
+    }
+
+    if start_seq.is_none() && end_seq.is_none() {
+        return Err("Missing `before` or `start_seq`/`end_seq`.".into());
+    }
+    enum RangePlan {
+        Ready(Vec<Message>, u64, u64),
+        DiskAndMem {
+            req_start: u64,
+            disk_end: u64,
+            mem_tail: Vec<Message>,
+        },
+    }
+    let plan = {
+        let st = s.lock();
+        let total = st.window_start_seq + st.messages.len() as u64;
+        let req_start = start_seq.unwrap_or(0).min(total);
+        let req_end = end_seq.unwrap_or(total).min(total);
+        if req_start >= req_end {
+            RangePlan::Ready(Vec::new(), req_start, req_start)
+        } else {
+            let capped_end = req_end.min(req_start.saturating_add(effective_limit as u64));
+            if req_start >= st.window_start_seq {
+                let start_idx = (req_start - st.window_start_seq) as usize;
+                let end_idx = (capped_end - st.window_start_seq) as usize;
+                let msgs = crate::session::page_forward(&st.messages, start_idx, end_idx, limit);
+                let actual_end = req_start + msgs.len() as u64;
+                RangePlan::Ready(msgs, req_start, actual_end)
+            } else {
+                let disk_end = capped_end.min(st.window_start_seq);
+                let mem_take = capped_end.saturating_sub(st.window_start_seq) as usize;
+                let mem_tail = st.messages.iter().take(mem_take).cloned().collect();
+                RangePlan::DiskAndMem {
+                    req_start,
+                    disk_end,
+                    mem_tail,
+                }
+            }
+        }
+    };
+    let (msgs, actual_start, actual_end) = match plan {
+        RangePlan::Ready(msgs, start, end) => (msgs, start, end),
+        RangePlan::DiskAndMem {
+            req_start,
+            disk_end,
+            mem_tail,
+        } => {
+            let store = hub.store.clone();
+            let sid = session_id.clone();
+            let mut combined = tokio::task::spawn_blocking(move || {
+                store.load_messages_range(&sid, req_start, disk_end)
+            })
+            .await
+            .map_err(|e| e.to_string())??;
+            combined.extend(mem_tail);
+            let msgs = crate::session::page_forward(&combined, 0, combined.len(), limit);
+            let actual_end = req_start + msgs.len() as u64;
+            (msgs, req_start, actual_end)
+        }
+    };
+    Ok(json!({
+        "messages": msgs,
+        "more_before": actual_start > 0,
+        "start_seq": actual_start,
+        "end_seq": actual_end,
+    }))
+}
+
 /// The full data of an image that history pages carry as a stub.
 async fn get_image(hub: &Arc<Hub>, session_id: String, image_id: String) -> Reply {
     let mid = ref_proto::image_message_id(&image_id)
         .ok_or_else(|| format!("Invalid image id: {image_id}"))?
         .to_string();
-    fn find<'a>(
-        mut msgs: impl Iterator<Item = &'a Message>,
-        mid: &str,
-        image_id: &str,
-    ) -> Option<ref_proto::ImageData> {
-        msgs.find(|m| m.id == mid)
-            .and_then(|m| m.image(image_id))
+    let mem_image = hub.session(&session_id).and_then(|s| {
+        let st = s.lock();
+        st.messages
+            .iter()
+            .rev()
+            .chain(st.queue.iter())
+            .find(|m| m.id == mid)
+            .and_then(|m| m.image(&image_id))
             .filter(|i| !i.is_stub())
             .cloned()
-    }
-    let image = match hub.session(&session_id) {
-        Some(s) => {
-            let st = s.lock();
-            find(
-                st.messages.iter().rev().chain(st.queue.iter()),
-                &mid,
-                &image_id,
-            )
-        }
+    });
+    let image = match mem_image {
+        Some(img) => Some(img),
         None => {
             let store = hub.store.clone();
-            let id = session_id.clone();
-            let p = tokio::task::spawn_blocking(move || store.load(&id))
+            let sid = session_id.clone();
+            let mid2 = mid.clone();
+            let msg = tokio::task::spawn_blocking(move || store.load_message(&sid, &mid2))
                 .await
                 .map_err(|e| e.to_string())??;
-            find(p.messages.iter().rev(), &mid, &image_id)
+            msg.and_then(|m| m.image(&image_id).filter(|i| !i.is_stub()).cloned())
         }
     };
     let image =
@@ -691,6 +917,65 @@ async fn undo(hub: &Arc<Hub>, session_id: String, message_id: Option<String>) ->
             return Err("The session did not stop in time.".into());
         }
     }
+
+    // If the target message sits before `window_start_seq`, reload from the previous compaction
+    // boundary so truncating across compaction boundaries stays consistent.
+    let need_reload_upto = {
+        let st = s.lock();
+        match &message_id {
+            Some(id) => match st.find_message(id) {
+                Some(0) if st.window_start_seq > 0 => Some((st.window_start_seq, true)),
+                Some(_) => None,
+                None if st.window_start_seq > 0 => Some((st.window_start_seq, false)),
+                None => return Err("That message is no longer in the conversation.".into()),
+            },
+            None => {
+                let in_mem = st
+                    .messages
+                    .iter()
+                    .rposition(|m| m.role == Role::User && m.source == MessageSource::Human);
+                match in_mem {
+                    Some(0) if st.window_start_seq > 0 => Some((st.window_start_seq, true)),
+                    Some(_) => None,
+                    None if st.window_start_seq > 0 => Some((st.window_start_seq, false)),
+                    None => return Err("Nothing to undo.".into()),
+                }
+            }
+        }
+    };
+
+    if let Some((window_start, only_previous_epoch)) = need_reload_upto {
+        let store = hub.store.clone();
+        let sid = session_id.clone();
+        let mid_opt = message_id.clone();
+        let (new_start, prefix) = tokio::task::spawn_blocking(move || -> Result<_, String> {
+            let target_seq = if only_previous_epoch {
+                window_start
+            } else if let Some(id) = mid_opt {
+                store
+                    .message_seq(&sid, &id)?
+                    .ok_or_else(|| "That message is no longer in the conversation.".to_string())?
+            } else {
+                store
+                    .last_human_seq_before(&sid, window_start)?
+                    .ok_or_else(|| "Nothing to undo.".to_string())?
+            };
+            let new_start = store.compaction_seq_before(&sid, target_seq)?;
+            let prefix = store.load_messages_range(&sid, new_start, window_start)?;
+            Ok((new_start, prefix))
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+
+        let mut st = s.lock();
+        if st.window_start_seq == window_start && !prefix.is_empty() {
+            let mut combined = prefix;
+            combined.append(&mut st.messages);
+            st.messages = combined;
+            st.window_start_seq = new_start;
+        }
+    }
+
     let (text, images) = {
         let mut st = s.lock();
         let i = match &message_id {
@@ -717,7 +1002,7 @@ async fn undo(hub: &Arc<Hub>, session_id: String, message_id: Option<String>) ->
             crate::engine::emit_queue(hub, &s, &st);
         }
         st.info.updated_at = ref_proto::now_ms();
-        hub.emit(&s.id, st.reset_event());
+        hub.emit(&s.id, st.reset_event(&hub.store));
         hub.emit_info(&st);
         (text, images)
     };
@@ -728,9 +1013,21 @@ async fn undo(hub: &Arc<Hub>, session_id: String, message_id: Option<String>) ->
 /// Writes the session as Markdown to `path` (relative to its working directory, expanding `~`).
 async fn export(hub: &Arc<Hub>, session_id: String, path: String) -> Reply {
     let s = crate::ops::get_or_load(hub, &session_id).await?;
-    let (info, messages) = {
+    let (info, window_start, mem_messages) = {
         let st = s.lock();
-        (st.info.clone(), st.messages.clone())
+        (st.info.clone(), st.window_start_seq, st.messages.clone())
+    };
+    let messages = if window_start > 0 {
+        let store = hub.store.clone();
+        let sid = session_id.clone();
+        let mut prefix =
+            tokio::task::spawn_blocking(move || store.load_messages_range(&sid, 0, window_start))
+                .await
+                .map_err(|e| e.to_string())??;
+        prefix.extend(mem_messages);
+        prefix
+    } else {
+        mem_messages
     };
     let home = hub
         .opts

@@ -1,0 +1,8 @@
+{
+  "id": 53,
+  "op": "add_to_group",
+  "group_id": "grp_a1b2c3d4",
+  "session_id": "ses_a1b2c3d4",
+  "position": 0,
+  "stash_live": true
+}

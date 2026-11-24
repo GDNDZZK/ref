@@ -94,5 +94,27 @@
       "error": null
     }
   ],
-  "more_before": true
+  "more_before": true,
+  "total_messages": 3,
+  "start_seq": 1,
+  "layout_metas": [
+    {
+      "seq": 0,
+      "id": "msg_older_00",
+      "role": "user",
+      "source_kind": "human",
+      "has_error": false,
+      "parts": [
+        {
+          "kind": "text",
+          "chars": 42,
+          "lines": 2,
+          "code_blocks": 0,
+          "code_lines": 0,
+          "tables": 0,
+          "tool_lines": 0
+        }
+      ]
+    }
+  ]
 }

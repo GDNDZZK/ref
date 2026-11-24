@@ -19,9 +19,8 @@ mod prompt;
 mod question;
 pub mod session;
 mod shell_complete;
+pub mod stash;
 mod store;
-pub mod title;
-mod toolset;
 pub mod util;
 pub mod ws;
 

@@ -2041,7 +2041,9 @@ async fn history_is_served_in_pages() {
     let first_id = |msgs: &serde_json::Value| msgs[0]["id"].as_str().unwrap().to_string();
     let older = |before: String, limit| ref_proto::Request::Messages {
         session_id: s.id.clone(),
-        before,
+        before: Some(before),
+        start_seq: None,
+        end_seq: None,
         limit,
     };
     let r2 = call(
@@ -2090,8 +2092,8 @@ async fn history_is_served_in_pages() {
                 SessionEvent::Reset {
                     messages,
                     more_before,
+                    ..
                 },
-            ..
         } => Some((messages.len(), more_before)),
         _ => None,
     });
@@ -2245,4 +2247,254 @@ async fn retry_honors_retry_after_in_http_body_and_sse_error() {
         });
         assert!(retrying, "{tag}: expected SessionStatus::Retrying event");
     }
+}
+
+#[tokio::test]
+async fn active_window_range_paging_get_image_and_cross_compaction_undo() {
+    let m = mock(Arc::new(|_, _| Reply::Text("ok".into()))).await;
+    let (hub, work) = hub(config(&m.url), "active-window");
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
+    let img_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==";
+    {
+        let mut st = s.lock();
+        let mut m0 = ref_server::session::user_message(
+            MessageSource::Human,
+            "first prompt".into(),
+            vec![ref_proto::ImageData::new("image/png", img_b64)],
+        );
+        m0.id = "msg_0".into();
+        st.messages.push(m0);
+        for i in 1..5 {
+            let mut msg =
+                ref_server::session::user_message(MessageSource::Human, format!("msg {i}"), vec![]);
+            msg.id = format!("msg_{i}");
+            st.messages.push(msg);
+        }
+        let mut comp =
+            ref_server::session::user_message(MessageSource::Compaction, "summary".into(), vec![]);
+        comp.id = "msg_5".into();
+        st.messages.push(comp);
+        let mut m6 =
+            ref_server::session::user_message(MessageSource::Human, "after compact".into(), vec![]);
+        m6.id = "msg_6".into();
+        st.messages.push(m6);
+    }
+    ref_server::ops::persist(&hub, &s);
+    let conn = hello_conn(&hub);
+    call(
+        &hub,
+        &conn,
+        ref_proto::Request::Close {
+            session_id: s.id.clone(),
+        },
+    )
+    .await;
+
+    // Reattach: Hub loads only from compaction point (seq 5..7).
+    let snap = call(&hub, &conn, attach_request(&s, None)).await;
+    assert_eq!(snap["snapshot"]["total_messages"], 7);
+    assert_eq!(snap["snapshot"]["start_seq"], 5);
+    assert_eq!(snap["snapshot"]["more_before"], true);
+    assert_eq!(snap["snapshot"]["messages"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        snap["snapshot"]["layout_metas"].as_array().unwrap().len(),
+        5
+    );
+
+    // Range request [1, 4) reads straight from SQLite.
+    let range = call(
+        &hub,
+        &conn,
+        ref_proto::Request::Messages {
+            session_id: s.id.clone(),
+            before: None,
+            start_seq: Some(1),
+            end_seq: Some(4),
+            limit: Some(10),
+        },
+    )
+    .await;
+    assert_eq!(range["start_seq"], 1);
+    assert_eq!(range["end_seq"], 4);
+    assert_eq!(range["more_before"], true);
+    assert_eq!(
+        range["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["msg_1", "msg_2", "msg_3"]
+    );
+
+    // get_image for seq 0 outside in-memory active window hits SQLite directly.
+    let img = call(
+        &hub,
+        &conn,
+        ref_proto::Request::GetImage {
+            session_id: s.id.clone(),
+            image_id: ref_proto::image_id("msg_0", 1, 0),
+        },
+    )
+    .await;
+    assert_eq!(img["image"]["data"], img_b64);
+
+    // Undo a message before window_start_seq reloads previous window cleanly.
+    let undone = call(
+        &hub,
+        &conn,
+        ref_proto::Request::Undo {
+            session_id: s.id.clone(),
+            message_id: Some("msg_3".into()),
+        },
+    )
+    .await;
+    assert_eq!(undone["text"], "msg 3");
+    let reloaded_live = hub.session(&s.id).unwrap();
+    assert_eq!(reloaded_live.lock().window_start_seq, 0);
+    assert_eq!(reloaded_live.lock().messages.len(), 3);
+}
+
+#[tokio::test]
+async fn retry_now_wakes_retrying_session_immediately() {
+    let m = mock(Arc::new(|n, _| {
+        if n == 0 {
+            Reply::StatusWithHeaders(
+                429,
+                vec![("retry-after".into(), "30".into())],
+                r#"{"error":{"message":"slow down"}}"#.into(),
+            )
+        } else {
+            Reply::Text("recovered".into())
+        }
+    }))
+    .await;
+    let (hub, work) = hub(config(&m.url), "retry-now");
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
+    let conn = hello_conn(&hub);
+
+    // Idle session returns retried: false.
+    let idle_res = call(
+        &hub,
+        &conn,
+        ref_proto::Request::RetryNow {
+            session_id: s.id.clone(),
+        },
+    )
+    .await;
+    assert_eq!(idle_res["retried"], false);
+
+    let start = std::time::Instant::now();
+    prompt(&hub, &s, "go");
+    wait_session(&s, "retrying", |s| {
+        matches!(s.lock().info.status, SessionStatus::Retrying { .. })
+    })
+    .await;
+
+    let res = call(
+        &hub,
+        &conn,
+        ref_proto::Request::RetryNow {
+            session_id: s.id.clone(),
+        },
+    )
+    .await;
+    assert_eq!(res["retried"], true);
+    wait_idle(&s).await;
+    assert!(
+        start.elapsed() < Duration::from_secs(5),
+        "RetryNow should skip the 30s backoff: {:?}",
+        start.elapsed()
+    );
+    assert_eq!(last_text(&s), "recovered");
+}
+
+#[tokio::test]
+async fn stash_groups_lifecycle_and_resume_reprompt() {
+    let m = mock(Arc::new(|n, _| match n {
+        0 => Reply::Tools(vec![tool(
+            "c1",
+            "bash",
+            json!({"command": "echo hi", "purpose": "test"}),
+        )]),
+        _ => Reply::Text("done".into()),
+    }))
+    .await;
+    let mut cfg = config(&m.url);
+    cfg.agents.get_mut(BUILD).unwrap().permission = perms(json!({ "*": "allow", "bash": "ask" }));
+    let (hub, work) = hub(cfg, "stash-lifecycle");
+    let empty_s = session(&hub, &work, "empty", BUILD).await;
+    let perm_s = session(&hub, &work, "perm", BUILD).await;
+    let conn = hello_conn(&hub);
+
+    prompt(&hub, &perm_s, "run bash");
+    wait_session(&perm_s, "waiting permission", |s| {
+        s.lock().info.status == SessionStatus::WaitingPermission
+    })
+    .await;
+    // Queue an extra prompt while waiting for permission.
+    call(
+        &hub,
+        &conn,
+        ref_proto::Request::Prompt {
+            session_id: perm_s.id.clone(),
+            text: "queued follow-up".into(),
+            images: vec![],
+        },
+    )
+    .await;
+
+    let _ = conn.out.drain();
+    let stashed = call(
+        &hub,
+        &conn,
+        ref_proto::Request::StashAll {
+            name: Some("Batch 1".into()),
+        },
+    )
+    .await;
+    assert!(hub.sessions().is_empty());
+    let gid = stashed["group"]["id"].as_str().unwrap().to_string();
+    assert_eq!(stashed["group"]["members"].as_array().unwrap().len(), 2);
+    assert!(
+        conn.out
+            .drain()
+            .iter()
+            .any(|f| matches!(f, ref_proto::ServerFrame::GroupsChanged { .. }))
+    );
+
+    // Restore empty session individually -> unlocked group keeps perm_s.
+    let res_empty = call(
+        &hub,
+        &conn,
+        ref_proto::Request::RestoreGroupMember {
+            group_id: gid.clone(),
+            session_id: empty_s.id.clone(),
+        },
+    )
+    .await;
+    assert_eq!(res_empty["restored"], true);
+    assert_eq!(res_empty["groups"].as_array().unwrap().len(), 1);
+    assert_eq!(hub.session(&empty_s.id).unwrap().info().attached, 0);
+
+    // Restore perm_s -> unlocked group becomes empty and auto-deletes; perm_s receives reprompt reminder & queue.
+    let res_perm = call(
+        &hub,
+        &conn,
+        ref_proto::Request::RestoreGroupMember {
+            group_id: gid,
+            session_id: perm_s.id.clone(),
+        },
+    )
+    .await;
+    assert_eq!(res_perm["restored"], true);
+    assert!(res_perm["groups"].as_array().unwrap().is_empty());
+    let restored_perm = hub.session(&perm_s.id).unwrap();
+    wait_idle(&restored_perm).await;
+    let msgs = messages(&restored_perm);
+    assert!(msgs.iter().any(|m| {
+        m.source == MessageSource::Reminder
+            && m.raw_text().contains("waiting for user input (permission:")
+    }));
+    assert!(msgs.iter().any(|m| m.raw_text() == "queued follow-up"));
 }

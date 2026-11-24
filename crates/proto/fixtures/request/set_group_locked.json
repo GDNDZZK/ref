@@ -1,0 +1,6 @@
+{
+  "id": 51,
+  "op": "set_group_locked",
+  "group_id": "grp_a1b2c3d4",
+  "locked": true
+}

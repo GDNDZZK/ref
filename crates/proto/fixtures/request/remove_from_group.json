@@ -1,0 +1,6 @@
+{
+  "id": 55,
+  "op": "remove_from_group",
+  "group_id": "grp_a1b2c3d4",
+  "session_id": "ses_a1b2c3d4"
+}
