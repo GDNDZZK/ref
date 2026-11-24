@@ -20,7 +20,6 @@ Item {
 	readonly property int tipDelay: 600
 	readonly property int barHeight: 5
 	readonly property int tickWidth: 2
-	readonly property int tickOverhang: 2
 	readonly property string activity: session.activity
 	readonly property bool working: activity === Activity.thinking || activity === Activity.running || activity === Activity.compacting
 	readonly property bool retrying: activity === Activity.retrying
@@ -182,7 +181,7 @@ Item {
 					anchors.verticalCenter: parent.verticalCenter
 					z: 1
 					width: line.tickWidth
-					height: parent.height + 2 * line.tickOverhang
+					height: parent.height
 					radius: width / 2
 					color: Theme.warning
 					visible: line.session.contextRecommend > 0 && line.session.contextRecommend < line.contextMax
@@ -196,7 +195,7 @@ Item {
 					anchors.verticalCenter: parent.verticalCenter
 					z: 1
 					width: line.tickWidth
-					height: parent.height + 2 * line.tickOverhang
+					height: parent.height
 					radius: width / 2
 					color: Theme.danger
 					visible: line.session.contextAuto > 0 && line.session.contextAuto < line.contextMax

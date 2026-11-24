@@ -221,8 +221,8 @@ const contextTitle = computed(() => {
 
 .tick {
   position: absolute;
-  top: -2px;
-  bottom: -2px;
+  top: 0;
+  bottom: 0;
   width: 2px;
   border-radius: 1px;
   transform: translateX(-50%);
