@@ -174,7 +174,12 @@ int main(int argc, char* argv[])
 		QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] { QCoreApplication::exit(EXIT_FAILURE); }, Qt::QueuedConnection);
 
 		engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
-		engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([&workspace](const QString& sessionId) { return workspace.session(sessionId); }));
+		auto* chatImages = new ChatImageProvider([&workspace](const QString& sessionId) { return workspace.session(sessionId); });
+		engine.addImageProvider(u"chatimage"_s, chatImages);
+		QObject::connect(&workspace, &Workspace::sessionMessagesEvicted, chatImages->cacheHost(),
+		                 [chatImages](const QString& sessionId, const QStringList& ids) { chatImages->evictMessages(sessionId, ids); });
+		QObject::connect(&workspace, &Workspace::clearImageCacheRequested, chatImages->cacheHost(),
+		                 [chatImages] { chatImages->clearAll(); });
 		QObject::connect(workspace.settings(), &refgui::workspace::Settings::languageChanged, &app, [&] {
 			translator.setLanguage(workspace.settings()->language());
 			engine.retranslate();

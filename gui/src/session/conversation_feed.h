@@ -26,8 +26,10 @@ public:
 	explicit ConversationFeed(ConversationModel& model, QObject* parent = nullptr);
 
 	// Loads the history of another session and drops whatever was waiting to be shown.
-	void reset(const QList<proto::Message>& messages);
-	// Handles message, part, delta, removal and reset events; ignores the others.
+	void reset(const QList<proto::Message>& messages,
+	           quint64 totalMessages = 0,
+	           quint64 startSeq = 0,
+	           const QList<proto::MessageLayoutMeta>& layoutMetas = {});
 	void apply(const proto::SessionEvent& event);
 	// Shows all waiting text now.
 	void flush();
@@ -42,8 +44,14 @@ private:
 	void applyPart(const proto::PartEvent& event);
 	void applyDelta(const proto::DeltaEvent& event);
 	// Drops what was waiting to be shown and installs the history with `install` of the model.
-	void replace(const QList<proto::Message>& messages, void (ConversationModel::*install)(const QList<proto::Message>&));
-
+	void replace(const QList<proto::Message>& messages,
+	             quint64 totalMessages,
+	             quint64 startSeq,
+	             const QList<proto::MessageLayoutMeta>& layoutMetas,
+	             void (ConversationModel::*install)(const QList<proto::Message>&,
+	                                              quint64,
+	                                              quint64,
+	                                              const QList<proto::MessageLayoutMeta>&));
 	enum class Fit
 	{
 		Equal,        // same text as what is known

@@ -7,6 +7,7 @@
 #include "session/conversation_model.h"
 
 #include <QCoroTask>
+#include <QTimer>
 #include <QObject>
 
 #include <optional>
@@ -82,6 +83,8 @@ public:
 	// Adds the page of messages before the oldest one. Does nothing when there are none or a page is on its way.
 	QCoro::Task<Result<void>> loadOlder();
 
+	void setVisibleSeqRange(quint64 startSeq, quint64 endSeq);
+	void setFollowing(bool following);
 	QCoro::Task<Result<proto::PromptResult>> send(QString text, QList<proto::ImageData> images = {});
 	QCoro::Task<Result<void>> abort();
 	QCoro::Task<Result<proto::RetryNowResult>> retryNow();
@@ -123,6 +126,9 @@ signals:
 	void questionsChanged();
 	void moreBeforeChanged();
 	void loadingOlderChanged();
+	void aboutToMaterialize();
+	void materialized();
+	void messagesEvicted(const QStringList& messageIds);
 	// The backend reported a problem with the session (an Error event).
 	void errorReported(const QString& text);
 	// Attaching again after a reconnect failed, e.g. because the session is gone.
@@ -133,6 +139,9 @@ private:
 	void adopt(const proto::SessionSnapshot& snapshot);
 	void onFrame(const proto::ServerFrame& frame);
 	void onEvent(const proto::SessionEvent& event);
+	QCoro::Task<> fetchRange(quint64 startSeq, quint64 endSeq, quint64 generation);
+	void onRangeFetchTimeout();
+	void cancelPendingRangeFetch();
 	// Adds a question unless it is already asked.
 	void addQuestion(const proto::QuestionRequest& request);
 	void setInfo(const proto::SessionInfo& info);
@@ -152,6 +161,11 @@ private:
 	QList<proto::QuestionRequest> m_questions;
 	bool m_moreBefore = false;
 	bool m_loadingOlder = false;
+	bool m_following = true;
+	QTimer m_rangeFetchTimer;
+	quint64 m_pendingFetchStart = 0;
+	quint64 m_pendingFetchEnd = 0;
+	quint64 m_rangeFetchGen = 0;
 };
 
 } // namespace refgui::session

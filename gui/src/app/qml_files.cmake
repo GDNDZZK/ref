@@ -164,6 +164,7 @@ set(REFGUI_APP_QML_NAMES
 	Flourish.qml
 	AlertBadge.qml
 	ErrorBlock.qml
+	SkeletonBlock.qml
 	ImageBlock.qml
 	StatusLine.qml
 	OlderPill.qml

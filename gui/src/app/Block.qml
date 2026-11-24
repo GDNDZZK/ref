@@ -44,6 +44,10 @@ Item {
 	ListView.onAdd: {
 		if (chat.prepending) // earlier history, not news
 			return
+		if (chat.materializing) {
+			quickFade.restart()
+			return
+		}
 		entrance.restart()
 		added()
 	}
@@ -87,6 +91,8 @@ Item {
 	Component.onCompleted: {
 		easedHeight = naturalHeight
 		easing = streaming
+		if (chat.materializing)
+			quickFade.restart()
 	}
 	onStreamingChanged: {
 		if (!streaming)
@@ -99,6 +105,15 @@ Item {
 		id: entrance
 		NumberAnimation { target: block; property: "opacity"; from: 0; to: 1; duration: Motion.standard; easing.type: Motion.ease }
 		NumberAnimation { target: entryShift; property: "y"; from: -Motion.enterDrop; to: 0; duration: Motion.standard; easing.type: Motion.ease }
+	}
+	NumberAnimation {
+		id: quickFade
+		target: block
+		property: "opacity"
+		from: 0
+		to: 1
+		duration: Motion.quick
+		easing.type: Motion.ease
 	}
 
 	SequentialAnimation {

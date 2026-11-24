@@ -26,9 +26,9 @@ struct Block
 		Tool,
 		Error,
 		Image,
-		Meta, // the line under a message: time, agent, tokens, actions
+		Meta,     // the line under a message: time, agent, tokens, actions
+		Skeleton, // lightweight placeholder for an evicted/unloaded message
 	};
-	// An image the server holds: its bytes come from GetImage with `id`.
 	struct ImageRef
 	{
 		QString id{};
@@ -85,6 +85,8 @@ struct Block
 	bool stale = false;        // before the last compaction: no longer sent to the model
 	bool contextStart = false; // the last compaction, with older messages above it
 
+	quint64 seq = 0;
+	std::optional<proto::MessageLayoutMeta> skeletonMeta{};
 	struct MarkdownCache
 	{
 		mutable QString source{};
@@ -111,6 +113,7 @@ struct Block
 QString kindName(Block::Kind kind);
 // The names the views get: "human", "peer", "spawn", "reminder", "compaction" or "shell"; empty for none.
 QString sourceName(std::optional<proto::MessageSource::Kind> kind);
+std::optional<proto::MessageSource::Kind> sourceKindFromName(QStringView name);
 // The wire name of the state, e.g. "awaiting_permission"; empty for none.
 QString toolStateName(std::optional<proto::ToolState> state);
 

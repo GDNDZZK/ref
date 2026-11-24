@@ -162,6 +162,11 @@ public:
 	Q_INVOKABLE void copyLastReply();
 	Q_INVOKABLE void toggleReasoning();
 	Q_INVOKABLE void toggleDetails();
+	Q_INVOKABLE void setColumnWidth(double width);
+	Q_INVOKABLE void setVisibleSeqRange(int startSeq, int endSeq);
+	Q_INVOKABLE void setFollowing(bool following);
+	Q_INVOKABLE int firstRowForSeq(int seq) const;
+	Q_INVOKABLE int seqForRow(int row) const;
 	Q_INVOKABLE QVariantList allImages() const;
 signals:
 	void busyChanged();
@@ -181,6 +186,9 @@ signals:
 	void errorReported(const QString& text);
 	// Undo took a prompt back: its text and pictures, for the input box.
 	void draftRestored(const QString& text, const QList<refgui::proto::NamedImage>& images);
+	void aboutToMaterialize();
+	void materialized();
+	void messagesEvicted(const QStringList& messageIds);
 
 private:
 	// How long a request or question is shown before the keys answer it: the user may still be typing.

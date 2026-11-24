@@ -14,6 +14,7 @@ namespace
 
 // Messages asked for at a time when scrolling back; the server caps a page at 1000.
 constexpr int OlderPageSize = 100;
+constexpr std::chrono::milliseconds RangeFetchDebounceMs{80};
 
 // What a request that outlived its controller reports to whoever still waits for it.
 QString destroyedError()
@@ -55,6 +56,10 @@ SessionController::SessionController(client::Backend& backend, QObject* parent)
 	connect(&m_feed, &ConversationFeed::pendingChanged, this, &SessionController::turnInProgressChanged);
 	connect(&m_feed, &ConversationFeed::pendingChanged, this, &SessionController::activelyWorkingChanged);
 	connect(&backend, &client::Backend::stateChanged, this, &SessionController::connectionChanged);
+	connect(&m_model, &ConversationModel::messagesEvicted, this, &SessionController::messagesEvicted);
+	m_rangeFetchTimer.setSingleShot(true);
+	m_rangeFetchTimer.setInterval(RangeFetchDebounceMs);
+	connect(&m_rangeFetchTimer, &QTimer::timeout, this, &SessionController::onRangeFetchTimeout);
 }
 
 bool SessionController::isConnected() const
@@ -120,9 +125,10 @@ QCoro::Task<SessionController::Result<void>> SessionController::detach()
 {
 	Q_ASSERT(m_attached);
 	m_attached = false; // also when the request fails: a lost connection detaches anyway
+	cancelPendingRangeFetch();
+	m_model.evictOldTail(ConversationModel::TailKeepMessages);
 	co_return co_await m_backend.client().detach(m_sessionId);
 }
-
 QCoro::Task<SessionController::Result<void>> SessionController::background()
 {
 	Q_ASSERT(m_attached);
@@ -159,6 +165,77 @@ QCoro::Task<SessionController::Result<void>> SessionController::loadOlder()
 		co_return std::unexpected(page.error());
 	}
 	co_return Result<void>();
+}
+
+void SessionController::cancelPendingRangeFetch()
+{
+	m_rangeFetchTimer.stop();
+	++m_rangeFetchGen;
+}
+
+void SessionController::setVisibleSeqRange(quint64 startSeq, quint64 endSeq)
+{
+	if(!m_attached || m_model.slotCount() == 0)
+	{
+		return;
+	}
+	if(!m_following)
+	{
+		m_model.evictOutside(startSeq, endSeq);
+	}
+	const auto missing = m_model.missingRangeAround(startSeq, endSeq, ConversationModel::PageSize);
+	if(!missing)
+	{
+		if(m_following && !m_rangeFetchTimer.isActive())
+		{
+			m_model.evictOldTail(ConversationModel::TailKeepMessages);
+		}
+		return;
+	}
+	m_pendingFetchStart = missing->first;
+	m_pendingFetchEnd = missing->second;
+	m_rangeFetchTimer.start();
+}
+
+void SessionController::setFollowing(bool following)
+{
+	m_following = following;
+	if(following && m_attached && !m_rangeFetchTimer.isActive())
+	{
+		m_model.evictOldTail(ConversationModel::TailKeepMessages);
+	}
+}
+
+void SessionController::onRangeFetchTimeout()
+{
+	if(!m_attached || !isConnected() || m_pendingFetchEnd <= m_pendingFetchStart)
+	{
+		return;
+	}
+	const quint64 generation = ++m_rangeFetchGen;
+	fetchRange(m_pendingFetchStart, m_pendingFetchEnd, generation);
+}
+
+QCoro::Task<> SessionController::fetchRange(quint64 startSeq, quint64 endSeq, quint64 generation)
+{
+	const QPointer<SessionController> self(this);
+	const QString sessionId = m_sessionId;
+	const auto page = co_await m_backend.client().messagesRange(sessionId, startSeq, endSeq, ConversationModel::PageSize);
+	if(!self || !m_attached || sessionId != m_sessionId || generation != m_rangeFetchGen)
+	{
+		co_return;
+	}
+	if(!page)
+	{
+		co_return;
+	}
+	emit aboutToMaterialize();
+	m_model.materializeRange(page->startSeq, page->messages);
+	emit materialized();
+	if(m_following)
+	{
+		m_model.evictOldTail(ConversationModel::TailKeepMessages);
+	}
 }
 
 QCoro::Task<SessionController::Result<proto::PromptResult>> SessionController::send(QString text, QList<proto::ImageData> images)
@@ -278,11 +355,12 @@ QCoro::Task<> SessionController::reattach()
 
 void SessionController::adopt(const proto::SessionSnapshot& snapshot)
 {
-	m_feed.reset(snapshot.messages);
+	cancelPendingRangeFetch();
+	m_feed.reset(snapshot.messages, snapshot.totalMessages, snapshot.startSeq, snapshot.layoutMetas);
 	m_model.setPendingPermissions(snapshot.pendingPermissions);
 	setQueued(snapshot.queued);
 	setQuestions(snapshot.pendingQuestions);
-	setMoreBefore(snapshot.moreBefore);
+	setMoreBefore(m_model.hasPlaceholders() ? false : snapshot.moreBefore);
 	setInfo(snapshot.info);
 }
 
@@ -338,7 +416,10 @@ void SessionController::onEvent(const proto::SessionEvent& event)
 	}
 	if(const auto* reset = std::get_if<proto::ResetEvent>(&event))
 	{
-		setMoreBefore(reset->moreBefore);
+		cancelPendingRangeFetch();
+		m_feed.apply(event);
+		setMoreBefore(m_model.hasPlaceholders() ? false : reset->moreBefore);
+		return;
 	}
 	m_feed.apply(event); // ignores permission events: tool parts carry their state
 }

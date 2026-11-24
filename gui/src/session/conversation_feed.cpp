@@ -49,20 +49,29 @@ ConversationFeed::ConversationFeed(ConversationModel& model, QObject* parent)
 	connect(&m_ticker, &QTimer::timeout, this, &ConversationFeed::tick);
 }
 
-void ConversationFeed::reset(const QList<proto::Message>& messages)
+void ConversationFeed::reset(const QList<proto::Message>& messages,
+                             quint64 totalMessages,
+                             quint64 startSeq,
+                             const QList<proto::MessageLayoutMeta>& layoutMetas)
 {
-	replace(messages, &ConversationModel::reset);
+	replace(messages, totalMessages, startSeq, layoutMetas, &ConversationModel::reset);
 }
 
-void ConversationFeed::replace(const QList<proto::Message>& messages, void (ConversationModel::*install)(const QList<proto::Message>&))
+void ConversationFeed::replace(const QList<proto::Message>& messages,
+                               quint64 totalMessages,
+                               quint64 startSeq,
+                               const QList<proto::MessageLayoutMeta>& layoutMetas,
+                               void (ConversationModel::*install)(const QList<proto::Message>&,
+                                                                quint64,
+                                                                quint64,
+                                                                const QList<proto::MessageLayoutMeta>&))
 {
 	const bool wasPending = hasPending();
 	m_pacer = {};
 	m_ticker.stop();
-	(m_model.*install)(messages);
+	(m_model.*install)(messages, totalMessages, startSeq, layoutMetas);
 	updatePending(wasPending);
 }
-
 void ConversationFeed::apply(const proto::SessionEvent& event)
 {
 	if(const auto* message = std::get_if<proto::MessageEvent>(&event))
@@ -84,7 +93,7 @@ void ConversationFeed::apply(const proto::SessionEvent& event)
 	}
 	else if(const auto* reset = std::get_if<proto::ResetEvent>(&event))
 	{
-		replace(reset->messages, &ConversationModel::replaceHistory);
+		replace(reset->messages, reset->totalMessages, reset->startSeq, reset->layoutMetas, &ConversationModel::replaceHistory);
 	}
 }
 

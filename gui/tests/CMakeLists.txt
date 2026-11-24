@@ -19,6 +19,7 @@ refgui_add_test(tst_fence_splitter LIBS refgui_session)
 refgui_add_test(tst_conversation_model SOURCES session_test_data.h LIBS refgui_session Qt6::Gui DEFINITIONS REF_FIXTURES_DIR="${PROJECT_SOURCE_DIR}/../crates/proto/fixtures")
 
 refgui_add_test(tst_stream_pacer LIBS refgui_session)
+refgui_add_test(tst_layout_estimator LIBS refgui_session)
 
 refgui_add_test(tst_proto LIBS refgui_proto DEFINITIONS REF_FIXTURES_DIR="${PROJECT_SOURCE_DIR}/../crates/proto/fixtures")
 
@@ -177,6 +178,7 @@ set(tool_block_qml_names
 	CodeBlock.qml
 	ToolBlock.qml
 	ErrorBlock.qml
+	SkeletonBlock.qml
 	MetaBlock.qml
 	ThemedScrollBar.qml
 	ProseText.qml

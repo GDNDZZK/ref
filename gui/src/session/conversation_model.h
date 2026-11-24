@@ -79,8 +79,17 @@ public:
 		ContextStartRole, // the last compaction, with older messages above it
 		ExpandedRole,     // reasoning, tool and compaction blocks: unfolded
 		ShowAllRole,      // tool blocks: the whole output instead of a preview
+		SeqRole,          // 0-based message sequence index in the session
+		EstimatedHeightRole, // placeholder height from LayoutEstimator
+		SkeletonPartsRole,   // list of part metadata maps for SkeletonBlock
+		MessageRoleRole,     // "user" | "assistant" for SkeletonBlock
+		HasErrorRole,        // whether the placeholder message ended with an error
 	};
 
+	static constexpr qsizetype PageSize = 100;
+	static constexpr qsizetype MaxResidentMessages = 300;
+	static constexpr qsizetype TailKeepMessages = 100;
+	static constexpr qsizetype EvictMargin = 150;
 	explicit ConversationModel(QObject* parent = nullptr);
 
 	// What the tool calls ask of the user, for the keys and the status line.
@@ -112,13 +121,36 @@ public:
 	QHash<int, QByteArray> roleNames() const override;
 
 	// Replaces the whole history. The only operation that resets the model.
-	void reset(const QList<proto::Message>& messages);
+	void reset(const QList<proto::Message>& messages,
+	           quint64 totalMessages = 0,
+	           quint64 startSeq = 0,
+	           const QList<proto::MessageLayoutMeta>& layoutMetas = {});
 	// Replaces the history of the same session: rows that stay as they are are left alone, the
 	// rest is removed and inserted, so a view can animate what changed.
-	void replaceHistory(const QList<proto::Message>& messages);
+	void replaceHistory(const QList<proto::Message>& messages,
+	                    quint64 totalMessages = 0,
+	                    quint64 startSeq = 0,
+	                    const QList<proto::MessageLayoutMeta>& layoutMetas = {});
 	// Adds older messages in front of the current ones.
 	void prependMessages(const QList<proto::Message>& older);
-
+	// Materializes placeholder slots in [startSeq, startSeq + messages.size()).
+	void materializeRange(quint64 startSeq, const QList<proto::Message>& messages);
+	// Evicts materialized slots outside [visibleStart - EvictMargin, visibleEnd + EvictMargin]
+	// and enforces MaxResidentMessages. Returns evicted message IDs.
+	QStringList evictOutside(quint64 visibleStart, quint64 visibleEnd);
+	// Evicts materialized slots older than total - keepCount. Returns evicted message IDs.
+	QStringList evictOldTail(qsizetype keepCount = TailKeepMessages);
+	// Updates column width used by LayoutEstimator and notifies placeholder rows synchronously.
+	void setColumnWidth(double width);
+	double columnWidth() const { return m_columnWidth; }
+	bool hasPlaceholders() const;
+	qsizetype slotCount() const { return m_messages.size(); }
+	qsizetype residentCount() const;
+	std::optional<std::pair<quint64, quint64>> missingRangeAround(quint64 visibleStart,
+	                                                              quint64 visibleEnd,
+	                                                              qsizetype pageSize = PageSize) const;
+	Q_INVOKABLE int firstRowForSeq(quint64 seq) const;
+	Q_INVOKABLE int seqForRow(int row) const;
 	// Adds the message, or replaces the one with the same id.
 	void setMessage(const proto::Message& message);
 	// Replaces part `index` of a message, or appends it when `index` is the part count.
@@ -147,6 +179,7 @@ public:
 	QVariantList allImages() const;
 signals:
 	void toolSummaryChanged();
+	void messagesEvicted(const QStringList& messageIds);
 
 private:
 	struct PartNode
@@ -158,6 +191,8 @@ private:
 	};
 	struct MessageNode
 	{
+		bool materialized = true;
+		std::optional<proto::MessageLayoutMeta> layoutMeta{};
 		MessageHeader header; // `parts` stays empty, see `parts` below
 		QList<PartNode> parts;
 		qsizetype partRows = 0;
@@ -172,6 +207,12 @@ private:
 	};
 
 	static MessageNode makeNode(proto::Message message);
+	static MessageNode makePlaceholderNode(proto::MessageLayoutMeta meta);
+	Block makeSkeletonBlock(const proto::MessageLayoutMeta& meta) const;
+	static proto::Message materializeHeaderAndParts(const MessageNode& node);
+	QStringList evictSlots(const QList<qsizetype>& indices);
+	void emitSkeletonHeightsChanged();
+	double estimatedHeightFor(const Block& block) const;
 
 	qsizetype indexOf(const QString& messageId) const;
 	qsizetype firstRowOf(qsizetype messageIndex) const;
@@ -185,8 +226,10 @@ private:
 		QList<MessageNode> nodes;
 		QList<Block> rows;
 	};
-	static Built buildNodes(const QList<proto::Message>& messages);
-	void rebuildPart(qsizetype messageIndex, qsizetype partIndex);
+	static Built buildNodes(const QList<proto::Message>& messages,
+	                        quint64 totalMessages = 0,
+	                        quint64 startSeq = 0,
+	                        const QList<proto::MessageLayoutMeta>& layoutMetas = {});
 	void rebuildOwnRows(qsizetype messageIndex);
 	// Rebuilds what a change elsewhere in the message made stale: parts whose
 	// streaming state changed, and the error.
@@ -225,6 +268,6 @@ private:
 	QHash<QString, proto::EditPreview> m_permissionPreviews;
 	bool m_reasoningExpanded = false;
 	bool m_toolsExpanded = false;
+	double m_columnWidth = 760.0;
 };
-
 } // namespace refgui::session

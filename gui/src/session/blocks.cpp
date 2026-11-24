@@ -247,6 +247,36 @@ QString sourceName(std::optional<proto::MessageSource::Kind> kind)
 	Q_UNREACHABLE_RETURN(QString());
 }
 
+std::optional<proto::MessageSource::Kind> sourceKindFromName(QStringView name)
+{
+	using Kind = proto::MessageSource::Kind;
+	if(name == "human"_L1)
+	{
+		return Kind::Human;
+	}
+	if(name == "peer"_L1)
+	{
+		return Kind::Peer;
+	}
+	if(name == "spawn"_L1)
+	{
+		return Kind::Spawn;
+	}
+	if(name == "reminder"_L1)
+	{
+		return Kind::Reminder;
+	}
+	if(name == "compaction"_L1)
+	{
+		return Kind::Compaction;
+	}
+	if(name == "shell"_L1)
+	{
+		return Kind::Shell;
+	}
+	return std::nullopt;
+}
+
 QString toolStateName(std::optional<proto::ToolState> state)
 {
 	using State = proto::ToolState;
@@ -298,6 +328,8 @@ QString kindName(Block::Kind kind)
 		return u"image"_s;
 	case Block::Kind::Meta:
 		return u"meta"_s;
+	case Block::Kind::Skeleton:
+		return u"skeleton"_s;
 	}
 	Q_UNREACHABLE_RETURN(QString());
 }

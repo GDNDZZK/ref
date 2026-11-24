@@ -393,6 +393,9 @@ ChatSession& Workspace::chat(const QString& sessionId)
 		slot = new ChatSession(m_connection.backend(), m_config, sessionId, this, &m_directory);
 		connect(slot, &ChatSession::infoChanged, this, &Workspace::syncConfigCwd);
 		connect(slot->composer(), &refgui::composer::ComposerModel::toastRequested, this, &Workspace::toast);
+		connect(slot, &ChatSession::messagesEvicted, this, [this, sessionId](const QStringList& ids) {
+			emit sessionMessagesEvicted(sessionId, ids);
+		});
 		connect(slot, &ChatSession::errorReported, this, [this, sessionId](const QString& text) {
 			// The current session draws its errors in the conversation; the others need a toast.
 			if(sessionId == currentId() && !m_split)
