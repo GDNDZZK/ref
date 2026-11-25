@@ -642,6 +642,20 @@ pub(crate) fn retry_max_delay(cfg: &Config) -> Duration {
     }
 }
 
+/// Server-provided retry hint filtered by `cfg`'s `retry.*` toggles in strict
+/// `header > body_field > text` precedence.
+pub(crate) fn effective_retry_after(cfg: &Config, hints: &ref_llm::RetryHints) -> Option<Duration> {
+    cfg.retry_respect_headers
+        .then_some(hints.header)
+        .flatten()
+        .or_else(|| {
+            cfg.retry_respect_body_fields
+                .then_some(hints.body_field)
+                .flatten()
+        })
+        .or_else(|| cfg.retry_parse_error_text.then_some(hints.text).flatten())
+}
+
 /// Backoff delay before retry `attempt` (1-based): `base * 2^(attempt-1)` capped at `max`,
 /// with `jitter` (within `JITTER_FRACTION` of zero) applied, at least `retry_after`, never above `max`.
 pub fn backoff(
@@ -722,7 +736,8 @@ async fn stream_with_retry(
                     return Err(Outcome::Failed(e.message.clone()));
                 }
                 let jitter = rand::random_range(-JITTER_FRACTION..=JITTER_FRACTION);
-                let delay = backoff(hub.opts.retry_base, attempt, max, e.retry_after, jitter);
+                let retry_after = effective_retry_after(&p.cfg, &e.retry_hints);
+                let delay = backoff(hub.opts.retry_base, attempt, max, retry_after, jitter);
                 tracing::warn!(session = %s.id, attempt, "LLM request failed ({}); retrying in {:?}", e.message, delay);
                 {
                     let mut st = s.lock();
@@ -1560,4 +1575,49 @@ fn maybe_title(hub: &Arc<Hub>, s: &Arc<Session>, st: &mut SessionState, msg: &Me
     st.info.title = crate::util::truncate_chars(first, TITLE_MAX_CHARS);
     hub.emit_info(st);
     tokio::spawn(crate::title::generate(hub.clone(), s.clone(), text));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::effective_retry_after;
+    use ref_config::Config;
+    use ref_llm::RetryHints;
+    use std::time::Duration;
+
+    #[test]
+    fn effective_retry_after_follows_toggles_and_header_first_precedence() {
+        let hints = RetryHints {
+            header: Some(Duration::from_secs(5)),
+            body_field: Some(Duration::from_secs(15)),
+            text: Some(Duration::from_secs(30)),
+        };
+        let mut cfg = Config::default();
+        assert_eq!(
+            effective_retry_after(&cfg, &hints),
+            Some(Duration::from_secs(5))
+        );
+
+        cfg.retry_respect_headers = false;
+        assert_eq!(
+            effective_retry_after(&cfg, &hints),
+            Some(Duration::from_secs(15))
+        );
+
+        cfg.retry_respect_body_fields = false;
+        assert_eq!(
+            effective_retry_after(&cfg, &hints),
+            Some(Duration::from_secs(30))
+        );
+
+        cfg.retry_parse_error_text = false;
+        assert_eq!(effective_retry_after(&cfg, &hints), None);
+
+        // Re-enabling headers still beats text even when body_field is disabled.
+        cfg.retry_respect_headers = true;
+        cfg.retry_parse_error_text = true;
+        assert_eq!(
+            effective_retry_after(&cfg, &hints),
+            Some(Duration::from_secs(5))
+        );
+    }
 }

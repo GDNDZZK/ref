@@ -1416,90 +1416,123 @@ $ARGUMENTS</translation>
     </message>
     <message>
         <location filename="../src/app/ConfigGeneralSection.qml" line="310"/>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="319"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="320"/>
+        <source>Respect retry response headers</source>
+        <translation>遵守重试响应头</translation>
+    </message>
+    <message>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="312"/>
+        <source>Honor Retry-After and rate-limit reset headers from upstream responses (highest precedence).</source>
+        <translation>遵守上游响应中的 Retry-After 与速率限制重置响应头（优先级最高）。</translation>
+    </message>
+    <message>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="327"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="337"/>
+        <source>Respect retry body fields</source>
+        <translation>遵守响应体中的重试字段</translation>
+    </message>
+    <message>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="329"/>
+        <source>Honor structured retry_after and retryDelay fields in JSON or SSE error payloads.</source>
+        <translation>遵守 JSON 或 SSE 错误载荷中的结构化 retry_after 与 retryDelay 字段。</translation>
+    </message>
+    <message>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="344"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="354"/>
+        <source>Parse retry hints from error text</source>
+        <translation>从错误文本解析重试等待提示</translation>
+    </message>
+    <message>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="346"/>
+        <source>Extract retry wait durations from free-form error messages when no higher-precedence hint is present.</source>
+        <translation>当不存在更高优先级的提示时，从自由格式的错误消息中提取重试等待时间。</translation>
+    </message>
+    <message>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="361"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="370"/>
         <source>Auto-resize images</source>
         <translation>自动缩放图片</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="312"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="363"/>
         <source>Downscale and recompress read, fetched, and pasted images for models.</source>
         <translation>为模型自动缩小并重新压缩读取、抓取和粘贴的图片。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="326"/>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="335"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="377"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="386"/>
         <source>Show sidebar by default</source>
         <translation>默认显示侧边栏</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="328"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="379"/>
         <source>Initial sidebar visibility in TUI sessions.</source>
         <translation>TUI 会话中侧边栏的初始显示状态。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="342"/>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="351"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="393"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="402"/>
         <source>Expand thinking by default</source>
         <translation>默认展开思考内容</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="344"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="395"/>
         <source>Expand reasoning blocks initially in new sessions.</source>
         <translation>在新会话中默认展开推理思考块。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="358"/>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="367"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="409"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="418"/>
         <source>Expand tool details by default</source>
         <translation>默认展开工具详情</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="360"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="411"/>
         <source>Expand tool call inputs and outputs initially in new sessions.</source>
         <translation>在新会话中默认展开工具调用的输入与输出。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="378"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="429"/>
         <source>Provider Filters</source>
         <translation>提供商过滤</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="384"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="435"/>
         <source>Enabled providers</source>
         <translation>启用的提供商</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="386"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="437"/>
         <source>When non-empty, only these provider IDs are loaded.</source>
         <translation>非空时仅加载此处列出的提供商 ID。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="397"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="448"/>
         <source>Provider ID (e.g. anthropic)</source>
         <translation>提供商 ID（如 anthropic）</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="398"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="449"/>
         <source>All configured providers enabled</source>
         <translation>已启用全部配置的提供商</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="404"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="455"/>
         <source>Disabled providers</source>
         <translation>禁用的提供商</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="406"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="457"/>
         <source>Provider IDs listed here are skipped even if configured or in environment.</source>
         <translation>此处列出的提供商 ID 即使已配置或存在于环境变量中也会被跳过。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="416"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="467"/>
         <source>Provider ID to disable</source>
         <translation>要禁用的提供商 ID</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="417"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="468"/>
         <source>No providers disabled</source>
         <translation>未禁用任何提供商</translation>
     </message>

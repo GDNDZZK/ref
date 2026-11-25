@@ -1,7 +1,9 @@
 //! Context compaction: model-generated summary (manual / automatic / overflow) or a
 //! summary supplied by the model via `compact_context`.
 
-use crate::engine::{ABORTED, JITTER_FRACTION, Prep, backoff, retry_max_delay};
+use crate::engine::{
+    ABORTED, JITTER_FRACTION, Prep, backoff, effective_retry_after, retry_max_delay,
+};
 use crate::hub::Hub;
 use crate::session::{Session, user_message};
 use ref_config::COMPACTION_AGENT;
@@ -287,7 +289,7 @@ async fn summarize(
                     hub.opts.retry_base,
                     attempt,
                     max,
-                    e.retry_after,
+                    effective_retry_after(&prep.cfg, &e.retry_hints),
                     rand::random_range(-JITTER_FRACTION..=JITTER_FRACTION),
                 );
                 tracing::warn!(session = %s.id, "compaction request failed ({}); retrying in {:?}", e.message, d);

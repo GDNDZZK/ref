@@ -99,6 +99,9 @@ fn empty_config_has_builtins() {
     assert!(!c.agents["plan"].can_spawn);
     assert!(c.providers.is_empty());
     assert_eq!(c.retry_max_delay, 600);
+    assert!(c.retry_respect_headers);
+    assert!(c.retry_respect_body_fields);
+    assert!(c.retry_parse_error_text);
     assert!(c.images_auto_resize);
     assert!(c.compaction.auto);
     assert!(c.config_dirs.contains(&fx.home().join(".config/opencode")));
@@ -947,4 +950,46 @@ fn project_config_files_lists_layers_and_excludes_global_dirs() {
     let in_global =
         project_config_files(Some(&fx.home()), &globals, Some(&global_ref), &global_ref);
     assert!(in_global.is_empty());
+}
+
+#[test]
+fn retry_hint_toggles_default_override_and_warn_on_non_bool() {
+    let def = Config::default();
+    assert!(def.retry_respect_headers);
+    assert!(def.retry_respect_body_fields);
+    assert!(def.retry_parse_error_text);
+
+    let fx = Fx::new();
+    fx.write_global_config(
+        r#"{"retry": {"respect_headers": false, "respect_body_fields": true, "parse_error_text": false}}"#,
+    );
+    fx.write(
+        "proj/.ref/ref.json",
+        r#"{"retry": {"respect_body_fields": false}}"#,
+    );
+    let c = fx.load();
+    assert!(c.warnings.is_empty(), "{:?}", c.warnings);
+    assert!(!c.retry_respect_headers);
+    assert!(!c.retry_respect_body_fields);
+    assert!(!c.retry_parse_error_text);
+
+    fx.write_global_config(
+        r#"{"retry": {"respect_headers": "no", "respect_body_fields": 0, "parse_error_text": []}}"#,
+    );
+    fx.write("proj/.ref/ref.json", "{}");
+    let c = fx.load();
+    assert!(c.retry_respect_headers);
+    assert!(c.retry_respect_body_fields);
+    assert!(c.retry_parse_error_text);
+    for expected in [
+        "retry.respect_headers must be true or false",
+        "retry.respect_body_fields must be true or false",
+        "retry.parse_error_text must be true or false",
+    ] {
+        assert!(
+            c.warnings.iter().any(|w| w.contains(expected)),
+            "missing {expected:?} in {:?}",
+            c.warnings
+        );
+    }
 }

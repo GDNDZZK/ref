@@ -307,6 +307,57 @@ Column {
 	}
 
 	FormRow {
+		label: qsTr("Respect retry response headers")
+		badge: "retry.respect_headers"
+		description: qsTr("Honor Retry-After and rate-limit reset headers from upstream responses (highest precedence).")
+		controlWidth: 0
+		showDivider: true
+		showReset: { void section.editor.revision; return section.editor.contains(["retry", "respect_headers"]) }
+		onResetClicked: section.resetPath(["retry", "respect_headers"])
+
+		Switch {
+			objectName: "retryRespectHeadersSwitch"
+			accessibleName: qsTr("Respect retry response headers")
+			checked: { void section.editor.revision; return section.boolAt(["retry", "respect_headers"], true) }
+			onToggled: val => section.mutate(() => section.editor.setValueAt(["retry", "respect_headers"], val))
+		}
+	}
+
+	FormRow {
+		label: qsTr("Respect retry body fields")
+		badge: "retry.respect_body_fields"
+		description: qsTr("Honor structured retry_after and retryDelay fields in JSON or SSE error payloads.")
+		controlWidth: 0
+		showDivider: true
+		showReset: { void section.editor.revision; return section.editor.contains(["retry", "respect_body_fields"]) }
+		onResetClicked: section.resetPath(["retry", "respect_body_fields"])
+
+		Switch {
+			objectName: "retryRespectBodyFieldsSwitch"
+			accessibleName: qsTr("Respect retry body fields")
+			checked: { void section.editor.revision; return section.boolAt(["retry", "respect_body_fields"], true) }
+			onToggled: val => section.mutate(() => section.editor.setValueAt(["retry", "respect_body_fields"], val))
+		}
+	}
+
+	FormRow {
+		label: qsTr("Parse retry hints from error text")
+		badge: "retry.parse_error_text"
+		description: qsTr("Extract retry wait durations from free-form error messages when no higher-precedence hint is present.")
+		controlWidth: 0
+		showDivider: true
+		showReset: { void section.editor.revision; return section.editor.contains(["retry", "parse_error_text"]) }
+		onResetClicked: section.resetPath(["retry", "parse_error_text"])
+
+		Switch {
+			objectName: "retryParseErrorTextSwitch"
+			accessibleName: qsTr("Parse retry hints from error text")
+			checked: { void section.editor.revision; return section.boolAt(["retry", "parse_error_text"], true) }
+			onToggled: val => section.mutate(() => section.editor.setValueAt(["retry", "parse_error_text"], val))
+		}
+	}
+
+	FormRow {
 		label: qsTr("Auto-resize images")
 		badge: "images.auto_resize"
 		description: qsTr("Downscale and recompress read, fetched, and pasted images for models.")

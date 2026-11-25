@@ -44,6 +44,18 @@ pub(crate) fn build(ctx: &mut Ctx, layers: &[Layer]) -> Config {
             Some(_) => ctx.warn("retry.max_delay must be >= 0"),
             None => {}
         }
+        for (key, dst) in [
+            ("respect_headers", &mut cfg.retry_respect_headers),
+            ("respect_body_fields", &mut cfg.retry_respect_body_fields),
+            ("parse_error_text", &mut cfg.retry_parse_error_text),
+        ] {
+            if let Some(v) = r.get(key) {
+                match v.as_bool() {
+                    Some(b) => *dst = b,
+                    None => ctx.warn(format!("retry.{key} must be true or false")),
+                }
+            }
+        }
     }
     if let Some(v) = merged.get("images").and_then(|i| i.get("auto_resize")) {
         match v.as_bool() {

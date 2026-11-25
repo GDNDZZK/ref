@@ -164,6 +164,24 @@ pub struct Response {
     pub stop_reason: String,
 }
 
+/// Server-provided retry delay hints broken down by extraction source.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RetryHints {
+    /// Delay parsed from HTTP response headers (`retry-after-ms`, `retry-after`, `x-ratelimit-reset-*`).
+    pub header: Option<Duration>,
+    /// Delay parsed from structured JSON/SSE error payload fields.
+    pub body_field: Option<Duration>,
+    /// Delay extracted from free-form error message or plain-text body.
+    pub text: Option<Duration>,
+}
+
+impl RetryHints {
+    /// Highest-precedence hint (`header > body_field > text`).
+    pub fn preferred(&self) -> Option<Duration> {
+        self.header.or(self.body_field).or(self.text)
+    }
+}
+
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("{message}")]
 pub struct LlmError {
@@ -171,8 +189,10 @@ pub struct LlmError {
     pub status: Option<u16>,
     /// Retrying might help (network, 429, 5xx, overloaded, stream cut).
     pub retryable: bool,
-    /// Server-provided retry hint.
+    /// Server-provided retry hint (header > body_field > text precedence).
     pub retry_after: Option<Duration>,
+    /// Individual server-provided retry hints by source.
+    pub retry_hints: RetryHints,
     /// Prompt exceeded the context window.
     pub context_overflow: bool,
     /// Aborted by the cancellation token.
@@ -186,6 +206,7 @@ impl LlmError {
             status: None,
             retryable: false,
             retry_after: None,
+            retry_hints: RetryHints::default(),
             context_overflow: false,
             cancelled: true,
         }

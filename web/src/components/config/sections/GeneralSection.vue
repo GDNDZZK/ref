@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // General configuration section: `$name`, `model`, `small_model`, `default_agent`, `compaction.*`,
-// `retry.max_delay`, `images.auto_resize`, `tui.{sidebar,thinking,details}`, and provider filters.
+// `retry.*`, `images.auto_resize`, `tui.{sidebar,thinking,details}`, and provider filters.
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
@@ -213,6 +213,51 @@ function writeTri(path: readonly string[], state: TriState): void {
         :label="t('config.editor.general.retryMaxDelay')"
         @update:model-value="patch(['retry', 'max_delay'], $event)"
       />
+    </FormRow>
+
+    <FormRow
+      :label="t('config.editor.general.retryRespectHeaders')"
+      :description="t('config.editor.general.retryRespectHeadersDesc')"
+      :can-reset="getAt(doc, ['retry', 'respect_headers']) !== undefined"
+      @reset="patch(['retry', 'respect_headers'], undefined)"
+    >
+      <div class="switch-wrap">
+        <ToggleSwitch
+          :model-value="getBooleanAt(doc, ['retry', 'respect_headers']) ?? true"
+          :label="t('config.editor.general.retryRespectHeaders')"
+          @update:model-value="patch(['retry', 'respect_headers'], $event)"
+        />
+      </div>
+    </FormRow>
+
+    <FormRow
+      :label="t('config.editor.general.retryRespectBodyFields')"
+      :description="t('config.editor.general.retryRespectBodyFieldsDesc')"
+      :can-reset="getAt(doc, ['retry', 'respect_body_fields']) !== undefined"
+      @reset="patch(['retry', 'respect_body_fields'], undefined)"
+    >
+      <div class="switch-wrap">
+        <ToggleSwitch
+          :model-value="getBooleanAt(doc, ['retry', 'respect_body_fields']) ?? true"
+          :label="t('config.editor.general.retryRespectBodyFields')"
+          @update:model-value="patch(['retry', 'respect_body_fields'], $event)"
+        />
+      </div>
+    </FormRow>
+
+    <FormRow
+      :label="t('config.editor.general.retryParseErrorText')"
+      :description="t('config.editor.general.retryParseErrorTextDesc')"
+      :can-reset="getAt(doc, ['retry', 'parse_error_text']) !== undefined"
+      @reset="patch(['retry', 'parse_error_text'], undefined)"
+    >
+      <div class="switch-wrap">
+        <ToggleSwitch
+          :model-value="getBooleanAt(doc, ['retry', 'parse_error_text']) ?? true"
+          :label="t('config.editor.general.retryParseErrorText')"
+          @update:model-value="patch(['retry', 'parse_error_text'], $event)"
+        />
+      </div>
     </FormRow>
 
     <FormRow

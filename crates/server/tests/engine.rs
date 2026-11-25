@@ -2294,6 +2294,131 @@ async fn retry_honors_retry_after_in_http_body_and_sse_error() {
 }
 
 #[tokio::test]
+async fn retry_hint_toggles_and_header_first_precedence() {
+    // (a) Disabling retry_parse_error_text ignores body text hints.
+    {
+        let m = mock(Arc::new(|n, _| {
+            if n == 0 {
+                Reply::Status(
+                    429,
+                    r#"{"error":{"message":"Rate limit reached. Please try again in 30s"}}"#.into(),
+                )
+            } else {
+                Reply::Text("ok-no-text".into())
+            }
+        }))
+        .await;
+        let mut cfg = config(&m.url);
+        cfg.retry_parse_error_text = false;
+        let (hub, work) = hub(cfg, "retry-no-text");
+        let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
+        let conn = attached_conn(&hub, &s).await;
+        let start_ms = ref_proto::now_ms();
+        let start = std::time::Instant::now();
+        prompt(&hub, &s, "go");
+        wait_idle(&s).await;
+        assert_eq!(last_text(&s), "ok-no-text");
+        assert_eq!(m.count(), 2);
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            start.elapsed()
+        );
+        let retrying_fast = events(&conn).into_iter().any(|ev| {
+            matches!(
+                ev,
+                SessionEvent::Info { info } if matches!(info.status, SessionStatus::Retrying { next_at, .. } if next_at < start_ms + 500)
+            )
+        });
+        assert!(
+            retrying_fast,
+            "expected fast retry when parse_error_text is false"
+        );
+    }
+
+    // (b) Disabling retry_respect_body_fields ignores JSON fields.
+    {
+        let m = mock(Arc::new(|n, _| {
+            if n == 0 {
+                Reply::Status(
+                    429,
+                    r#"{"error":{"message":"rate limit","retry_after":30}}"#.into(),
+                )
+            } else {
+                Reply::Text("ok-no-body-field".into())
+            }
+        }))
+        .await;
+        let mut cfg = config(&m.url);
+        cfg.retry_respect_body_fields = false;
+        let (hub, work) = hub(cfg, "retry-no-body-field");
+        let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
+        let conn = attached_conn(&hub, &s).await;
+        let start_ms = ref_proto::now_ms();
+        let start = std::time::Instant::now();
+        prompt(&hub, &s, "go");
+        wait_idle(&s).await;
+        assert_eq!(last_text(&s), "ok-no-body-field");
+        assert_eq!(m.count(), 2);
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            start.elapsed()
+        );
+        let retrying_fast = events(&conn).into_iter().any(|ev| {
+            matches!(
+                ev,
+                SessionEvent::Info { info } if matches!(info.status, SessionStatus::Retrying { next_at, .. } if next_at < start_ms + 500)
+            )
+        });
+        assert!(
+            retrying_fast,
+            "expected fast retry when respect_body_fields is false"
+        );
+    }
+
+    // (c) When header, body_field, and text are all present and enabled, header wins.
+    {
+        let m = mock(Arc::new(|n, _| {
+            if n == 0 {
+                Reply::StatusWithHeaders(
+                    429,
+                    vec![("retry-after".into(), "0.15".into())],
+                    r#"{"error":{"message":"Rate limit reached. Please try again in 30s","retry_after":20}}"#.into(),
+                )
+            } else {
+                Reply::Text("ok-header-wins".into())
+            }
+        }))
+        .await;
+        let (hub, work) = hub(config(&m.url), "retry-header-wins");
+        let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
+        let conn = attached_conn(&hub, &s).await;
+        let start_ms = ref_proto::now_ms();
+        let start = std::time::Instant::now();
+        prompt(&hub, &s, "go");
+        wait_idle(&s).await;
+        let elapsed = start.elapsed();
+        assert_eq!(last_text(&s), "ok-header-wins");
+        assert_eq!(m.count(), 2);
+        assert!(
+            elapsed >= Duration::from_millis(140) && elapsed < Duration::from_secs(5),
+            "{elapsed:?}"
+        );
+        let retrying_header = events(&conn).into_iter().any(|ev| {
+            matches!(
+                ev,
+                SessionEvent::Info { info } if matches!(info.status, SessionStatus::Retrying { next_at, .. } if next_at >= start_ms + 140 && next_at < start_ms + 5000)
+            )
+        });
+        assert!(
+            retrying_header,
+            "expected header delay (150ms) to beat body/text (20s/30s)"
+        );
+    }
+}
+
+#[tokio::test]
 async fn active_window_range_paging_get_image_and_cross_compaction_undo() {
     let m = mock(Arc::new(|_, _| Reply::Text("ok".into()))).await;
     let (hub, work) = hub(config(&m.url), "active-window");

@@ -2,7 +2,7 @@
 //! provider errors are mapped onto [`LlmError`] with `retryable`,
 //! `retry_after` and `context_overflow` filled in.
 
-use crate::LlmError;
+use crate::{LlmError, RetryHints};
 use regex::Regex;
 use reqwest::StatusCode;
 use reqwest::header::HeaderMap;
@@ -25,6 +25,7 @@ impl LlmError {
             status: None,
             retryable: false,
             retry_after: None,
+            retry_hints: RetryHints::default(),
             context_overflow: false,
             cancelled: false,
         }
@@ -108,16 +109,25 @@ pub fn classify_http_error(status: u16, headers: &HeaderMap, body: &str) -> LlmE
     let context_overflow =
         status == PAYLOAD_TOO_LARGE || (status != TOO_MANY_REQUESTS && is_context_overflow(body));
     let retryable = !context_overflow;
+    let retry_hints = if retryable {
+        let header = parse_retry_after(headers);
+        let (body_field, text) = parse_retry_after_body_parts(body);
+        RetryHints {
+            header,
+            body_field,
+            text,
+        }
+    } else {
+        RetryHints::default()
+    };
+    let retry_after = retry_hints.preferred();
 
     LlmError {
         message,
         status: Some(status),
         retryable,
-        retry_after: if retryable {
-            parse_retry_after(headers).max(parse_retry_after_body(body))
-        } else {
-            None
-        },
+        retry_after,
+        retry_hints,
         context_overflow,
         cancelled: false,
     }
@@ -167,21 +177,27 @@ fn build_stream_error(
         "context_length_exceeded" | "model_context_window_exceeded" | "request_too_large"
     ) || is_context_overflow(message);
     let retryable = !overflow;
-    let retry_after = if retryable {
-        let from_err = err.and_then(parse_retry_after_json);
-        let from_meta = meta
+    let retry_hints = if retryable {
+        let (err_field, err_text) = err.map_or((None, None), parse_retry_after_json_parts);
+        let meta_field = meta
             .iter()
             .filter_map(|m| parse_retry_after_top_level(m))
             .max();
-        let from_message = parse_retry_after_body(message);
-        from_err.max(from_meta).max(from_message)
+        let (msg_field, msg_text) = parse_retry_after_body_parts(message);
+        RetryHints {
+            header: None,
+            body_field: err_field.max(meta_field).max(msg_field),
+            text: err_text.max(msg_text),
+        }
     } else {
-        None
+        RetryHints::default()
     };
+    let retry_after = retry_hints.preferred();
     LlmError {
         context_overflow: overflow,
         retryable,
         retry_after,
+        retry_hints,
         ..LlmError::fatal(text)
     }
 }
@@ -371,20 +387,26 @@ fn parse_retry_after_top_level(value: &Value) -> Option<Duration> {
         .max()
 }
 
-/// Extract the largest retry delay hint from a parsed JSON payload, checking structured retry
-/// fields recursively and error-message text fields while skipping echoed request/output subtrees.
-pub(crate) fn parse_retry_after_json(value: &Value) -> Option<Duration> {
+/// Extract `(body_field, text)` retry delay hints from a parsed JSON payload, checking structured
+/// retry fields recursively and error-message text fields while skipping echoed request/output subtrees.
+pub(crate) fn parse_retry_after_json_parts(value: &Value) -> (Option<Duration>, Option<Duration>) {
     if let Value::String(s) = value {
-        return parse_retry_after_text(s);
+        return (None, parse_retry_after_text(s));
     }
-    let mut best: Option<Duration> = None;
-    collect_retry_after_json(value, false, &mut best);
-    best
+    let mut body_field: Option<Duration> = None;
+    let mut text: Option<Duration> = None;
+    collect_retry_after_json(value, false, &mut body_field, &mut text);
+    (body_field, text)
 }
 
-fn collect_json_field(key: &str, value: &Value, best: &mut Option<Duration>) {
+fn collect_json_field(
+    key: &str,
+    value: &Value,
+    body_field: &mut Option<Duration>,
+    text: &mut Option<Duration>,
+) {
     if let Some(hint) = parse_structured_retry_field(key, value) {
-        *best = (*best).max(hint);
+        *body_field = (*body_field).max(hint);
         return;
     }
     let lower = key.to_ascii_lowercase();
@@ -392,37 +414,42 @@ fn collect_json_field(key: &str, value: &Value, best: &mut Option<Duration>) {
         return;
     }
     let allow_text = ERROR_TEXT_KEYS.contains(&lower.as_str());
-    collect_retry_after_json(value, allow_text, best);
+    collect_retry_after_json(value, allow_text, body_field, text);
 }
 
-fn collect_retry_after_json(value: &Value, allow_text: bool, best: &mut Option<Duration>) {
+fn collect_retry_after_json(
+    value: &Value,
+    allow_text: bool,
+    body_field: &mut Option<Duration>,
+    text: &mut Option<Duration>,
+) {
     match value {
         Value::Object(map) => {
             for (k, v) in map {
-                collect_json_field(k, v, best);
+                collect_json_field(k, v, body_field, text);
             }
         }
         Value::Array(items) => {
             for item in items {
-                collect_retry_after_json(item, allow_text, best);
+                collect_retry_after_json(item, allow_text, body_field, text);
             }
         }
         Value::String(s) if allow_text => {
-            *best = (*best).max(parse_retry_after_text(s));
+            *text = (*text).max(parse_retry_after_text(s));
         }
         _ => {}
     }
 }
 
-/// Extract a retry delay hint from an HTTP/error body (JSON fields or message text).
-fn parse_retry_after_body(body: &str) -> Option<Duration> {
+/// Extract `(body_field, text)` retry delay hints from an HTTP/error body.
+fn parse_retry_after_body_parts(body: &str) -> (Option<Duration>, Option<Duration>) {
     if body.trim().is_empty() {
-        return None;
+        return (None, None);
     }
     if let Ok(val) = serde_json::from_str::<Value>(body) {
-        return parse_retry_after_json(&val);
+        return parse_retry_after_json_parts(&val);
     }
-    parse_retry_after_text(body)
+    (None, parse_retry_after_text(body))
 }
 
 const DURATION_RE_FRAG: &str = concat!(
@@ -892,7 +919,7 @@ mod tests {
     }
 
     #[test]
-    fn retry_after_body_saturates_huge_and_takes_max_with_header() {
+    fn retry_after_body_saturates_huge_and_prefers_header_then_body_field_then_text() {
         for body in [
             r#"{"retry_after": 1e300}"#,
             r#"{"retry_after_ms": "1e300"}"#,
@@ -902,19 +929,53 @@ mod tests {
             assert_eq!(e.retry_after, Some(Duration::MAX), "{body}");
         }
 
+        // Header beats body text even when the text specifies a longer delay.
         let e = classify_http_error(
             429,
             &headers(&[("retry-after", "5")]),
             "Please try again in 20s",
         );
-        assert_eq!(e.retry_after, Some(Duration::from_secs(20)));
+        assert_eq!(e.retry_after, Some(Duration::from_secs(5)));
+        assert_eq!(
+            e.retry_hints,
+            RetryHints {
+                header: Some(Duration::from_secs(5)),
+                body_field: None,
+                text: Some(Duration::from_secs(20)),
+            }
+        );
 
+        // Header beats both body_field and text while recording every source in retry_hints.
         let e = classify_http_error(
             429,
-            &headers(&[("retry-after", "30")]),
-            "Please try again in 10s",
+            &headers(&[("retry-after", "3")]),
+            r#"{"error":{"message":"Please try again in 30s","retry_after":12}}"#,
         );
-        assert_eq!(e.retry_after, Some(Duration::from_secs(30)));
+        assert_eq!(e.retry_after, Some(Duration::from_secs(3)));
+        assert_eq!(
+            e.retry_hints,
+            RetryHints {
+                header: Some(Duration::from_secs(3)),
+                body_field: Some(Duration::from_secs(12)),
+                text: Some(Duration::from_secs(30)),
+            }
+        );
+
+        // Without a header, structured body_field beats text even when text is larger.
+        let e = classify_http_error(
+            429,
+            &HeaderMap::new(),
+            r#"{"error":{"message":"Please try again in 25s","retry_after":8}}"#,
+        );
+        assert_eq!(e.retry_after, Some(Duration::from_secs(8)));
+        assert_eq!(
+            e.retry_hints,
+            RetryHints {
+                header: None,
+                body_field: Some(Duration::from_secs(8)),
+                text: Some(Duration::from_secs(25)),
+            }
+        );
     }
 
     #[test]
@@ -922,23 +983,39 @@ mod tests {
         let e = stream_error(Some("rate_limit_error"), "Please try again in 12s");
         assert!(e.retryable);
         assert_eq!(e.retry_after, Some(Duration::from_secs(12)));
+        assert_eq!(
+            e.retry_hints,
+            RetryHints {
+                header: None,
+                body_field: None,
+                text: Some(Duration::from_secs(12)),
+            }
+        );
 
         let payload = serde_json::json!({
             "error": {
                 "type": "rate_limit_error",
-                "message": "Rate limited, please wait 5s",
+                "message": "Rate limited, please wait 50s",
                 "retry_after": 25,
                 "details": [{"retryDelay": "10s"}]
             }
         });
         let e = stream_error_json(
             Some("rate_limit_error"),
-            "Rate limited, please wait 5s",
+            "Rate limited, please wait 50s",
             &payload,
             &[],
         );
         assert!(e.retryable);
         assert_eq!(e.retry_after, Some(Duration::from_secs(25)));
+        assert_eq!(
+            e.retry_hints,
+            RetryHints {
+                header: None,
+                body_field: Some(Duration::from_secs(25)),
+                text: Some(Duration::from_secs(50)),
+            }
+        );
 
         let overflow_payload = serde_json::json!({
             "error": {
@@ -955,6 +1032,7 @@ mod tests {
         );
         assert!(e.context_overflow && !e.retryable);
         assert_eq!(e.retry_after, None);
+        assert_eq!(e.retry_hints, RetryHints::default());
     }
 
     #[test]

@@ -220,9 +220,10 @@ async fn truncated_error_body_surfaces_read_error() {
 
 #[tokio::test]
 async fn json_body_2xx_error_honors_body_and_header_retry_after() {
-    let body = r#"{"error":{"message":"Rate limit reached. Please try again in 4s","type":"rate_limit_error","retry_after":7}}"#;
+    // Header takes precedence over larger body_field and text while capturing all sources.
+    let body = r#"{"error":{"message":"Rate limit reached. Please try again in 40s","type":"rate_limit_error","retry_after":17}}"#;
     let head = format!(
-        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nretry-after: 11\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nretry-after: 5\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
         body.len()
     );
     let (url, _server) = serve(head, vec![], Duration::ZERO, Duration::ZERO).await;
@@ -230,9 +231,18 @@ async fn json_body_2xx_error_honors_body_and_header_retry_after() {
     let mut sink = |_e: StreamEvent| {};
     let err = run_stream(&p, &mut sink).await.unwrap_err();
     assert!(err.retryable);
-    assert_eq!(err.retry_after, Some(Duration::from_secs(11)));
+    assert_eq!(err.retry_after, Some(Duration::from_secs(5)));
+    assert_eq!(
+        err.retry_hints,
+        ref_llm::RetryHints {
+            header: Some(Duration::from_secs(5)),
+            body_field: Some(Duration::from_secs(17)),
+            text: Some(Duration::from_secs(40)),
+        }
+    );
 
-    let body_only = r#"{"error":{"message":"Please try again in 7s","retry_after_ms":12500}}"#;
+    // Without a header, body_field takes precedence over larger text.
+    let body_only = r#"{"error":{"message":"Please try again in 30s","retry_after_ms":12500}}"#;
     let head_only = format!(
         "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body_only}",
         body_only.len()
@@ -242,6 +252,14 @@ async fn json_body_2xx_error_honors_body_and_header_retry_after() {
     let err = run_stream(&p, &mut sink).await.unwrap_err();
     assert!(err.retryable);
     assert_eq!(err.retry_after, Some(Duration::from_millis(12500)));
+    assert_eq!(
+        err.retry_hints,
+        ref_llm::RetryHints {
+            header: None,
+            body_field: Some(Duration::from_millis(12500)),
+            text: Some(Duration::from_secs(30)),
+        }
+    );
 }
 
 #[tokio::test]

@@ -56,7 +56,7 @@ pub use markdown::split_frontmatter;
 pub use permission::{Action, PermissionRules};
 
 /// Fully resolved configuration (for one working directory).
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     pub providers: BTreeMap<String, ProviderConfig>,
     /// Agents by name (built-ins merged with user definitions; disabled ones removed).
@@ -82,6 +82,12 @@ pub struct Config {
     pub compaction: CompactionConfig,
     /// Retry: max delay between attempts in seconds (default 600). Retries are unlimited.
     pub retry_max_delay: u64,
+    /// Retry: respect `retry-after` / `x-ratelimit-reset-*` response headers (default true).
+    pub retry_respect_headers: bool,
+    /// Retry: respect structured retry fields in JSON/SSE error payloads (default true).
+    pub retry_respect_body_fields: bool,
+    /// Retry: extract retry hints from error messages / plain text (default true).
+    pub retry_parse_error_text: bool,
     /// `images.auto_resize` (default true): downscale / recompress images before they reach the model.
     pub images_auto_resize: bool,
     /// `tui` key passthrough.
@@ -92,6 +98,34 @@ pub struct Config {
     pub project_root: Option<PathBuf>,
     /// Non-fatal problems found while loading (shown to the user).
     pub warnings: Vec<String>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            providers: BTreeMap::new(),
+            agents: BTreeMap::new(),
+            default_agent: String::new(),
+            model: None,
+            small_model: None,
+            permission: PermissionRules::default(),
+            delay: Vec::new(),
+            mcp: BTreeMap::new(),
+            instructions: Vec::new(),
+            skill_paths: Vec::new(),
+            commands: BTreeMap::new(),
+            compaction: CompactionConfig::default(),
+            retry_max_delay: 0,
+            retry_respect_headers: true,
+            retry_respect_body_fields: true,
+            retry_parse_error_text: true,
+            images_auto_resize: false,
+            tui: Value::Null,
+            config_dirs: Vec::new(),
+            project_root: None,
+            warnings: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

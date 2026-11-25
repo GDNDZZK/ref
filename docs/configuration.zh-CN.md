@@ -113,7 +113,7 @@ Markdown 智能体和命令从同样的全局目录以及每个 `.opencode/` 和
 | `tools` | object | | opencode 的旧写法：`{"bash": false}` 禁用一个工具。 |
 | `delay` | object 或 number | 无延迟 | **ref** [工具延迟](#工具延迟)。 |
 | `compaction` | object | 90% 时自动压缩 | **ref** [上下文压缩](#上下文压缩)。 |
-| `retry` | object | `{"max_delay": 600}` | **ref** [重试](#重试图片与-tui-默认值)。 |
+| `retry` | object | `max_delay` 600，提示开关均为 `true` | **ref** [重试](#重试图片与-tui-默认值)。 |
 | `images` | object | `{"auto_resize": true}` | **ref** [图片](#重试图片与-tui-默认值)。 |
 | `tui` | object | | **ref** [TUI 默认值](#重试图片与-tui-默认值)。 |
 | `mcp` | object | 无 | [MCP 服务器](#mcp-服务器)。 |
@@ -362,12 +362,22 @@ ref 在 `~/.config/opencode/`、`~/.config/ref/` 以及每个项目的 `.opencod
 ## 重试、图片与 TUI 默认值
 
 ```jsonc
-"retry":  { "max_delay": 600 },     // 秒；重试退避的上限
+"retry":  {
+  "max_delay": 600,            // 秒；重试退避的上限
+  "respect_headers": true,     // 遵守 Retry-After / x-ratelimit-reset-* 响应头
+  "respect_body_fields": true, // 遵守 JSON/SSE 错误载荷中的结构化重试字段
+  "parse_error_text": true     // 从错误文本中提取重试等待时间
+},
 "images": { "auto_resize": true },  // 在模型看到图片之前缩小图片
 "tui":    { "sidebar": true, "thinking": false, "details": false }
 ```
 
-- **`retry.max_delay`**（**ref**，默认 `600`）：所有请求、流与网络错误（HTTP 4xx 与 5xx，包括 400、401、429 等，以及超时）都会无限重试。等待时间从 2 秒开始，每次翻倍，直到这个上限；会遵守提供商返回的 `retry-after` 响应头，以及错误响应体和流式错误事件中的 `retry-after` / `retryDelay` 重试等待提示。按 `esc esc` 停止重试。只有本地配置/初始化失败，或上下文溢出在压缩后仍然超出限制时，才会立即停止并显示错误。
+- **`retry.max_delay`**（**ref**，默认 `600`）：所有请求、流与网络错误（HTTP 4xx 与 5xx，包括 400、401、429 等，以及超时）都会无限重试。等待时间从 2 秒开始，每次翻倍，直到这个上限。按 `esc esc` 停止重试。只有本地配置/初始化失败，或上下文溢出在压缩后仍然超出限制时，才会立即停止并显示错误。
+- **上游重试等待提示**（**ref**，默认均为 `true`）：当多个已启用的来源同时提供等待提示时，ref 严格按 **`header > body_field > text`**（响应头 > 响应体字段 > 错误文本）的优先级选取，而不是在多个来源之间取最大值：
+  - **`retry.respect_headers`**（默认 `true`）：遵守 HTTP 响应头中的 `retry-after-ms`、`retry-after` 和 `x-ratelimit-reset-*`。
+  - **`retry.respect_body_fields`**（默认 `true`）：遵守 JSON/SSE 错误载荷中的结构化字段（`retry_after`、`retry_after_ms`、`retryDelay` 等）。
+  - **`retry.parse_error_text`**（默认 `true`）：从自由格式的错误消息和纯文本中提取等待时长。
+  - **号池 / 中转代理建议**：如果上游号池或代理会自动轮换账号，但错误响应体/错误文本里仍透传了底层服务商的长冷却提示（例如 `"Please try again in 30m"`），建议将 `retry.parse_error_text`（以及按需将 `retry.respect_body_fields`）设为 `false`，或由网关返回自己的 `Retry-After` 响应头，借助响应头优先规则覆盖内层消息文本。
 - **`images.auto_resize`**（**ref**，默认 `true`）：来自 `read`、`webfetch` 的图片和粘贴的图片会被缩放并重新压缩到模型处理得好的尺寸。参见[工具](tools.zh-CN.md#图片)。
 - **`tui`**（**ref**）：三个 TUI 开关的初始状态：`sidebar`（默认显示）、`thinking`（展开推理内容，`ctrl+x t`）和 `details`（展开工具调用，`ctrl+x d`）。
 

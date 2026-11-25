@@ -3,7 +3,7 @@
 //! response/event assembler.
 
 use crate::error::{
-    classify_http_error, network_error, parse_retry_after, parse_retry_after_json,
+    classify_http_error, network_error, parse_retry_after, parse_retry_after_json_parts,
     parse_retry_after_text, stream_error_json, trim_body,
 };
 use crate::sse::{SseEvent, SseParser};
@@ -629,14 +629,17 @@ fn json_body_error(headers: &HeaderMap, text: &str) -> LlmError {
             "expected an event stream, got JSON: {}",
             trim_body(text)
         ));
-        e.retry_after = match parsed.as_ref() {
-            Some(value) => parse_retry_after_json(value),
-            None => parse_retry_after_text(text),
+        let (body_field, msg_text) = match parsed.as_ref() {
+            Some(value) => parse_retry_after_json_parts(value),
+            None => (None, parse_retry_after_text(text)),
         };
+        e.retry_hints.body_field = body_field;
+        e.retry_hints.text = msg_text;
         e
     };
     if err.retryable {
-        err.retry_after = err.retry_after.max(parse_retry_after(headers));
+        err.retry_hints.header = parse_retry_after(headers);
+        err.retry_after = err.retry_hints.preferred();
     }
     err
 }

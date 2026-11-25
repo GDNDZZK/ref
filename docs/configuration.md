@@ -113,7 +113,7 @@ Problems such as invalid JSON, unknown permission actions or a missing `template
 | `tools` | object | | Older opencode form: `{"bash": false}` denies a tool. |
 | `delay` | object or number | no delay | **ref** [Tool delays](#tool-delays). |
 | `compaction` | object | auto at 90% | **ref** [Context compaction](#context-compaction). |
-| `retry` | object | `{"max_delay": 600}` | **ref** [Retries](#retries-images-and-tui-defaults). |
+| `retry` | object | `max_delay` 600, all hint toggles `true` | **ref** [Retries](#retries-images-and-tui-defaults). |
 | `images` | object | `{"auto_resize": true}` | **ref** [Images](#retries-images-and-tui-defaults). |
 | `tui` | object | | **ref** [TUI defaults](#retries-images-and-tui-defaults). |
 | `mcp` | object | none | [MCP servers](#mcp-servers). |
@@ -362,12 +362,22 @@ The model sees both points through the `context_window` tool and can compact on 
 ## Retries, images and TUI defaults
 
 ```jsonc
-"retry":  { "max_delay": 600 },     // seconds; cap for the retry backoff
+"retry":  {
+  "max_delay": 600,            // seconds; cap for the retry backoff
+  "respect_headers": true,     // honor Retry-After / x-ratelimit-reset-* headers
+  "respect_body_fields": true, // honor structured JSON/SSE retry fields
+  "parse_error_text": true     // extract durations from error message text
+},
 "images": { "auto_resize": true },  // downscale images before the model sees them
 "tui":    { "sidebar": true, "thinking": false, "details": false }
 ```
 
-- **`retry.max_delay`** (**ref**, default `600`): failed LLM requests — all request, stream and network errors (HTTP 4xx and 5xx, including 400, 401, 429, etc., and timeouts) — are retried without limit. The wait starts at 2 s and doubles up to this cap; a `retry-after` header from the provider—as well as `retry-after` or `retryDelay` hints in error response bodies and stream error events—is respected. `esc esc` stops retrying. Only local setup failures or a context overflow that remains too large after compaction stop immediately and show the error.
+- **`retry.max_delay`** (**ref**, default `600`): failed LLM requests — all request, stream and network errors (HTTP 4xx and 5xx, including 400, 401, 429, etc., and timeouts) — are retried without limit. The wait starts at 2 s and doubles up to this cap. `esc esc` stops retrying. Only local setup failures or a context overflow that remains too large after compaction stop immediately and show the error.
+- **Upstream retry hints** (**ref**, all default `true`): when multiple enabled sources provide a wait hint, ref applies strict **`header > body_field > text`** precedence (the higher-precedence source wins rather than taking the maximum across sources):
+  - **`retry.respect_headers`** (default `true`): honors `retry-after-ms`, `retry-after`, and `x-ratelimit-reset-*` HTTP response headers.
+  - **`retry.respect_body_fields`** (default `true`): honors structured retry fields in JSON/SSE error payloads (`retry_after`, `retry_after_ms`, `retryDelay`, etc.).
+  - **`retry.parse_error_text`** (default `true`): extracts wait durations from free-form error messages and plain text.
+  - **Account-pool / relay guidance**: if an upstream gateway or account pool rotates keys across accounts and forwards an underlying provider's long cooldown text (such as `"Please try again in 30m"`), set `retry.parse_error_text` (and/or `retry.respect_body_fields`) to `false`, or let the gateway's own `Retry-After` header override the inner message via header-first precedence.
 - **`images.auto_resize`** (**ref**, default `true`): images from `read`, `webfetch` and pasted images are scaled and recompressed to sizes the models handle well. See [Tools](tools.md#images).
 - **`tui`** (**ref**): initial state of three TUI toggles: `sidebar` (default shown), `thinking` (expand reasoning, `ctrl+x t`) and `details` (expand tool calls, `ctrl+x d`).
 
