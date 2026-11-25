@@ -205,7 +205,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function openFromSplit(id: string, mine: number): Promise<void> {
     if (mine !== latestOpen) return
     const session = chat(id)
-    await session.setForeground(true)
+    if (session.attachment !== 'foreground') await session.setForeground(true)
     if (mine !== latestOpen) {
       const stillWanted = id === latestOpenTarget || id === currentId.value
       if (!stillWanted) await session.detach()
@@ -432,7 +432,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
   // --- Split view
 
-  // Watches the tiles' sessions and lets go of those that no longer have a tile (including the hidden foreground session).
+  // Watches the tiles' sessions and lets go of those that no longer have a tile (keeping the hidden foreground session).
   async function syncTiles(): Promise<void> {
     if (mode.value !== 'split') return
     const wanted = new Set(tileIds.value)
@@ -447,7 +447,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       )
     }
     for (const [id, session] of chats) {
-      if (wanted.has(id) || session.attachment === 'detached' || detachingTiles.has(id)) continue
+      const isCurrent = id === currentId.value
+      if (wanted.has(id) || isCurrent || session.attachment === 'detached' || detachingTiles.has(id)) continue
       detachingTiles.add(id)
       jobs.push(session.detach().finally(() => detachingTiles.delete(id)))
     }
@@ -481,9 +482,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const open = targetId ? chat(targetId) : undefined
       await connection.getApi().watchAll(false)
       const others = [...chats.values()].filter(
-        (session) => session !== open && session.attachment === 'watching',
+        (session) => session !== open && session.attachment !== 'detached',
       )
-      const attachOpen = open && mine === latestOpen ? open.setForeground(true) : Promise.resolve()
+      const attachOpen =
+        open && mine === latestOpen && open.attachment !== 'foreground'
+          ? open.setForeground(true)
+          : Promise.resolve()
       await Promise.all([attachOpen, ...others.map((session) => session.detach())])
     })
     openChain = run.catch(() => undefined)

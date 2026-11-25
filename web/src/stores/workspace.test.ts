@@ -279,7 +279,7 @@ describe('closing sessions', () => {
     await workspace.enterSplit()
     workspace.onFrame({
       kind: 'sessions',
-      sessions: [session('ses_1', { attached: 0 }), session('ses_2', { attached: 0 })],
+      sessions: [session('ses_1', { attached: 1 }), session('ses_2', { attached: 0 })],
     })
     expect(workspace.tileIds).toEqual(['ses_2'])
 
@@ -344,13 +344,14 @@ describe('detachCurrent', () => {
     const workspace = setup([session('ses_1'), session('ses_2', { attached: 0 })])
     await workspace.openSession('ses_1')
     await workspace.enterSplit()
-    workspace.onFrame({
-      kind: 'sessions',
-      sessions: [session('ses_1', { attached: 0 }), session('ses_2', { attached: 0 })],
-    })
     workspace.zoomTile('ses_2')
     api.attach.mockClear()
-
+    api.detach.mockImplementationOnce(async () => {
+      workspace.onFrame({
+        kind: 'sessions',
+        sessions: [session('ses_1', { attached: 0 }), session('ses_2', { attached: 0 })],
+      })
+    })
     await workspace.detachCurrent()
     expect(workspace.zoomedId).toBeUndefined()
     expect(workspace.currentId).toBeUndefined()
@@ -475,11 +476,11 @@ describe('split view', () => {
     api.attach.mockClear()
     api.detach.mockClear()
     await workspace.enterSplit()
-    // The backend's answer to the open session leaving the foreground.
+    // The hidden foreground session stays attached (attached: 1).
     workspace.onFrame({
       kind: 'sessions',
       sessions: [
-        session('ses_1', { attached: 0 }),
+        session('ses_1', { attached: 1 }),
         session('ses_2', { attached: 0 }),
         session('ses_3', { attached: 2 }),
         ...extraSessions,
@@ -488,15 +489,15 @@ describe('split view', () => {
     return workspace
   }
 
-  it('hides the current foreground session, watches only background tiles, and starts unfocused', async () => {
+  it('keeps the current foreground session attached (hidden), watches only background tiles, and starts unfocused', async () => {
     const workspace = await inSplit()
     expect(api.watchAll).toHaveBeenCalledWith(true)
-    expect(api.detach).toHaveBeenCalledWith('ses_1')
+    expect(api.detach).not.toHaveBeenCalled()
     expect(api.attach).toHaveBeenCalledWith('ses_2', false)
     expect(workspace.tileIds).toEqual(['ses_2']) // ses_1 is hidden foreground, ses_3 is in another window
     expect(workspace.visibleSessionIds).toEqual(['ses_2'])
     expect(workspace.focusedId).toBeUndefined()
-    expect(workspace.chat('ses_1').attachment).toBe('detached')
+    expect(workspace.chat('ses_1').attachment).toBe('foreground')
     expect(workspace.chat('ses_2').attachment).toBe('watching')
   })
 
@@ -518,7 +519,7 @@ describe('split view', () => {
     expect(workspace.visibleSessionIds).toEqual(['ses_2'])
   })
 
-  it('leaving brings the zoomed tile (or original open session) back to the foreground', async () => {
+  it('leaving brings the zoomed tile (or original open session) back to the foreground and detaches the previous foreground session', async () => {
     const workspace = await inSplit()
     workspace.zoomTile('ses_2')
     api.attach.mockClear()
@@ -526,19 +527,24 @@ describe('split view', () => {
     await workspace.leaveSplit()
     expect(api.watchAll).toHaveBeenLastCalledWith(false)
     expect(api.attach).toHaveBeenCalledWith('ses_2', true)
+    expect(api.detach).toHaveBeenCalledWith('ses_1')
+    expect(workspace.chat('ses_1').attachment).toBe('detached')
+    expect(workspace.chat('ses_2').attachment).toBe('foreground')
     expect(workspace.mode).toBe('single')
     expect(workspace.currentId).toBe('ses_2')
     expect(workspace.zoomedId).toBeUndefined()
     expect(workspace.tileFocusId).toBeUndefined()
   })
 
-  it('leaving without zoom re-attaches the hidden foreground session and detaches tiles', async () => {
+  it('leaving without zoom keeps the hidden foreground session attached without re-attaching and detaches tiles', async () => {
     const workspace = await inSplit()
     api.attach.mockClear()
     api.detach.mockClear()
     await workspace.leaveSplit()
-    expect(api.attach).toHaveBeenCalledWith('ses_1', true)
+    expect(api.attach).not.toHaveBeenCalled()
     expect(api.detach).toHaveBeenCalledWith('ses_2')
+    expect(workspace.chat('ses_1').attachment).toBe('foreground')
+    expect(workspace.chat('ses_2').attachment).toBe('detached')
     expect(workspace.currentId).toBe('ses_1')
   })
 
@@ -548,8 +554,10 @@ describe('split view', () => {
     await workspace.enterSplit()
     expect(workspace.tileIds).toEqual([])
     expect(workspace.focusedId).toBeUndefined()
-    expect(workspace.chat('ses_1').attachment).toBe('detached')
+    expect(workspace.chat('ses_1').attachment).toBe('foreground')
+    api.attach.mockClear()
     await workspace.leaveSplit()
+    expect(api.attach).not.toHaveBeenCalled()
     expect(workspace.chat('ses_1').attachment).toBe('foreground')
   })
 
@@ -584,6 +592,7 @@ describe('split view', () => {
     expect(workspace.live.some((entry) => entry.id === 'ses_hist')).toBe(true)
     expect(api.watchAll).toHaveBeenLastCalledWith(false)
     expect(api.attach).toHaveBeenCalledWith('ses_hist', true)
+    expect(api.detach).toHaveBeenCalledWith('ses_1')
     expect(api.detach).toHaveBeenCalledWith('ses_2')
     expect(api.detach).toHaveBeenCalledWith('ses_4')
   })

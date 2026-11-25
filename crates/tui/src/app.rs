@@ -1334,7 +1334,7 @@ impl App {
                     return;
                 };
                 // Keep an existing view's flag: it may have changed while the request was in flight
-                // (e.g. the current session went to the background on entering split view).
+                // (e.g. a background tile was zoomed while its attach was in flight).
                 let v = self
                     .views
                     .entry(sid.clone())
@@ -2345,7 +2345,7 @@ impl App {
             for (k, _) in &self.watch.tiles {
                 order.push(k);
             }
-            // The current session (background while the split view is shown) may not be a tile.
+            // The current session (hidden while the split view is shown) may not be a tile.
             if let Some(c) = &self.current
                 && !order.contains(&c)
             {
@@ -4644,9 +4644,8 @@ impl App {
                 self.watch.drag_tile = None;
                 self.clear_autocomplete();
                 self.clear_selection();
-                // Subscribes to all sessions first, so detaching the current one loses no events.
+                // Subscribes to all sessions; the current session stays foreground (hidden).
                 self.sync_watch();
-                self.background_current();
             }
             Mode::Watch => {
                 if self.current.is_some() {
@@ -4659,27 +4658,7 @@ impl App {
         }
     }
 
-    /// Entering split view: the current session becomes background (it stays `current`, so
-    /// leaving split view returns to it). Its events keep arriving through `WatchAll`.
-    fn background_current(&mut self) {
-        let Some(sid) = self.current.clone() else {
-            return;
-        };
-        let Some(v) = self.views.get_mut(&sid).filter(|v| v.foreground) else {
-            return;
-        };
-        v.foreground = false;
-        // Optimistic, so its tile shows at once; the backend's session broadcast follows.
-        v.info.attached = v.info.attached.saturating_sub(1);
-        if let Some(i) = self.live.iter_mut().find(|s| s.id == sid) {
-            i.attached = i.attached.saturating_sub(1);
-        }
-        if self.connected {
-            self.client.notify(Request::Detach { session_id: sid });
-        }
-    }
-
-    /// Leaving split view: back to the current session, attached as foreground again.
+    /// Leaving split view: back to the current session.
     fn resume_current(&mut self) {
         let Some(sid) = self.current.clone() else {
             return;
@@ -4687,17 +4666,8 @@ impl App {
         self.mode = Mode::Chat;
         self.clear_selection();
         self.clear_autocomplete();
-        match self.views.get_mut(&sid) {
-            None => self.attach_fg(&sid),
-            Some(v) if !v.foreground => {
-                v.foreground = true;
-                v.info.attached += 1;
-                if let Some(i) = self.live.iter_mut().find(|s| s.id == sid) {
-                    i.attached += 1;
-                }
-                self.send_attach(sid, true);
-            }
-            Some(_) => {}
+        if !self.views.contains_key(&sid) {
+            self.attach_fg(&sid);
         }
         self.sync_watch();
     }

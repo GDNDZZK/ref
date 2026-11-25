@@ -819,10 +819,10 @@ async fn mock_watch_mode_tiles_focus_and_back_to_chat() {
     assert_eq!(m.app.mode, Mode::Watch);
     assert!(s.contains("worker-1") && s.contains("reviewer") && s.contains("docs-写手"));
 
-    // The session that was foreground in this frontend is background now, and hidden from tiles.
+    // The session that was foreground in this frontend stays foreground (hidden from tiles).
     let attached = |app: &App| app.live.iter().find(|i| i.id == sid).map(|i| i.attached);
-    assert_eq!(attached(&m.app), Some(0));
-    assert!(!m.app.views[&sid].foreground);
+    assert_eq!(attached(&m.app), Some(1));
+    assert!(m.app.views[&sid].foreground);
     assert!(!m.app.tile_ids().contains(&sid));
     assert_eq!(m.app.current.as_deref(), Some(sid.as_str()));
 
@@ -881,7 +881,7 @@ async fn mock_watch_mode_tiles_focus_and_back_to_chat() {
     m.leader('w');
     assert_eq!(m.app.mode, Mode::Chat);
     m.pump(PUMP_REPLY_MS).await;
-    assert_eq!(attached(&m.app), Some(1), "foreground again");
+    assert_eq!(attached(&m.app), Some(1), "stays foreground");
     assert!(m.app.views[&sid].foreground);
 }
 
@@ -3681,13 +3681,11 @@ fn long_transcript(tag: &str, n: usize) -> Vec<Message> {
 }
 
 /// Split view with two idle background sessions holding long transcripts. The current session
-/// is foreground in another frontend, so it is not tiled.
+/// stays foreground (hidden), so it is not tiled.
 fn watch_app() -> App {
     let mut app = test_app(false);
     app.toggle_watch();
-    let mut cur = app.views[TEST_SESSION].info.clone();
-    cur.attached = 1;
-    let mut live = vec![cur];
+    let mut live = vec![app.views[TEST_SESSION].info.clone()];
     for (i, (id, name)) in [("ses_w1", "alpha"), ("ses_w2", "beta")]
         .into_iter()
         .enumerate()
@@ -4133,15 +4131,15 @@ fn respond(app: &mut App, pred: impl Fn(&crate::app::Pending) -> bool, result: s
 }
 
 #[test]
-fn current_session_goes_background_in_split_view() {
+fn current_session_stays_foreground_in_split_view() {
     use crate::app::Pending;
     let mut app = test_app(false);
     app.live = vec![app.views[TEST_SESSION].info.clone()];
     app.toggle_watch();
     assert_eq!(app.mode, Mode::Watch);
     let v = &app.views[TEST_SESSION];
-    assert!(!v.foreground);
-    assert_eq!(app.live[0].attached, 0);
+    assert!(v.foreground);
+    assert_eq!(app.live[0].attached, 1);
     assert!(app.tile_ids().is_empty());
     let (_, empty_screen) = render(&mut app, 100, 30);
     assert!(
@@ -4161,12 +4159,14 @@ fn current_session_goes_background_in_split_view() {
     assert!(app.views[TEST_SESSION].foreground);
     assert_eq!(app.live[0].attached, 1);
     assert!(
-        app.pending
+        !app.pending
             .values()
             .any(|p| matches!(p, Pending::Attach { sid, fg: true } if sid == TEST_SESSION))
     );
-    // Into the split view before that attach is answered: the late answer keeps it background.
+    // An in-flight foreground attach answered after entering split view keeps it foreground.
+    app.attach_fg(TEST_SESSION);
     app.toggle_watch();
+    assert_eq!(app.mode, Mode::Watch);
     let snap = SessionSnapshot {
         info: app.views[TEST_SESSION].info.clone(),
         messages: vec![],
@@ -4180,10 +4180,10 @@ fn current_session_goes_background_in_split_view() {
     };
     respond(
         &mut app,
-        |p| matches!(p, Pending::Attach { fg: true, .. }),
+        |p| matches!(p, Pending::Attach { sid, fg: true } if sid == TEST_SESSION),
         json!({ "snapshot": snap }),
     );
-    assert!(!app.views[TEST_SESSION].foreground);
+    assert!(app.views[TEST_SESSION].foreground);
 }
 
 #[test]

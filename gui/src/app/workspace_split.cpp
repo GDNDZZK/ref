@@ -20,8 +20,8 @@ void Workspace::toggleSplit()
 	enterSplit();
 }
 
-// The current session becomes a background one like the others; its events then come
-// through WatchAll, which also brings those of every other live session.
+// The current session stays attached in the foreground (hidden while split view is on);
+// WatchAll brings events for the live sessions.
 QCoro::Task<> Workspace::enterSplit()
 {
 	m_split = true;
