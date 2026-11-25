@@ -56,6 +56,105 @@
     </message>
 </context>
 <context>
+    <name>BackendDialog</name>
+    <message>
+        <location filename="../src/app/BackendDialog.qml" line="14"/>
+        <location filename="../src/app/BackendDialog.qml" line="78"/>
+        <source>Temporary</source>
+        <translation>临时切换</translation>
+    </message>
+    <message>
+        <location filename="../src/app/BackendDialog.qml" line="16"/>
+        <source>Saved default</source>
+        <translation>已保存默认</translation>
+    </message>
+    <message>
+        <location filename="../src/app/BackendDialog.qml" line="18"/>
+        <source>CLI (--server)</source>
+        <translation>命令行 (--server)</translation>
+    </message>
+    <message>
+        <location filename="../src/app/BackendDialog.qml" line="20"/>
+        <source>Mock</source>
+        <translation>Mock</translation>
+    </message>
+    <message>
+        <location filename="../src/app/BackendDialog.qml" line="22"/>
+        <source>Local (auto)</source>
+        <translation>本地（自动）</translation>
+    </message>
+    <message>
+        <location filename="../src/app/BackendDialog.qml" line="29"/>
+        <source>Enter a ws:// or wss:// URL.</source>
+        <translation>请输入 ws:// 或 wss:// 地址。</translation>
+    </message>
+    <message>
+        <location filename="../src/app/BackendDialog.qml" line="34"/>
+        <source>Invalid URL. Expected ws://host:port or wss://host:port.</source>
+        <translation>地址无效，格式应为 ws://host:port 或 wss://host:port。</translation>
+    </message>
+    <message>
+        <location filename="../src/app/BackendDialog.qml" line="61"/>
+        <source>Switch backend</source>
+        <translation>切换后端</translation>
+    </message>
+    <message>
+        <location filename="../src/app/BackendDialog.qml" line="73"/>
+        <source>Restore local</source>
+        <translation>恢复本地默认</translation>
+    </message>
+    <message>
+        <location filename="../src/app/BackendDialog.qml" line="84"/>
+        <source>Save as default</source>
+        <translation>设为默认</translation>
+    </message>
+    <message>
+        <location filename="../src/app/BackendDialog.qml" line="118"/>
+        <source>Current backend</source>
+        <translation>当前后端</translation>
+    </message>
+    <message>
+        <location filename="../src/app/BackendDialog.qml" line="148"/>
+        <source>Local automatic discovery</source>
+        <translation>本地自动发现</translation>
+    </message>
+    <message>
+        <location filename="../src/app/BackendDialog.qml" line="158"/>
+        <source>Token: %1</source>
+        <translation>令牌：%1</translation>
+    </message>
+    <message>
+        <location filename="../src/app/BackendDialog.qml" line="172"/>
+        <source>WebSocket URL</source>
+        <translation>WebSocket 地址</translation>
+    </message>
+    <message>
+        <location filename="../src/app/BackendDialog.qml" line="182"/>
+        <source>ws://127.0.0.1:4000/</source>
+        <translation>ws://127.0.0.1:4000/</translation>
+    </message>
+    <message>
+        <location filename="../src/app/BackendDialog.qml" line="200"/>
+        <source>Bearer token (optional)</source>
+        <translation>Bearer 令牌（可选）</translation>
+    </message>
+    <message>
+        <location filename="../src/app/BackendDialog.qml" line="210"/>
+        <source>Clear token</source>
+        <translation>清除令牌</translation>
+    </message>
+    <message>
+        <location filename="../src/app/BackendDialog.qml" line="223"/>
+        <source>Leave empty to keep %1</source>
+        <translation>留空以保留 %1</translation>
+    </message>
+    <message>
+        <location filename="../src/app/BackendDialog.qml" line="224"/>
+        <source>Optional token</source>
+        <translation>可选令牌</translation>
+    </message>
+</context>
+<context>
     <name>BashBody</name>
     <message>
         <location filename="../src/app/BashBody.qml" line="31"/>
@@ -425,6 +524,26 @@
         <location filename="../src/workspace/command_registry.cpp" line="160"/>
         <source>Custom</source>
         <translation>自定义</translation>
+    </message>
+    <message>
+        <location filename="../src/workspace/command_registry.cpp" line="98"/>
+        <source>Stash all running sessions</source>
+        <translation>暂存全部运行中会话</translation>
+    </message>
+    <message>
+        <location filename="../src/workspace/command_registry.cpp" line="99"/>
+        <source>Manage stashed groups…</source>
+        <translation>管理暂存分组…</translation>
+    </message>
+    <message>
+        <location filename="../src/workspace/command_registry.cpp" line="114"/>
+        <source>Toggle floating ball</source>
+        <translation>切换悬浮球</translation>
+    </message>
+    <message>
+        <location filename="../src/workspace/command_registry.cpp" line="120"/>
+        <source>Switch backend…</source>
+        <translation>切换后端…</translation>
     </message>
 </context>
 <context>
@@ -2166,6 +2285,113 @@ $ARGUMENTS</translation>
     </message>
 </context>
 <context>
+    <name>FloatingBallWindow</name>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="61"/>
+        <source>Waiting for your answer</source>
+        <translation>等待你的回答</translation>
+    </message>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="63"/>
+        <source>Needs permission</source>
+        <translation>需要授权</translation>
+    </message>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="65"/>
+        <source>Failed</source>
+        <translation>失败</translation>
+    </message>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="67"/>
+        <source>Retrying</source>
+        <translation>重试中</translation>
+    </message>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="69"/>
+        <source>Compacting</source>
+        <translation>压缩中</translation>
+    </message>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="403"/>
+        <source>Open mini panel</source>
+        <translation>打开迷你面板</translation>
+    </message>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="404"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="734"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="735"/>
+        <source>Return to full window</source>
+        <translation>返回完整窗口</translation>
+    </message>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="405"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="714"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="715"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="830"/>
+        <source>New session</source>
+        <translation>新建会话</translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/app/FloatingBallWindow.qml" line="490"/>
+        <source>%n running session(s)</source>
+        <translation>
+            <numerusform>%n 个运行中会话</numerusform>
+        </translation>
+    </message>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="491"/>
+        <source>No running sessions</source>
+        <translation>没有运行中的会话</translation>
+    </message>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="558"/>
+        <source>Click ball to open panel</source>
+        <translation>点击悬浮球打开面板</translation>
+    </message>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="661"/>
+        <source>Select session</source>
+        <translation>选择会话</translation>
+    </message>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="661"/>
+        <source>No session</source>
+        <translation>无会话</translation>
+    </message>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="724"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="725"/>
+        <source>Collapse to ball</source>
+        <translation>收起为悬浮球</translation>
+    </message>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="744"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="745"/>
+        <source>Close</source>
+        <translation>关闭</translation>
+    </message>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="773"/>
+        <source>Work is still running. Quit anyway?</source>
+        <translation>仍有任务在运行。确定要退出吗？</translation>
+    </message>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="786"/>
+        <source>Cancel</source>
+        <translation>取消</translation>
+    </message>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="794"/>
+        <source>Quit</source>
+        <translation>退出</translation>
+    </message>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="822"/>
+        <source>No session open</source>
+        <translation>未打开会话</translation>
+    </message>
+</context>
+<context>
     <name>FormRow</name>
     <message>
         <location filename="../src/app/FormRow.qml" line="16"/>
@@ -2474,6 +2700,53 @@ $ARGUMENTS</translation>
         <location filename="../src/app/Main.qml" line="445"/>
         <source>Leave zoom</source>
         <translation>退出放大</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Main.qml" line="354"/>
+        <source>Switch Backend…</source>
+        <translation>切换后端…</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Main.qml" line="478"/>
+        <location filename="../src/app/Main.qml" line="526"/>
+        <source>All</source>
+        <translation>全部</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Main.qml" line="486"/>
+        <location filename="../src/app/Main.qml" line="527"/>
+        <source>User-created</source>
+        <translation>用户创建</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Main.qml" line="497"/>
+        <source>By %1 ×</source>
+        <translation>由 %1 创建 ×</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Main.qml" line="498"/>
+        <source>Clear creator filter</source>
+        <translation>清除创建者筛选</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Main.qml" line="530"/>
+        <source>By %1</source>
+        <translation>由 %1 创建</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Main.qml" line="537"/>
+        <source>Filter by creator</source>
+        <translation>按创建者筛选</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Main.qml" line="635"/>
+        <source>Floating ball (Ctrl+Shift+F)</source>
+        <translation>悬浮球 (Ctrl+Shift+F)</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Main.qml" line="636"/>
+        <source>Floating ball</source>
+        <translation>悬浮球</translation>
     </message>
 </context>
 <context>
@@ -3058,6 +3331,11 @@ $ARGUMENTS</translation>
         <source>Jump to latest</source>
         <translation>跳到最新</translation>
     </message>
+    <message>
+        <location filename="../src/app/SessionPane.qml" line="131"/>
+        <source>Retry</source>
+        <translation>重试</translation>
+    </message>
 </context>
 <context>
     <name>SessionRow</name>
@@ -3241,6 +3519,26 @@ $ARGUMENTS</translation>
         <source>ref-gui %1 · backend %2</source>
         <translation>ref-gui %1 · 后端 %2</translation>
     </message>
+    <message>
+        <location filename="../src/app/SettingsDialog.qml" line="293"/>
+        <source>Backend</source>
+        <translation>后端</translation>
+    </message>
+    <message>
+        <location filename="../src/app/SettingsDialog.qml" line="306"/>
+        <source>Server connection</source>
+        <translation>服务器连接</translation>
+    </message>
+    <message>
+        <location filename="../src/app/SettingsDialog.qml" line="316"/>
+        <source>Local (auto)</source>
+        <translation>本地（自动）</translation>
+    </message>
+    <message>
+        <location filename="../src/app/SettingsDialog.qml" line="329"/>
+        <source>Switch backend…</source>
+        <translation>切换后端…</translation>
+    </message>
 </context>
 <context>
     <name>Sidebar</name>
@@ -3344,6 +3642,156 @@ $ARGUMENTS</translation>
         <source>Settings</source>
         <translation>设置</translation>
     </message>
+    <message>
+        <location filename="../src/app/Sidebar.qml" line="452"/>
+        <source>Stash all running sessions (right-click to manage)</source>
+        <translation>暂存全部运行中会话（右键管理分组）</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Sidebar.qml" line="453"/>
+        <location filename="../src/app/Sidebar.qml" line="456"/>
+        <source>Manage stashed groups</source>
+        <translation>管理暂存分组</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Sidebar.qml" line="456"/>
+        <source>Stash all running sessions</source>
+        <translation>暂存全部运行中会话</translation>
+    </message>
+</context>
+<context>
+    <name>SkeletonBlock</name>
+    <message>
+        <location filename="../src/app/SkeletonBlock.qml" line="174"/>
+        <source>tool</source>
+        <translation>工具</translation>
+    </message>
+</context>
+<context>
+    <name>StashDialog</name>
+    <message>
+        <location filename="../src/app/StashDialog.qml" line="254"/>
+        <source>Move to &quot;%1&quot;</source>
+        <translation>移动到“%1”</translation>
+    </message>
+    <message>
+        <location filename="../src/app/StashDialog.qml" line="262"/>
+        <source>Copy to &quot;%1&quot;</source>
+        <translation>复制到“%1”</translation>
+    </message>
+    <message>
+        <location filename="../src/app/StashDialog.qml" line="271"/>
+        <source>Add to &quot;%1&quot;</source>
+        <translation>添加到“%1”</translation>
+    </message>
+    <message>
+        <location filename="../src/app/StashDialog.qml" line="281"/>
+        <source>New group with session</source>
+        <translation>用此会话新建分组</translation>
+    </message>
+    <message>
+        <location filename="../src/app/StashDialog.qml" line="293"/>
+        <source>Stashed groups</source>
+        <translation>暂存分组</translation>
+    </message>
+    <message>
+        <location filename="../src/app/StashDialog.qml" line="344"/>
+        <source>RUNNING</source>
+        <translation>运行中</translation>
+    </message>
+    <message>
+        <location filename="../src/app/StashDialog.qml" line="356"/>
+        <source>Stash all</source>
+        <translation>全部暂存</translation>
+    </message>
+    <message>
+        <location filename="../src/app/StashDialog.qml" line="368"/>
+        <source>No running sessions</source>
+        <translation>没有运行中的会话</translation>
+    </message>
+    <message>
+        <location filename="../src/app/StashDialog.qml" line="496"/>
+        <location filename="../src/app/StashDialog.qml" line="497"/>
+        <source>Add to group</source>
+        <translation>添加到分组</translation>
+    </message>
+    <message>
+        <location filename="../src/app/StashDialog.qml" line="528"/>
+        <source>STASHED GROUPS</source>
+        <translation>已暂存分组</translation>
+    </message>
+    <message>
+        <location filename="../src/app/StashDialog.qml" line="562"/>
+        <source>New group</source>
+        <translation>新建分组</translation>
+    </message>
+    <message>
+        <location filename="../src/app/StashDialog.qml" line="580"/>
+        <source>Loading…</source>
+        <translation>加载中…</translation>
+    </message>
+    <message>
+        <location filename="../src/app/StashDialog.qml" line="580"/>
+        <source>No stashed groups yet</source>
+        <translation>暂无已暂存分组</translation>
+    </message>
+    <message>
+        <location filename="../src/app/StashDialog.qml" line="774"/>
+        <location filename="../src/app/StashDialog.qml" line="775"/>
+        <source>Rename group</source>
+        <translation>重命名分组</translation>
+    </message>
+    <message>
+        <location filename="../src/app/StashDialog.qml" line="792"/>
+        <location filename="../src/app/StashDialog.qml" line="793"/>
+        <source>Unlock group</source>
+        <translation>解锁分组</translation>
+    </message>
+    <message>
+        <location filename="../src/app/StashDialog.qml" line="792"/>
+        <location filename="../src/app/StashDialog.qml" line="793"/>
+        <source>Lock group</source>
+        <translation>锁定分组</translation>
+    </message>
+    <message>
+        <location filename="../src/app/StashDialog.qml" line="800"/>
+        <source>Restore all</source>
+        <translation>全部恢复</translation>
+    </message>
+    <message>
+        <location filename="../src/app/StashDialog.qml" line="811"/>
+        <location filename="../src/app/StashDialog.qml" line="812"/>
+        <source>Delete group</source>
+        <translation>删除分组</translation>
+    </message>
+    <message>
+        <location filename="../src/app/StashDialog.qml" line="825"/>
+        <source>Drop sessions here</source>
+        <translation>将会话拖放到此处</translation>
+    </message>
+    <message>
+        <location filename="../src/app/StashDialog.qml" line="985"/>
+        <location filename="../src/app/StashDialog.qml" line="986"/>
+        <source>Move or copy to group</source>
+        <translation>移动或复制到分组</translation>
+    </message>
+    <message>
+        <location filename="../src/app/StashDialog.qml" line="995"/>
+        <location filename="../src/app/StashDialog.qml" line="996"/>
+        <source>Restore session</source>
+        <translation>恢复会话</translation>
+    </message>
+    <message>
+        <location filename="../src/app/StashDialog.qml" line="1007"/>
+        <location filename="../src/app/StashDialog.qml" line="1008"/>
+        <source>Remove from group</source>
+        <translation>从分组移除</translation>
+    </message>
+    <message>
+        <location filename="../src/app/StashDialog.qml" line="1045"/>
+        <source>Drop to remove: %1</source>
+        <translation>松开以移除：%1</translation>
+    </message>
 </context>
 <context>
     <name>StatusLine</name>
@@ -3381,6 +3829,12 @@ $ARGUMENTS</translation>
         <location filename="../src/app/StatusLine.qml" line="181"/>
         <source>Context: %1 of %2 tokens. Compaction is recommended at %3 and automatic at %4.</source>
         <translation>上下文：%1 / %2 tokens。建议在 %3 时压缩，%4 时自动压缩。</translation>
+    </message>
+    <message>
+        <location filename="../src/app/StatusLine.qml" line="107"/>
+        <location filename="../src/app/StatusLine.qml" line="150"/>
+        <source>Click to retry now</source>
+        <translation>点击立刻重试</translation>
     </message>
 </context>
 <context>
@@ -3439,6 +3893,26 @@ $ARGUMENTS</translation>
         <source>Zoom in</source>
         <translation>放大</translation>
     </message>
+    <message>
+        <location filename="../src/app/Tile.qml" line="342"/>
+        <source>Filter tiles by %1</source>
+        <translation>按 %1 筛选分块</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Tile.qml" line="344"/>
+        <source>Filter tiles spawned by %1</source>
+        <translation>筛选由 %1 派生的分块</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Tile.qml" line="345"/>
+        <source>Filter spawned history</source>
+        <translation>筛选子会话历史</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Tile.qml" line="347"/>
+        <source>Show all tiles</source>
+        <translation>显示全部分块</translation>
+    </message>
 </context>
 <context>
     <name>TileGrid</name>
@@ -3451,6 +3925,16 @@ $ARGUMENTS</translation>
         <location filename="../src/app/TileGrid.qml" line="188"/>
         <source>New session</source>
         <translation>新建会话</translation>
+    </message>
+    <message>
+        <location filename="../src/app/TileGrid.qml" line="184"/>
+        <source>No matching background sessions</source>
+        <translation>没有匹配的后台会话</translation>
+    </message>
+    <message>
+        <location filename="../src/app/TileGrid.qml" line="194"/>
+        <source>Show all</source>
+        <translation>显示全部</translation>
     </message>
 </context>
 <context>
@@ -3673,6 +4157,11 @@ $ARGUMENTS</translation>
         <source>Configuration reloaded</source>
         <translation>配置已重新加载</translation>
     </message>
+    <message>
+        <location filename="../src/app/workspace_commands.cpp" line="414"/>
+        <source>Invalid backend URL &quot;%1&quot;. Expected ws:// or wss://.</source>
+        <translation>无效的后端 URL“%1”。应为 ws:// 或 wss://。</translation>
+    </message>
 </context>
 <context>
     <name>refgui::compose</name>
@@ -3848,6 +4337,72 @@ $ARGUMENTS</translation>
     </message>
 </context>
 <context>
+    <name>refgui::notify::ToastNotifier</name>
+    <message>
+        <location filename="../src/notify/toast_notifier.cpp" line="37"/>
+        <source>Cannot register ref with Windows notifications.</source>
+        <translation>无法向 Windows 通知注册 ref。</translation>
+    </message>
+    <message>
+        <location filename="../src/notify/toast_notifier.cpp" line="41"/>
+        <source>Cannot name ref to Windows notifications.</source>
+        <translation>无法向 Windows 通知设置 ref 名称。</translation>
+    </message>
+    <message>
+        <location filename="../src/notify/toast_notifier.cpp" line="54"/>
+        <source>Notifications for ref are turned off in the Windows settings.</source>
+        <translation>Windows 设置中已关闭 ref 的通知。</translation>
+    </message>
+    <message>
+        <location filename="../src/notify/toast_notifier.cpp" line="56"/>
+        <source>Notifications are turned off by group policy.</source>
+        <translation>组策略已关闭通知。</translation>
+    </message>
+    <message>
+        <location filename="../src/notify/toast_notifier.cpp" line="58"/>
+        <source>Notifications are turned off for ref by its manifest.</source>
+        <translation>ref 的清单配置已关闭通知。</translation>
+    </message>
+    <message>
+        <location filename="../src/notify/toast_notifier.cpp" line="60"/>
+        <source>Windows does not allow notifications for ref.</source>
+        <translation>Windows 不允许 ref 发送通知。</translation>
+    </message>
+    <message>
+        <location filename="../src/notify/toast_notifier.cpp" line="101"/>
+        <source>Windows notifications failed: %1</source>
+        <translation>Windows 通知失败：%1</translation>
+    </message>
+    <message>
+        <location filename="../src/notify/toast_notifier.cpp" line="150"/>
+        <source>Windows could not show the notification (error %1).</source>
+        <translation>Windows 无法显示通知（错误 %1）。</translation>
+    </message>
+</context>
+<context>
+    <name>refgui::notify::UserNotificationsNotifier</name>
+    <message>
+        <location filename="../src/notify/user_notifications_notifier.mm" line="71"/>
+        <source>Notifications need ref to run as ref.app.</source>
+        <translation>通知功能需要通过 ref.app 运行 ref。</translation>
+    </message>
+    <message>
+        <location filename="../src/notify/user_notifications_notifier.mm" line="75"/>
+        <source>Asking macOS for permission to show notifications…</source>
+        <translation>正在向 macOS 请求通知权限…</translation>
+    </message>
+    <message>
+        <location filename="../src/notify/user_notifications_notifier.mm" line="101"/>
+        <source>macOS refused notifications for ref: %1</source>
+        <translation>macOS 拒绝了 ref 的通知：%1</translation>
+    </message>
+    <message>
+        <location filename="../src/notify/user_notifications_notifier.mm" line="105"/>
+        <source>Notifications for ref are turned off in the macOS System Settings.</source>
+        <translation>macOS 系统设置中已关闭 ref 的通知。</translation>
+    </message>
+</context>
+<context>
     <name>refgui::session::QuestionPrompt</name>
     <message>
         <location filename="../src/session/question_prompt.cpp" line="82"/>
@@ -3980,6 +4535,43 @@ $ARGUMENTS</translation>
         <location filename="../src/workspace/settings.cpp" line="349"/>
         <source>Could not save %1: %2</source>
         <translation>无法保存 %1：%2</translation>
+    </message>
+    <message>
+        <location filename="../src/workspace/settings.cpp" line="741"/>
+        <source>Could not set permissions on %1: %2</source>
+        <translation>无法设置 %1 的权限：%2</translation>
+    </message>
+</context>
+<context>
+    <name>refgui::workspace::StashController</name>
+    <message numerus="yes">
+        <location filename="../src/workspace/stash_controller.cpp" line="180"/>
+        <source>Stashed %n session(s) into &quot;%1&quot;</source>
+        <translation>
+            <numerusform>已将 %n 个会话暂存到“%1”</numerusform>
+        </translation>
+    </message>
+    <message>
+        <location filename="../src/workspace/stash_controller.cpp" line="184"/>
+        <source>No running sessions to stash.</source>
+        <translation>没有可暂存的运行中会话。</translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/workspace/stash_controller.cpp" line="286"/>
+        <source>Restored %n session(s)</source>
+        <translation>
+            <numerusform>已恢复 %n 个会话</numerusform>
+        </translation>
+    </message>
+    <message>
+        <location filename="../src/workspace/stash_controller.cpp" line="286"/>
+        <source>Group restored (all members already live).</source>
+        <translation>已恢复分组（所有成员均已在运行）。</translation>
+    </message>
+    <message>
+        <location filename="../src/workspace/stash_controller.cpp" line="300"/>
+        <source>Restored session to background.</source>
+        <translation>已将会话恢复到后台。</translation>
     </message>
 </context>
 </TS>

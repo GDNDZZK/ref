@@ -37,6 +37,17 @@
     </message>
 </context>
 <context>
+    <name>FloatingBallWindow</name>
+    <message numerus="yes">
+        <location filename="../src/app/FloatingBallWindow.qml" line="490"/>
+        <source>%n running session(s)</source>
+        <translation>
+            <numerusform>%n running session</numerusform>
+            <numerusform>%n running sessions</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
     <name>GrepBody</name>
     <message numerus="yes">
         <location filename="../src/app/GrepBody.qml" line="63"/>
@@ -77,6 +88,25 @@
         <translation>
             <numerusform>Show %n more line</numerusform>
             <numerusform>Show %n more lines</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
+    <name>refgui::workspace::StashController</name>
+    <message numerus="yes">
+        <location filename="../src/workspace/stash_controller.cpp" line="180"/>
+        <source>Stashed %n session(s) into &quot;%1&quot;</source>
+        <translation>
+            <numerusform>Stashed %n session into &quot;%1&quot;</numerusform>
+            <numerusform>Stashed %n sessions into &quot;%1&quot;</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/workspace/stash_controller.cpp" line="286"/>
+        <source>Restored %n session(s)</source>
+        <translation>
+            <numerusform>Restored %n session</numerusform>
+            <numerusform>Restored %n sessions</numerusform>
         </translation>
     </message>
 </context>
