@@ -109,10 +109,8 @@ Item {
 	}
 
 	Item {
-		id: maskSource
+		id: maskContent
 		visible: false
-		layer.enabled: shimmer.active && shimmer.useGpuEffect
-		layer.smooth: true
 		width: brightSource.width
 		height: brightSource.height
 
@@ -136,6 +134,18 @@ Item {
 				GradientStop { position: 1.0; color: Qt.rgba(1, 1, 1, 0) }
 			}
 		}
+	}
+
+	// ShaderEffectSource is always a texture provider from creation (unlike toggling layer.enabled on an Item,
+	// which leaves MultiEffect bound to a dummy texture), 0x0 skips drawing the proxy quad while still updating
+	// the offscreen texture, and sourceItem: null skips layer allocation on software backends.
+	ShaderEffectSource {
+		id: maskSource
+		width: 0
+		height: 0
+		live: shimmer.active && shimmer.useGpuEffect
+		smooth: true
+		sourceItem: shimmer.useGpuEffect ? maskContent : null
 	}
 
 	MultiEffect {
