@@ -345,7 +345,7 @@ Keys are tool-name globs and values are seconds. The last matching key wins. `"d
 
 ## Context compaction
 
-**ref** When a conversation fills the model's context window, ref compacts it: the `compaction` agent writes a summary, and the next requests send the summary instead of the older messages. The full history stays in the session and in the TUI, with a divider where compaction happened.
+**ref** When a conversation fills the model's context window, ref compacts it: the `compaction` agent writes a summary, and the next requests send the summary instead of the older messages. When the session has a non-empty todo list, compaction appends it to the summary with a note that items may be stale relative to the summary. The full history stays in the session and in the TUI, with a divider where compaction happened.
 
 ```jsonc
 "compaction": {

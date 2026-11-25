@@ -17,12 +17,12 @@
 ## Starting
 
 ```bash
-ref                       # new session in the current directory
-ref ~/src/project         # new session in another directory
+ref                       # open the empty welcome screen in the current directory
+ref ~/src/project         # open with another default directory
 ref -c                    # continue the most recent session for this directory
 ref -s ses_01a1…          # open a session by id (live or from history)
 ref -w                    # split view of all background sessions
-ref --agent plan          # new session with another agent
+ref --agent plan          # pre-select an agent for the new session
 ref --model openai/gpt-5#high -p "Explain src/main.rs"
 ```
 
@@ -32,20 +32,21 @@ All flags are listed in [Command line](cli.md#ref).
 
 ref has two programs. `ref-server` (the backend) runs the sessions: it calls the LLM, runs tools, stores history and handles permissions. `ref` (the TUI) shows sessions and sends your input. They talk over a local WebSocket.
 
-When you start `ref`, it connects to a running backend or starts one. A backend started this way exits when the last `ref` window closes. Other programs that show sessions, such as the browser UI ([Web UI](web.md)), find the same backend through the same instance file, so a session can be open in several of them at once. A backend started by one of them exits after its last client of any kind disconnects, and the turns that are running stop with it. While at least one client is connected, sessions keep running even if no window shows them, so you can close one window, open another and continue where the session is. To keep sessions running with no window open, start the backend yourself with `ref-server` (see [Command line](cli.md#ref-server)); a backend started that way never exits on its own.
+When you start `ref`, it resolves the backend from `--server`, then any saved default in `~/.local/state/ref/tui.json`, and otherwise connects to a running local backend or lazily starts `ref-server`. A backend started locally this way exits when the last `ref` window closes. Other programs that show sessions, such as the desktop GUI ([Desktop GUI](gui.md)) and browser UI ([Web UI](web.md)), find the same local backend through the same instance file, so a session can be open in several of them at once. A backend started by one of them exits after its last client of any kind disconnects, and the turns that are running stop with it. While at least one client is connected, sessions keep running even if no window shows them, so you can close one window, open another and continue where the session is. To keep sessions running with no window open, start the backend yourself with `ref-server` (see [Command line](cli.md#ref-server)); a backend started that way never exits on its own.
 
-- A session is **foreground** while a `ref` window is attached to it, and **background** otherwise.
+- Without `-c`, `-s`, `-w`, or `-p`, `ref` starts on an empty welcome screen without creating a session (`-c` with no saved session in the directory warns instead of creating one). On the welcome screen you can pre-select the working directory (`/cd`), agent (`tab`, `/agents`), model (`ctrl+x m`, `/models`), and variant (`ctrl+t`, `/variant`) before sending your first prompt, or run `/new` (`ctrl+x n`) to create a session immediately.
+- A session is **foreground** while a frontend is attached to it, and **background** otherwise. Clicking the active session row in the sidebar or running `/detach` (`/background`, `/leave`) detaches it to the background and returns to the empty welcome screen.
 - Sessions are saved in `~/.local/share/ref/sessions/`. `ctrl+x l` lists live sessions and history; opening an old one loads it again.
-- Several `ref` windows can show the same session at the same time.
+- Several windows can show the same session at the same time.
 
 ## The screen
 
-- **Transcript**: your prompts, the model's replies, reasoning and tool calls.
+- **Welcome screen / Transcript**: when no session is open, shows the current directory, active backend summary, and a clickable `Switch Backend…` button; when a session is open, shows your prompts, the model's replies, reasoning and tool calls.
 - **Input box** at the bottom, with the agent, model and variant next to it.
 - **Sidebar** (`ctrl+x b` toggles it):
-  - **Live sessions**, each with its todo progress (`2/5`, or a green `✓3/3` when all are done; cancelled items are not counted) and, while busy, how long the current turn has been running.
+  - **Live sessions**, each with its todo progress (`2/5`, or a green `✓3/3` when all are done; cancelled items are not counted) and, while busy, how long the current turn has been running. Clicking the active row detaches to the empty welcome screen.
   - **MCP servers** and their status.
-- **Status line**: what the session is doing and the turn's running time. The time comes from the backend, so it is correct after switching sessions.
+- **Status line**: what the session is doing and the turn's running time. The time comes from the backend, so it is correct after switching sessions. When retrying a failed request, clicking the retrying status line retries immediately.
 
 ## Writing prompts
 
@@ -115,7 +116,11 @@ Other keys: `ctrl+p` opens the command palette, `tab` cycles agents, `ctrl+t` cy
 | `/undo` | Undo the last prompt |
 | `/rename NAME` | Rename the session |
 | `/cd [DIR]` (`/cwd`) | Change the session's directory (opens a directory picker when omitted) |
-| `/detach` (`/background`, `/leave`) | Move the open session to the background (`ref-gui` and `ref-web`) |
+| `/detach` (`/background`, `/leave`) | Move the open session to the background (TUI, `ref-gui`, and `ref-web`) |
+| `/retry` | Retry immediately (skip the retry backoff wait; clicking the retrying status line does the same) |
+| `/stash [name]` | Stash all live sessions into a new group (TUI, `ref-gui`, and `ref-web`) |
+| `/stashed` (`/groups`, `/stash-groups`) | Open the Stash Groups manager (`ref-web` uses `/stashed` or `/groups`) |
+| `/backend` (`/server`) | Switch backend connection interactively, or pass `auto` / `URL [TOKEN]` temporarily in TUI |
 | `/close` | Close this session |
 | `/close-session [name or id …]` (`/kill`) | Close live sessions (picker, or one or more by name or id) |
 | `/export [PATH]` | Export the transcript as markdown (default `ref-session-<id>.md` in the session directory) |
@@ -132,20 +137,38 @@ Other keys: `ctrl+p` opens the command palette, `tab` cycles agents, `ctrl+t` cy
 
 Your own commands from the configuration are listed too (see [Custom commands](configuration.md#custom-commands)).
 
-**`/cd [DIR]`** moves the session to another directory: absolute, relative to the current one, or `~/…`. Without `DIR`, it opens an interactive directory picker (`tab` drills into subdirectories, `backspace` at a trailing `/` steps up). Project configuration and context files are loaded again, and a note telling the model about the change is added to the conversation, without an LLM turn. It is not allowed while the session is busy. New sessions from this window start in the new directory too.
+**`/cd [DIR]`** moves the session (or the pre-selected directory before a session is created) to another directory: absolute, relative to the current one, or `~/…`. Without `DIR`, it opens an interactive directory picker (`tab` drills into subdirectories, `backspace` at a trailing `/` steps up). For an open session, project configuration and context files are loaded again, and a note telling the model about the change is added to the conversation, without an LLM turn. It is not allowed while the session is busy. New sessions from this window start in the new directory too.
 
 **Switching the agent** (`tab`, `ctrl+x a` or `/agents`) adds a note to the conversation that tells the model about the change, without an LLM turn. Several quick switches share one note, and switching back to the original agent removes it. A session with no conversation yet gets no note; only the agent changes. While the session is busy the note is added right before the next request.
 
-**`/close`** closes the current session and switches to the oldest remaining live session. When none is left, `ref` exits, and a backend that `ref` started exits with it.
+**`/close`** closes the current session and returns to the empty welcome screen without quitting `ref` or auto-creating a replacement session (press `ctrl+x q` or run `/exit` to quit).
+
+**`/stashed`** opens the two-pane Stash Groups dialog (groups on the left, members on the right; restoring a group or member brings it back as a background live session):
+
+| Key | Action |
+|---|---|
+| `tab`, `←` / `→` | Switch between Groups and Members panes |
+| `↑` `↓`, `j` `k`, `ctrl+p` / `ctrl+n` | Move selection |
+| `enter` | Groups pane: open Members pane (or restore if empty); Members pane: restore member (double-click restores group or member) |
+| `R` | Restore the entire selected group |
+| `c` / `s` / `r` / `l` | Create empty group / Stash all live sessions / Rename group / Lock or unlock group |
+| `m` / `a` | Merge group (Groups pane) or move member (Members pane) / Add a live session to the group |
+| `shift+↑` / `shift+↓`, `K` / `J` | Reorder member within the group (Members pane) |
+| `x`, `delete`, `ctrl+d` | Delete group (press twice to confirm) or remove member |
+| `g` | Refresh groups |
+| `esc`, `q`, `ctrl+c` | Close dialog (or cancel confirmation, input, or target picker) |
+
+**`/backend`** opens a dialog to switch endpoints temporarily (`enter`), save one as default in `~/.local/state/ref/tui.json` (`ctrl+s`), or restore local auto-discovery (`ctrl+r`).
 
 ## Split view
 
 `ref -w`, `ctrl+x w` or `/watch` shows the live background sessions side by side.
 
 - The current foreground session of this window is hidden while split view is on and returns when you leave. Split view starts with no tile focused; click a tile, or press `tab` or `alt+arrows`, to move the focus (click the focused tile's header or empty space to clear focus).
-- Tiles use solid rounded borders (`╭─╮│╰─╯`). Sub-sessions spawned by another session show a `⟲ <root>` chip and tint unfocused borders and chips using a deterministic 8-color root-task palette; tiles waiting for a permission or `question` answer highlight in warning yellow.
+- A direct-parent creator filter pill (`All`, `User-created`, or `By <creator>`) sits in the status line: press `f` (while no tile is focused) or click the pill to cycle filters.
+- Tiles use solid rounded borders (`╭─╮│╰─╯`). Sub-sessions spawned by another session show a `⟲ <root>` chip in the header and tint unfocused borders and chips using a deterministic 8-color root-task palette; tiles waiting for a permission or `question` answer highlight in warning yellow.
 - Typing and `enter` send a message to the focused session, `esc esc` interrupts it and `ctrl+o` zooms in. Slash commands, `@file` mentions, `!` shell mode (with full autocompletion above the focused input), and `enter` on standalone slash completions act on that tile's session (`tab` cycles focus between tiles unless a completion popup is open or shell mode is active).
-- Each tile shows its queued prompts (`✕ remove` takes one back). Clicking a tool call shows its input and output inside the tile; clicking again collapses it. Dragging across a tile's transcript selects text (`ctrl+c` or right click copies; double click zooms).
+- Each tile shows its queued prompts (`✕ remove` takes one back); clicking a retrying tile header retries immediately. Clicking a tool call shows its input and output inside the tile; clicking again collapses it. Dragging across a tile's transcript selects text (`ctrl+c` or right click copies; double click zooms).
 - The mouse wheel scrolls the tile under the pointer.
 
 ## Working with several sessions

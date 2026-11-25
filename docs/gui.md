@@ -6,6 +6,7 @@
 - [Starting](#starting)
 - [The window](#the-window)
 - [Split view](#split-view)
+- [Floating ball](#floating-ball)
 - [The conversation](#the-conversation)
 - [The input box](#the-input-box)
 - [Notifications](#notifications)
@@ -15,7 +16,7 @@
 - [Files and backend](#files-and-backend)
 - [Building and developing](#building-and-developing)
 
-`ref-gui` shows ref in a desktop window (Qt Quick). Like `ref` and `ref-web` it only displays sessions: they run in `ref-server`, so a session can be open in the terminal, the GUI and a browser tab at the same time. When no backend is running, `ref-gui` starts the `ref-server` that sits in its own folder; a backend started this way exits when the last client disconnects.
+`ref-gui` shows ref in a desktop window (Qt Quick). Like `ref` and `ref-web` it only displays sessions: they run in `ref-server`, so a session can be open in the terminal, the GUI and a browser tab at the same time. When `--server` is absent and no default `backendUrl` is saved in `gui.json`, `ref-gui` connects to a running local backend or lazily starts the `ref-server` that sits in its own folder; a backend started this way exits when the last client disconnects.
 
 ## Installing
 
@@ -63,12 +64,13 @@ The window has a sidebar on the left and the content on the right: one session, 
 
 - **Running** lists the live sessions of this window (newest first by default). Long-press (~280 ms) and drag a row vertically to reorder live sessions (auto-scrolling when needed); newly created sessions appear at the top, and the custom order is remembered (`sidebar.runningOrder` in `gui.json`). **History** lists the sessions the backend has saved, by time of the last change; the search box filters the 200 most recent ones. A click opens a session; clicking the already-open session again in single view, choosing *Move to background* from its right-click menu, or running `/detach` (`/background`, `/leave`, or Command Palette → *Move session to background*) detaches it to the background without stopping it and returns to *No session open*. Double-click a running session, or use the right-click menu, to rename or close it. The right-click menu of a history entry deletes it.
 - A running session is labelled with the name you gave it, else its title, else the name of its directory. A session in the history is labelled with its title (on one line), else its name, else the name of its directory, as in the terminal UI. The *Running* list is as tall as its rows and scrolls only when *History* would get fewer than three rows.
-- The *New session* button creates a session in the workspace's default directory. The folder button next to it, or *New session in folder…* / *New session in another folder…*, asks for a directory first and updates the workspace's default directory to that folder.
+- The *New session* button creates a session in the workspace's default directory. Next to it, the `36×36` **Stash** button shows the stashed group count inside the icon when at least one group exists: left-clicking stashes all running sessions into a new group (or opens the Stash dialog when none are running), and right-clicking opens the Stash dialog directly (also via `/stash [name]` or `/stashed` / `/stash-groups`). The two-column *Stashed groups* dialog puts *Running* on the left and *Stashed groups* on the right, with drag-and-drop and action menus to create groups, stash all, rename inline, lock or unlock groups, reorder/move/copy members, merge unlocked groups, drag a member out to remove it, or restore a member or an entire group as background live sessions. The folder button next to it, or *New session in folder…* / *New session in another folder…*, asks for a directory first and updates the workspace's default directory to that folder.
 - Closing a session that is still working asks for confirmation first (including from the sidebar and the *Sessions* dialog); its conversation stays in history. Closing the last open session returns to *No session open* instead of starting a new one (and in split view, closing the held foreground session clears it without pulling a background tile out of the grid).
 - The sidebar can be hidden and shown again (Ctrl+Shift+B) and resized by dragging its right border (210–480 px; double-click the edge to reset to 264 px). Click a *Todo*, *Running*, or *History* header (or press Space / Return / Enter when focused) to collapse or expand that section; collapsed sections give their vertical space to the remaining expanded ones. Drag the horizontal divider between *Todo* and *Running* or between *Running* and *History* vertically to adjust section heights (double-click a divider to return to automatic sizing). Sidebar visibility, width, section fold states, and custom section heights are remembered.
 - At the top of the sidebar, above *Running*, the *Todo* section shows the to-do list of the session you are looking at (in the split view, of the focused tile) with the number of items done, like *Todo 2/5*; cancelled items count in neither number. Long items wrap, the list scrolls once it reaches its height limit (a third of the sidebar by default, or the custom dragged height), and the section is hidden while the session has no to-do list.
 - The command palette (Ctrl+P) lists every command and filters as you type. Commands that take no argument run at once; choosing *Rename the session*, *Change this session's working directory*, *Export transcript as markdown*, *Set or cycle model variant* or *Close live sessions* opens its dedicated dialog directly, and pressing Esc while entering custom-command arguments returns to the command list. It holds the same commands as the `/` list in the input box, including your [custom commands](configuration.md) (group *Custom*). Without a shortcut: *New session in another folder…*, *Move session to background* (`/detach`), *Rename the session*, *Change this session's working directory*, *Close live sessions*, the `peers` commands, *MCP servers*, *Configuration* (`/config`) and *Reload configuration* (`/reload`). There are no `/editor` and `/exit` commands.
 - *Configuration* (`/config` or `/configuration`, the configuration button in the sidebar footer, or *Settings* → *Edit ref.json…*) opens the 860 px six-section visual and raw JSONC editor for global `ref.json`, with multi-profile switching (`ref.json.<n>.bak`) and Ctrl+S to save; `/reload` (`/reload-config`, or the reload button) hot-reloads configuration across live sessions and MCP servers. See [Graphical editor and profiles](configuration.md#graphical-editor-and-profiles).
+- **Backend switching:** `/backend` (`/server`), *Settings* → *Backend* → *Switch backend…*, or the *Switch Backend…* button on the disconnected status pill opens the *Switch backend* dialog to connect to another `ws://` / `wss://` endpoint temporarily, save it (with an optional token) as the default in `gui.json`, or restore local automatic discovery.
 - If the running backend is older than the GUI, a banner at the top of the content offers *Restart backend*. The button is disabled while a session is running or waiting for permission. The restart stops the backend; the GUI then starts the installed one again.
 - A message in the corner reports errors of sessions you are not looking at and the result of actions such as an export.
 - The *Sessions* dialog (Ctrl+Shift+L or `/sessions`) filters between *All*, *User-created*, and *By creator* of the selected row, marks spawned sessions with their creator, and searches creator names and ids alongside session names, titles, and directories.
@@ -77,18 +79,28 @@ The window has a sidebar on the left and the content on the right: one session, 
 
 The split view (Ctrl+Shift+W, the button at the top right, or `ref-gui -w`) shows one tile per background session: the live sessions that no other client has open, excluding the current foreground session (which stays hidden until you leave split view). Split view starts with no tile focused; click a tile or press Alt+arrow keys to focus it, and click the focused tile's header or empty background to deselect. Tiles spawned by another session show a `⟲ <root>` chip in the header and tint unfocused borders and status dots by their root task; user-created tiles stay unmarked. Only the focused tile shows its input box (as in the terminal UI), so the others have room for the conversation; they keep the status line and the queue of waiting messages, and a draft, attachments and shell mode survive while the box is hidden. The sidebar selects the session of the focused tile, and marks all tiles with a bar; commands act on the focused tile. Double-click a tile's title bar, or use its zoom button (Ctrl+Shift+Z), to enlarge it. Leave the zoom with Ctrl+Shift+Z or the *Leave zoom* button at the top right. Esc does not leave it, because Esc belongs to the input box, to permission questions and to the model's questions. With no background sessions the view says so.
 
-Clicking the *Jump to latest* button on an unfocused tile scrolls it to the bottom without focusing the tile or opening its input box. While resizing split tiles or dragging the sidebar, tile content smoothly blurs and fades out before reflowing at the new width.
+A centered **creator filter capsule** in the top bar filters split tiles by direct parent (*All*, *User-created*, *By `<creator>` ×*, plus a creator menu); right-clicking a tile header also offers *Filter tiles by `<creator>`*, *Filter tiles spawned by `<title>`*, *Filter spawned history*, and *Show all tiles*. Clicking the *Jump to latest* button on an unfocused tile scrolls it to the bottom without focusing the tile or opening its input box.
+
+## Floating ball
+
+Click the floating ball button (`float-20`) in the top-right bar, press Ctrl+Shift+F, or run `/float` (`/floating`) to hide the main window and enter the 3-state floating ball mode:
+
+1. **Floating ball (`56×56`):** a compact circular always-on-top ball showing the aggregate status dot and running session count. Drag to reposition (saved under `floatingBall` in `gui.json`); right-click for *Open mini panel*, *Return to full window*, or *New session*.
+2. **Hover summary card (`264 px` wide):** hovering over the ball reveals up to 4 active or attention-needing sessions (permission, question, error, or working). Clicking a row opens that session directly in the mini panel.
+3. **Mini chat panel (`380×520`):** clicking the ball opens a single-session compact panel anchored inward from the ball's screen corner across monitors, with a session switcher pill, *New session*, *Collapse to ball*, *Return to full window*, and a busy-guarded *Close* button.
+
+Clicking a desktop notification while in floating mode restores the full window and opens the session.
 
 ## The conversation
 
 - Your prompts, the model's replies, its reasoning and its tool calls appear in one column. Under every message a small line shows who wrote it (agent, model, variant), how long it took and the tokens used (input including cache reads and writes, and output). Interrupted and failed messages are marked. The line shows *Copy* on hover, and *Undo* on your own messages.
 - Markdown tables render as styled bordered cards with header shading, horizontal scrolling when wide, a hover *Copy* button, and independent cell text selection.
 - The view follows the end of the conversation while the model writes. Scroll up (wheel, touchpad, scroll bar) to stop following; a *Jump to latest* button appears. Scrolling to the end follows again.
-- Only the newest messages are loaded when a session opens. Scroll near the top and earlier ones load by themselves; the *Load older messages* row at the top does the same by click, and shows the error with a retry when loading fails.
+- Only the newest messages are loaded when a session opens, while older messages appear as structured skeleton placeholders estimated from `MessageLayoutMeta` without fetching full message bodies upfront. Scrolling near the top (or clicking *Load older messages*) loads pages of 100 messages automatically, and a sliding window keeps up to 300 resident messages (~150 around the viewport, trimming back to the newest 100 when settled at the bottom and evicting cached images for evicted messages). Failed loads show the error with a retry.
 - After a compaction a divider marks where the model's context starts. Messages above it are dimmed: you can still read them, but the model no longer sees them. The divider's summary folds and unfolds.
 - Messages that did not come from you are marked: from another session (*message from "name"*), created by a parent session, a system reminder, or the output of a `!` shell command. When you switch the agent, a reminder tells the model about it.
 - Reasoning blocks open while the model thinks and fold when it is done. Click the header to open or fold one; the commands *Toggle expanded thinking* (Ctrl+Shift+R) and *Toggle expanded tool details* (Ctrl+Shift+O) do all of them at once and override the blocks you opened by hand.
-- The line above the input box shows what the session is doing (Working, Running tools, Compacting context, Waiting for your permission, Waiting for your answer) with the time of the current turn, a countdown when a request is being retried, and a small bar for how full the model's context is. The bar turns yellow when compaction is recommended and red when it will happen by itself; hover for the numbers. When the session has a to-do list, the line also shows the item being worked on (else the next pending one) and how many items are done, like *Check the workspace · 1/3*, and a green *✓ 3/3* when all are done; cancelled items count in neither number, in the sidebar and tile badges too. A click on it opens the whole list above the line; Esc, a click elsewhere or another session closes it. The conversation's own errors show at its end until you send the next prompt.
+- The line above the input box shows what the session is doing (Working, Running tools, Compacting context, Waiting for your permission, Waiting for your answer) with the time of the current turn, a countdown with a clickable retry icon button when a request is being retried (click, or press Enter/Space when focused, to retry immediately), and a small bar for how full the model's context is. The bar turns yellow when compaction is recommended and red when it will happen by itself; hover for the numbers. When the session has a to-do list, the line also shows the item being worked on (else the next pending one) and how many items are done, like *Check the workspace · 1/3*, and a green *✓ 3/3* when all are done; cancelled items count in neither number, in the sidebar and tile badges too. A click on it opens the whole list above the line; Esc, a click elsewhere or another session closes it. The conversation's own errors show at its end until you send the next prompt.
 
 **Tool cards**
 
@@ -176,6 +188,7 @@ On macOS, Ctrl in the table is Cmd. The letters are the same in the [Web UI](web
 | Toggle expanded tool details | Ctrl+Shift+O | `/details` |
 | Split view | Ctrl+Shift+W | `/watch` |
 | Toggle sidebar | Ctrl+Shift+B | `/sidebar` |
+| Toggle floating ball | Ctrl+Shift+F | `/float` (`/floating`) |
 | Zoom the focused tile (split view) | Ctrl+Shift+Z | |
 | Zoom in interface | Ctrl+= (Ctrl++, Ctrl+Shift+=) | |
 | Zoom out interface | Ctrl+- | |
@@ -184,7 +197,7 @@ On macOS, Ctrl in the table is Cmd. The letters are the same in the [Web UI](web
 | Settings | Ctrl+Shift+S | |
 | Move the tile focus (split view) | Alt+arrow keys | |
 
-*Set or cycle the model variant* without an argument switches to the next variant. The help dialog (Ctrl+Shift+H) lists the same keys.
+*Set or cycle the model variant* without an argument switches to the next variant. Commands without a shortcut include `/detach` (`/background`, `/leave`), `/stash [name]`, `/stashed` (`/stash-groups`), and `/backend` (`/server`). The help dialog (Ctrl+Shift+H) lists the same keys.
 
 ## Settings
 
@@ -195,8 +208,9 @@ Open them with Ctrl+Shift+S or the settings button at the bottom of the sidebar.
 - **Interface zoom:** `50%`–`400%` (`−` / `+` / *Reset* buttons, Command Palette, or `Ctrl+=` / `Ctrl+-` / `Ctrl+0` in `5%` steps, or type any percentage directly; `Cmd` on macOS). Restart `ref-gui` after changing zoom for native `QT_SCALE_FACTOR` sharpness.
 - **Notifications:** the master switch and the three kinds described [above](#notifications).
 - **Configuration:** *Reload configuration* and *Edit ref.json…* (see [Graphical editor and profiles](configuration.md#graphical-editor-and-profiles)).
+- **Backend:** displays the active endpoint (or *Local (auto)* and masked token) and *Switch backend…* to switch endpoints temporarily, save a default (`backendUrl` / `backendToken`), or restore local discovery.
 
-They are saved in `gui.json` in the state directory ([Files and directories](cli.md#files-and-directories)), together with `uiScale` (interface zoom factor), whether the sidebar is shown, its width, section fold states, custom section heights (`sidebar.todoHeight` / `sidebar.runningHeight`), running session order (`sidebar.runningOrder`), and the size of the window:
+They are saved in `gui.json` in the state directory ([Files and directories](cli.md#files-and-directories)), together with `uiScale` (interface zoom factor), whether the sidebar is shown, its width, section fold states, custom section heights (`sidebar.todoHeight` / `sidebar.runningHeight`), running session order (`sidebar.runningOrder`), saved backend endpoint (`backendUrl` / `backendToken` when set), floating ball position (`floatingBall` once moved), and the size of the window:
 
 ```json
 {
@@ -204,11 +218,13 @@ They are saved in `gui.json` in the state directory ([Files and directories](cli
   "language": "system",
   "uiScale": 1,
   "notifications": { "enabled": true, "permission": true, "turnDone": true, "turnError": true },
-  "sidebar": { "visible": true, "todoExpanded": true, "runningExpanded": true, "historyExpanded": true, "width": 264, "todoHeight": 0, "runningHeight": 0, "runningOrder": [] }
+  "sidebar": { "visible": true, "todoExpanded": true, "runningExpanded": true, "historyExpanded": true, "width": 264, "todoHeight": 0, "runningHeight": 0, "runningOrder": [] },
+  "backendUrl": "wss://remote.example:7777/",
+  "floatingBall": { "screenName": "DP-1", "x": 1840, "y": 980 }
 }
 ```
 
-`theme` is `system`, `light` or `dark`; `language` is `system`, `en` or `zh_CN`; `uiScale` is `0.5`–`4` (default `1`); `sidebar.todoHeight` and `sidebar.runningHeight` are `0` (automatic) or a height in pixels. The file is written on every change. If it cannot be read, it is renamed to `gui.json.bad`, the defaults are used, and the settings dialog and a message in the corner say so. Values that are wrong are ignored one by one and keep their defaults.
+`theme` is `system`, `light` or `dark`; `language` is `system`, `en` or `zh_CN`; `uiScale` is `0.5`–`4` (default `1`); `sidebar.todoHeight` and `sidebar.runningHeight` are `0` (automatic) or a height in pixels; `backendUrl` (`ws://` or `wss://`) and `backendToken` are omitted when using local automatic discovery, and `floatingBall` is written once the ball is moved. The file is written on every change (with mode 600 on Unix). If it cannot be read, it is renamed to `gui.json.bad`, the defaults are used, and the settings dialog and a message in the corner say so. Values that are wrong are ignored one by one and keep their defaults.
 
 ## Known limits
 
@@ -217,7 +233,8 @@ They are saved in `gui.json` in the state directory ([Files and directories](cli
 - Ctrl+Shift+U can be taken by the IBus Unicode input on Linux. If the key does not respond, turn that IBus key off, or use the *Undo* button under your message or `/undo`.
 - **Input methods (IME):** On Linux, the package bundles `fcitx5-qt` alongside Qt's `ibus` and `compose` input context plugins, so `fcitx5` (`QT_IM_MODULE=fcitx`) and `IBus` work out of the box on both native Wayland and `xcb` (X11/XWayland). On native Wayland without `QT_IM_MODULE` set, Qt uses `zwp_text_input_v3`.
 - **Wayland window icon:** Wayland compositors resolve window icons by desktop ID, so installing `ref-gui.desktop` and `ref.svg` (see [Installation](../README.md#installation)) is required for the window icon to appear.
-- In very long sessions (more than about 200 messages above or below the view) the scroll bar length is an estimate, and may shift a little while you drag it.
+- **Wayland floating ball:** Wayland compositors own global window coordinates and `startSystemMove()`, so `floatingBall` `x`/`y` persistence and inward screen-edge anchoring fall back to compositor placement on Linux Wayland.
+- In very long sessions, unloaded or evicted messages render as estimated skeleton placeholders, so the total scroll bar length is an estimate and may shift slightly as messages materialize or while dragging it.
 - A bash call that exits with a non-zero code still shows as done in the card header; the exit code is in the open card.
 - For tools the GUI has no special view for, the one-line summary lists the first three plain arguments in alphabetical order, where the terminal UI uses the order in the call.
 - Tool arguments and output are shown as UTF-8 text.

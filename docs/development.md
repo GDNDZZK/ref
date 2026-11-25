@@ -43,7 +43,7 @@ Some tests start `python3` (a fake MCP server) and `bash`. The end-to-end script
 | `mcp` | MCP client over stdio and Streamable HTTP. |
 | `sys` | Operating-system layer: processes, signals, Windows specifics. |
 | `client` | Finds the running backend through the instance files or starts the `ref-server` next to the program, or a private `ref-server --mock`. Shared by `ref` and `ref-web`. |
-| `server` | `ref-server`: sessions, the agent loop, permissions, compaction, storage (SQLite), cross-session messaging, WebSocket API. |
+| `server` | `ref-server`: sessions, the agent loop, permissions, compaction, storage (SQLite schema v3 with `sessions_fts` FTS5 index and stash groups), cross-session messaging, WebSocket API. |
 | `tui` | `ref`: the terminal UI (ratatui). |
 | `web` | `ref-web`: serves the web frontend from `web/` (embedded, pre-compressed), signs browsers in and forwards their WebSocket frames to `ref-server`. See [Web UI](web.md). |
 
@@ -51,9 +51,9 @@ Some tests start `python3` (a fake MCP server) and `bash`. The end-to-end script
 
 The protocol types are in `crates/proto`. Two sets of files are generated from them and checked into the repository: JSON samples of every frame in `crates/proto/fixtures/` (the GUI and the web frontend parse each one in their tests) and the TypeScript types in `web/src/proto/generated/`. `cargo test -p ref-proto` fails when they are out of date; `REF_UPDATE_FIXTURES=1 cargo test -p ref-proto` rewrites them. Both directories are kept on LF line endings by `.gitattributes`.
 
-The TUI, GUI and web frontend exchange JSON frames over WebSocket (`PROTOCOL_VERSION` is currently `5`). On `Hello`, the server checks `version == PROTOCOL_VERSION` and refuses mismatches with `code: "protocol_mismatch"` (the `ref-server-cli` control client used by `--stop` and `--status` is exempt). The protocol version is bumped only for incompatible changes or when a new baseline is enforced; version 5 adds configuration profile management (`GetConfigFiles`, `SaveConfigFile`, `CreateConfigFile`, `SelectConfigFile`, `DeleteConfigFile`), hot reload (`ReloadConfig` and `ServerFrame::ConfigChanged`), `$PATH` binary completion (`ListBinaries`), and per-session `cwd` / file entries on `ListDirs`.
+The TUI, GUI and web frontend exchange JSON frames over WebSocket (`PROTOCOL_VERSION` is currently `6`). On `Hello`, the server checks `version == PROTOCOL_VERSION` and refuses mismatches with `code: "protocol_mismatch"` (the `ref-server-cli` control client used by `--stop` and `--status` is exempt). The protocol version is bumped only for incompatible changes or when a new baseline is enforced; version 6 adds lightweight layout metadata (`MessageLayoutMeta`, `PartLayoutMeta`, and `layout_metas` on `SessionSnapshot` / `SessionEvent::Reset`), sequence range paging (`start_seq` / `end_seq` on `Messages`), `RetryNow`, and Stash group requests (`ListGroups`, `StashAll`, `CreateGroup`, `RenameGroup`, `SetGroupLocked`, `DeleteGroup`, `AddToGroup`, `MoveGroupMember`, `RemoveFromGroup`, `MergeGroups`, `RestoreGroup`, `RestoreGroupMember`) plus `ServerFrame::GroupsChanged`.
 
-`ServerFrame::Response` may carry an optional machine-readable `code` on `ok: false` when clients need to branch on an error (`no_pending_question`, `no_pending_permission`, `not_found`, `protocol_mismatch`, `dir_not_found`); the human-readable `error` text remains as a fallback. Frontends get history page by page: `Attach` returns the newest messages (100, or fewer if they exceed about 1 MiB) and `Messages` returns the page before a given message, so older pages load as you scroll up. Images reach frontends as stubs (MIME type, size and an `id`, no bytes); `GetImage` returns the bytes for an id.
+`ServerFrame::Response` may carry an optional machine-readable `code` on `ok: false` when clients need to branch on an error (`no_pending_question`, `no_pending_permission`, `not_found`, `protocol_mismatch`, `dir_not_found`); the human-readable `error` text remains as a fallback. Frontends get history page by page: `Attach` returns the newest messages (100, or fewer if they exceed about 1 MiB) together with `layout_metas` for older messages, and `Messages` returns a page before a given message or a `[start_seq, end_seq)` sequence range, so older pages and virtualized scroll jumps load on demand. Images reach frontends as stubs (MIME type, size and an `id`, no bytes); `GetImage` returns the bytes for an id.
 
 Additional optional metadata used by clients:
 - `Part::Tool.meta.warnings`: array of warning strings on successful `edit` results (e.g. remapped line numbers or stripped `N:` prefixes); omitted when empty.
@@ -142,7 +142,7 @@ QT_QPA_PLATFORM=offscreen QML_IMPORT_PATH=$REF_DEPS_DIR/prefix/lib/qml \
 cmake -S gui -B gui/build -G Ninja -DCMAKE_INSTALL_BINDIR=. -DCMAKE_PREFIX_PATH=… 
 cmake --build gui/build
 cmake --install gui/build --prefix stage
-scripts/package.sh --version v0.2.3 --target x86_64-unknown-linux-gnu \
+scripts/package.sh --version v0.2.4 --target x86_64-unknown-linux-gnu \
   --bin-dir target/release --out dist --gui-dir stage      # needs the Rust build, see above
 ```
 
@@ -160,7 +160,7 @@ scripts/package.sh --version v0.2.3 --target x86_64-unknown-linux-gnu \
 
 Two GitHub Actions workflows live in `.github/workflows/`. Both build the frontend first with the actions in `.github/actions/` (Node 24, pnpm with a cached store, `pnpm install --frozen-lockfile`, `pnpm build`).
 
-- **`ci.yml`** runs on every push and pull request: `cargo fmt --check` and `cargo clippy -D warnings` on Linux, `cargo test` on Linux, macOS (Intel) and Windows, `pnpm check` for the frontend, and the GUI build with its tests (`ctest`) on the same three systems. The GUI libraries come from `gui/scripts` and are cached by the hash of those scripts. When tests or the frontend check fail, their output is repeated in the run summary.
+- **`ci.yml`** runs on every push and pull request: `cargo fmt --check` and `cargo clippy -D warnings` on Linux, `cargo test` on Linux, macOS (Intel) and Windows, `pnpm check` for the frontend, the GUI build with its tests (`ctest`) on the same three systems, and `gui tests with ASan and UBSan` (`gui-sanitizers`) on Linux. The GUI libraries come from `gui/scripts` and are cached by the hash of those scripts. When tests or the frontend check fail, their output is repeated in the run summary.
 - **`release.yml`** runs when a `v*` tag is pushed. Its jobs, in order: build the frontend once; build `ref`, `ref-server` and `ref-web` for six targets on native runners (one `cargo build --release --workspace` per target); build and deploy the GUI for each target and pack the four archives with `scripts/package.sh`, then check the GUI archive with `scripts/verify-gui-package.sh`; write the `SHA256SUMS` file and, for tags, publish a GitHub Release. Every package job lists the archive sizes in the run summary.
 
 | Target | Runner (Linux GUI and packaging) | Archive |
@@ -184,7 +184,7 @@ Each target gets four archives. Every archive holds one folder of the same name 
 To pack by hand after `cargo build --release`:
 
 ```bash
-scripts/package.sh --version v0.2.3 --target x86_64-unknown-linux-gnu \
+scripts/package.sh --version v0.2.4 --target x86_64-unknown-linux-gnu \
   --bin-dir target/release --out dist [--gui-dir stage]
 ```
 
@@ -195,10 +195,10 @@ To make a release:
 ```bash
 # 1. Set the version in Cargo.toml ([workspace.package] version) and run
 #    `cargo update --workspace` to refresh Cargo.lock (CI builds with --locked).
-#    Write the release text in .github/release-notes/v0.2.3.md. Commit and push.
+#    Write the release text in .github/release-notes/v0.2.4.md. Commit and push.
 # 2. Tag and push the tag:
-git tag v0.2.3
-git push origin v0.2.3
+git tag v0.2.4
+git push origin v0.2.4
 ```
 
 The `ref-gui` version, the Windows and macOS metadata and the archive names follow from the tag and `Cargo.toml`. The first job of the workflow fails when the tag and the version in `Cargo.toml` differ. The release text is the file `.github/release-notes/<tag>.md`; when it does not exist, GitHub generates the text from the commits.

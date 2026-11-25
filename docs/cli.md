@@ -20,19 +20,21 @@ ref [PATH] [options]
 
 | Option | Meaning |
 |---|---|
-| `PATH` | Directory for the new session (default: the current directory). |
-| `-c`, `--continue` | Continue the most recent session for this directory. |
+| `PATH` | Default directory for the new session (default: the current directory). |
+| `-c`, `--continue` | Continue the most recent session for this directory (warns when none exists). |
 | `-s`, `--session ID` | Open a session by id, live or from history. |
 | `-w`, `--watch` | Split view of all live background sessions. Creates no session. |
-| `--agent NAME` | Agent for the new session. |
-| `--model provider/model[#variant]` | Model for the new session. Not remembered for later sessions. |
-| `-p`, `--prompt TEXT` | Send this prompt right away. |
+| `--agent NAME` | Pre-selected agent for the new session. |
+| `--model provider/model[#variant]` | Pre-selected model for the new session. Not remembered for later sessions. |
+| `-p`, `--prompt TEXT` | Create a session and send this prompt right away. |
 | `--server ws://host:port` | Connect to this backend instead of finding or starting one. |
 | `--token T` | Token for `--server`. |
 | `--mock` | Run against a built-in fake backend (for development). |
 | `-V`, `--version`, `-h`, `--help` | Version and help. |
 
-Without `--server`, `ref` looks for a running backend in the instance files (see below) and connects to it. If none is running, it starts `ref-server` from the same directory as `ref` (or from `PATH`) with a random free port and `--idle-timeout 0`, so the backend exits when the last `ref` disconnects. Turns that are running stop with it; start `ref-server` yourself (below) to keep sessions running without a window.
+Without `-c`, `-s`, `-w`, or `-p`, `ref` starts on an empty welcome screen without creating a session; sending the first prompt (or running `/new`) creates one with the pre-selected directory, agent, model, and variant. Passing `-c` when the directory has no saved session warns instead of creating one.
+
+Without `--server` (and when no saved default backend is set in `tui.json`), `ref` looks for a running backend in the instance files (see below) and connects to it. If none is running, it starts `ref-server` lazily from the same directory as `ref` (or from `PATH`) with a random free port and `--idle-timeout 0`, so the backend exits when the last `ref` disconnects. Passing `--server` or saving a default backend skips local `ref-server` startup. Turns that are running stop with a locally spawned server; start `ref-server` yourself (below) to keep sessions running without a window.
 
 ## `ref-gui`
 
@@ -55,7 +57,7 @@ ref-gui [DIR] [options]
 | `--mock` | Use a private fake backend (for development). Cannot be combined with `--server`. |
 | `-V`, `--version`, `-h`, `--help` | Version and help. |
 
-Without `-c` or `-s`, `ref-gui` opens in the empty workspace state (*No session open*) without auto-creating a session; `DIR`, `--agent` and `--model` set defaults for sessions you create from the window (and creating a session in another folder updates the default directory). The hidden `--smoke` flag prints `ready` when started without a session flag, or `attached <id>` with `-c` / `-s`, and exits with code 0.
+Without `-c` or `-s`, `ref-gui` opens in the empty workspace state (*No session open*) without auto-creating a session; `DIR`, `--agent` and `--model` set defaults for sessions you create from the window (and creating a session in another folder updates the default directory). Local `ref-server` startup is skipped when `--server` or a saved default `backendUrl` in `gui.json` is configured. The hidden `--smoke` flag prints `ready` when started without a session flag, or `attached <id>` with `-c` / `-s`, and exits with code 0.
 
 ## `ref-web`
 
@@ -78,7 +80,7 @@ ref-web [DIR] [options]
 | `--mock` | Use a private fake backend (for development). Cannot be combined with `--server`. |
 | `-V`, `--version`, `-h`, `--help` | Version and help. |
 
-Without `--server`, `ref-web` finds the backend the same way `ref` does. Without `--key`, the key for browsers is the login token kept in `<state dir>/web/login-token`.
+Without `--server`, `ref-web` resolves the backend lazily when a browser connects: if the browser sends an explicit saved backend (`ref.backend.v1`) over the sealed control channel, `ref-web` connects directly to it without starting a local `ref-server`; otherwise it finds or starts one the same way `ref` does. Without `--key`, the key for browsers is the login token kept in `<state dir>/web/login-token`.
 
 ## `ref-server`
 
@@ -126,6 +128,7 @@ ref --server ws://127.0.0.1:7777 --token <token>
 | `~/.local/share/ref/sessions/` | Saved sessions. |
 | `~/.local/state/ref/instances/<pid>.json` | One file per running backend: port, token and settings. Readable only by you (mode 600). |
 | `~/.local/state/ref/prompt-history.jsonl` | Prompt history (500 entries), shared by `ref` and `ref-gui`. |
+| `~/.local/state/ref/tui.json` | Preferences of `ref` (saved default `backendUrl` and `backendToken`). Readable only by you (mode 600 on Unix). |
 | `~/.local/state/ref/gui.json` | Settings of `ref-gui` ([Settings](gui.md#settings)). |
 | `~/.local/state/ref/web/login-token` | Login token of `ref-web`, the default key. Readable only by you (mode 600). Delete it while `ref-web` is stopped to get a new one. |
 | `~/.local/state/ref/web/salt` | Salt for the key (16 random bytes as hex, not secret; mode 600). Browsers keep a value derived from the key and the salt; a new salt makes them ask for the key again. |

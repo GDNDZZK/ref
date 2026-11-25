@@ -20,19 +20,21 @@ ref [PATH] [options]
 
 | 选项 | 含义 |
 |---|---|
-| `PATH` | 新会话的目录（默认：当前目录）。 |
-| `-c`, `--continue` | 继续此目录最近的会话。 |
+| `PATH` | 新会话的默认目录（默认：当前目录）。 |
+| `-c`, `--continue` | 继续此目录最近的会话（没有历史会话时给出警告）。 |
 | `-s`, `--session ID` | 按 id 打开会话，可以是运行中的，也可以是历史中的。 |
 | `-w`, `--watch` | 所有运行中后台会话的分屏视图。不创建会话。 |
-| `--agent NAME` | 新会话使用的智能体。 |
-| `--model provider/model[#variant]` | 新会话使用的模型。不会记住给之后的会话。 |
-| `-p`, `--prompt TEXT` | 立即发送这条提示。 |
+| `--agent NAME` | 为新会话预先选择的智能体。 |
+| `--model provider/model[#variant]` | 为新会话预先选择的模型。不会记住给之后的会话。 |
+| `-p`, `--prompt TEXT` | 立即创建会话并发送这条提示。 |
 | `--server ws://host:port` | 连接到这个后端，而不是查找或启动一个。 |
 | `--token T` | `--server` 使用的令牌。 |
 | `--mock` | 使用内置的假后端运行（用于开发）。 |
 | `-V`, `--version`, `-h`, `--help` | 版本和帮助。 |
 
-不带 `--server` 时，`ref` 会在实例文件（见下文）中查找运行中的后端并连接。如果没有，它会从 `ref` 所在目录（或 `PATH`）启动 `ref-server`，使用随机空闲端口和 `--idle-timeout 0`，这样最后一个 `ref` 断开后后端就会退出，正在运行的轮次也随之停止。想在没有窗口时让会话继续运行，请自己启动 `ref-server`（见下文）。
+不带 `-c`、`-s`、`-w` 或 `-p` 时，`ref` 启动后停留在空白欢迎页，不自动创建会话；发送第一条提示（或运行 `/new`）时再按预先选定的目录、智能体、模型和变体创建会话。当前目录没有已保存会话时传入 `-c` 会发出警告，而不是新建会话。
+
+不带 `--server`（且 `tui.json` 中未保存默认后端）时，`ref` 会在实例文件（见下文）中查找运行中的后端并连接。如果没有，它才按需从 `ref` 所在目录（或 `PATH`）启动 `ref-server`，使用随机空闲端口和 `--idle-timeout 0`，这样最后一个 `ref` 断开后后端就会退出。传入 `--server` 或保存了默认后端时，会跳过本地 `ref-server` 启动。本地拉起的后端退出时，正在运行的轮次也随之停止；想在没有窗口时让会话继续运行，请自己启动 `ref-server`（见下文）。
 
 ## `ref-gui`
 
@@ -55,7 +57,7 @@ ref-gui [DIR] [options]
 | `--mock` | 使用私有的假后端（开发用）。不能与 `--server` 同时使用。 |
 | `-V`, `--version`, `-h`, `--help` | 版本和帮助。 |
 
-不带 `-c` 或 `-s` 时，`ref-gui` 打开后进入空白工作区（*未打开会话*），不会自动创建会话；`DIR`、`--agent` 和 `--model` 作为在窗口内手动新建会话时的默认值（选择其他文件夹新建会话后会同步更新工作区默认目录）。隐藏测试参数 `--smoke` 在未传会话参数时输出 `ready`，带 `-c` / `-s` 时输出 `attached <id>`，并以退出码 0 退出。
+不带 `-c` 或 `-s` 时，`ref-gui` 打开后进入空白工作区（*未打开会话*），不会自动创建会话；`DIR`、`--agent` 和 `--model` 作为在窗口内手动新建会话时的默认值（选择其他文件夹新建会话后会同步更新工作区默认目录）。配置了 `--server` 或在 `gui.json` 中保存了默认 `backendUrl` 时，会跳过本地 `ref-server` 启动。隐藏测试参数 `--smoke` 在未传会话参数时输出 `ready`，带 `-c` / `-s` 时输出 `attached <id>`，并以退出码 0 退出。
 
 ## `ref-web`
 
@@ -78,7 +80,7 @@ ref-web [DIR] [选项]
 | `--mock` | 使用私有的假后端（开发用）。不能与 `--server` 同时使用。 |
 | `-V`, `--version`, `-h`, `--help` | 版本和帮助。 |
 
-不带 `--server` 时，`ref-web` 查找后端的方式与 `ref` 相同。不带 `--key` 时，浏览器的密钥是保存在 `<state 目录>/web/login-token` 中的登录 token。
+不带 `--server` 时，`ref-web` 会在浏览器连接时按需解析后端：如果浏览器通过加密控制通道指定了已保存的显式后端（`ref.backend.v1`），`ref-web` 会直接连接该地址，不会启动本地 `ref-server`；否则以与 `ref` 相同的方式查找或启动本地后端。不带 `--key` 时，浏览器的密钥是保存在 `<state 目录>/web/login-token` 中的登录 token。
 
 ## `ref-server`
 
@@ -126,6 +128,7 @@ ref --server ws://127.0.0.1:7777 --token <token>
 | `~/.local/share/ref/sessions/` | 保存的会话。 |
 | `~/.local/state/ref/instances/<pid>.json` | 每个运行中的后端一个文件：端口、令牌和设置。只有你自己可读（权限 600）。 |
 | `~/.local/state/ref/prompt-history.jsonl` | 提示历史（500 条），`ref` 和 `ref-gui` 共用。 |
+| `~/.local/state/ref/tui.json` | `ref` 的偏好设置（保存的默认 `backendUrl` 与 `backendToken`）。Unix 下仅本人可读（权限 600）。 |
 | `~/.local/state/ref/gui.json` | `ref-gui` 的设置（[设置](gui.zh-CN.md#设置)）。 |
 | `~/.local/state/ref/web/login-token` | `ref-web` 的登录 token，即默认密钥，仅你本人可读（权限 600）。在 `ref-web` 停止时删除它即可换新 token。 |
 | `~/.local/state/ref/web/salt` | 密钥的 salt（16 个随机字节的十六进制，不是秘密；权限 600）。浏览器保存由密钥和 salt 推导出的值；换了 salt，浏览器会重新询问密钥。 |

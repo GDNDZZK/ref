@@ -41,7 +41,8 @@ The file tools use hash-tagged line numbers, modeled on [oh-my-pi](https://githu
 
 `read` and `grep` print a `[path#TAG]` header, where `TAG` is a hash of the whole file, followed by `N:content` rows. `edit` takes that tag and line numbers from that version of the file, and applies all its changes (replace, delete, insert before or after) at once, so earlier changes in the same call do not shift later line numbers.
 
-If the file changed since the tag was issued, ref maps the line numbers onto the current file through a diff when it can, and the tool card notes the remap below the diff. Otherwise it rejects the edit and returns the current content around the requested lines, so the model can retry without reading the whole file again.
+If the file changed since the tag was issued, ref maps the line numbers onto the current file through a diff when it can (tolerating trailing spaces and tabs, matching `file_hash`), and the tool card notes the remap below the diff. Otherwise it rejects the edit and returns the current content around the requested lines, so the model can retry without reading the whole file again.
+
 ## bash
 
 Runs a command with `bash -c` in the session directory, with stdout and stderr combined in order.
@@ -82,7 +83,7 @@ When a provider rejects a request with a stricter image limit in the error messa
 ## Context tools
 
 - `context_window`: tokens used, the maximum, and the recommended and automatic compaction points, for this session or another one.
-- `compact_context`: replaces the history with a summary the model writes itself.
+- `compact_context`: replaces the history with a summary the model writes itself (appending the current todo list with a staleness note when non-empty).
 
 See [Context compaction](configuration.md#context-compaction).
 

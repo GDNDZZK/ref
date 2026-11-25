@@ -31,9 +31,8 @@ Several sessions can work side by side and message each other.
 
 ## Features
 
-- **Server and interfaces are separate.** `ref-server` runs sessions, the agent loop, LLM calls, tools and permissions. `ref` (terminal), `ref-gui` (desktop window) and `ref-web` (browser) only show them. Sessions keep running as long as any window (terminal, desktop or browser) is connected, so you can close one and continue in another, or have several open at once. A server started by one of them exits when the last window disconnects, and running sessions stop. To keep them running with no window open, start `ref-server` yourself: `ref-server` runs until you stop it, and the interfaces connect to it.
-- **Many sessions at once.** A split view tiles all background sessions. Sessions can send each other messages, and the `build` agent can start worker sessions and give them tasks.
-- **Reads opencode configuration, with a visual editor and hot reload.** ref loads the providers, models, agents, permissions, MCP servers and commands of an existing `opencode.json`, edits `ref.json` losslessly in `ref-gui` and `ref-web` (with multi-profile switching), and reloads live across running sessions without restarting. A few keys are accepted and ignored; see [Configuration](docs/configuration.md).
+- **Server and interfaces are separate.** `ref-server` runs sessions, the agent loop, LLM calls, tools and permissions. `ref` (terminal), `ref-gui` (desktop window) and `ref-web` (browser) only show them; each supports switching backend connections interactively (temporary or saved default) and starts a local `ref-server` lazily only when connecting locally without a running backend. Sessions keep running as long as any window (terminal, desktop or browser) is connected, so you can close one and continue in another, or have several open at once. A server started by one of them exits when the last window disconnects, and running sessions stop. To keep them running with no window open, start `ref-server` yourself: `ref-server` runs until you stop it, and the interfaces connect to it.
+- **Many sessions at once.** A split view tiles all background sessions (with direct-parent creator filtering). Sessions can send each other messages, the `build` agent can start worker sessions and give them tasks, Stash groups let you save and restore groups of sessions together, and `ref-gui` includes a 3-state floating ball mode.
 - **Three provider APIs.** Anthropic Messages, OpenAI Responses and any OpenAI-compatible Chat Completions endpoint, with model variants for reasoning effort or extended thinking. There is no native Gemini or Bedrock client.
 - **Control over tool calls.** Allow, ask or deny per tool, with patterns for commands, paths and URLs, plus optional countdowns before a tool runs.
 - **Reliable file edits.** Edits address hash-tagged line numbers, so a stale view of a file is detected instead of corrupting it.
@@ -83,7 +82,7 @@ Pick an interface, then get the archive for your system from the [latest release
 | Windows x86_64 | `x86_64-pc-windows-msvc.zip` |
 | Windows arm64 | `aarch64-pc-windows-msvc.zip` |
 
-For example, `ref-tui-v0.2.3-x86_64-unknown-linux-gnu.tar.gz`. Unpack it and put the programs **in the same directory** on your `PATH`; each interface looks for `ref-server` next to itself:
+For example, `ref-tui-v0.2.4-x86_64-unknown-linux-gnu.tar.gz`. Unpack it and put the programs **in the same directory** on your `PATH`; each interface looks for `ref-server` next to itself:
 
 ```bash
 tar -xzf ref-tui-*.tar.gz

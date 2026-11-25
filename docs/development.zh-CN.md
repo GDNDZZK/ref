@@ -43,7 +43,7 @@ REF_DUMP_REQUESTS=/tmp/dump ref-server ...                     # 导出 LLM 请�
 | `mcp` | 基于 stdio 和 Streamable HTTP 的 MCP 客户端。 |
 | `sys` | 操作系统层：进程、信号、Windows 相关处理。 |
 | `client` | 通过 instance 文件找到运行中的后端，或启动程序同目录的 `ref-server`，或启动私有的 `ref-server --mock`。`ref` 和 `ref-web` 共用。 |
-| `server` | `ref-server`：会话、智能体循环、权限、压缩、存储（SQLite）、跨会话消息、WebSocket API。 |
+| `server` | `ref-server`：会话、智能体循环、权限、压缩、存储（SQLite v3 模式，含 `sessions_fts` FTS5 索引与暂存分组）、跨会话消息、WebSocket API。 |
 | `tui` | `ref`：终端界面（ratatui）。 |
 | `web` | `ref-web`：提供 `web/` 中的前端（嵌入并预压缩）、为浏览器登录，并把它们的 WebSocket 帧转发给 `ref-server`。见 [Web 界面](web.zh-CN.md)。 |
 
@@ -51,9 +51,9 @@ REF_DUMP_REQUESTS=/tmp/dump ref-server ...                     # 导出 LLM 请�
 
 协议类型在 `crates/proto` 中。由它们生成并提交到仓库的文件有两组：`crates/proto/fixtures/` 中每种帧的 JSON 样例（GUI 和 Web 前端的测试会逐个解析），以及 `web/src/proto/generated/` 中的 TypeScript 类型。文件过期时 `cargo test -p ref-proto` 会失败；`REF_UPDATE_FIXTURES=1 cargo test -p ref-proto` 会重写它们。`.gitattributes` 让这两个目录保持 LF 换行。
 
-TUI、GUI 和 Web 前端与后端通过 WebSocket 交换 JSON 帧（当前 `PROTOCOL_VERSION` 为 `5`）。收到 `Hello` 时，服务器要求 `version == PROTOCOL_VERSION`，不匹配会返回 `code: "protocol_mismatch"` 并拒绝连接（供 `--stop` 和 `--status` 使用的 `ref-server-cli` 控制客户端不受此限制）。只有发生不兼容变更或需要强制统一新基线时才递增协议版本号；第 5 版新增配置方案管理（`GetConfigFiles`、`SaveConfigFile`、`CreateConfigFile`、`SelectConfigFile`、`DeleteConfigFile`）、热重载（`ReloadConfig` 与 `ServerFrame::ConfigChanged`）、`$PATH` 可执行文件补全（`ListBinaries`），以及 `ListDirs` 的按会话 `cwd` 与文件列表支持。
+TUI、GUI 和 Web 前端与后端通过 WebSocket 交换 JSON 帧（当前 `PROTOCOL_VERSION` 为 `6`）。收到 `Hello` 时，服务器要求 `version == PROTOCOL_VERSION`，不匹配会返回 `code: "protocol_mismatch"` 并拒绝连接（供 `--stop` 和 `--status` 使用的 `ref-server-cli` 控制客户端不受此限制）。只有发生不兼容变更或需要强制统一新基线时才递增协议版本号；第 6 版新增轻量布局元数据（`MessageLayoutMeta`、`PartLayoutMeta`，以及 `SessionSnapshot` / `SessionEvent::Reset` 上的 `layout_metas`）、按序号范围分页（`Messages` 的 `start_seq` / `end_seq`）、`RetryNow`，以及暂存分组请求（`ListGroups`、`StashAll`、`CreateGroup`、`RenameGroup`、`SetGroupLocked`、`DeleteGroup`、`AddToGroup`、`MoveGroupMember`、`RemoveFromGroup`、`MergeGroups`、`RestoreGroup`、`RestoreGroupMember`）和 `ServerFrame::GroupsChanged`。
 
-`ServerFrame::Response` 在 `ok: false` 时可附带机器可读的 `code` 字段供客户端分支判断（`no_pending_question`、`no_pending_permission`、`not_found`、`protocol_mismatch`、`dir_not_found`）；人类可读的 `error` 文本保持不变以作兜底。前端分页获取历史：`Attach` 返回最新的消息（100 条，超过约 1 MiB 时更少），`Messages` 返回指定消息之前的一页，因此向上滚动时会加载更早的页。图片以占位信息发给前端（MIME 类型、尺寸和 `id`，不含字节数据）；`GetImage` 按 id 返回图片字节。
+`ServerFrame::Response` 在 `ok: false` 时可附带机器可读的 `code` 字段供客户端分支判断（`no_pending_question`、`no_pending_permission`、`not_found`、`protocol_mismatch`、`dir_not_found`）；人类可读的 `error` 文本保持不变以作兜底。前端分页获取历史：`Attach` 返回最新的消息（100 条，超过约 1 MiB 时更少）及更早消息的 `layout_metas`，`Messages` 返回指定消息之前的一页或 `[start_seq, end_seq)` 序号区间，因此向上滚动或虚拟化跳转时可按需加载。图片以占位信息发给前端（MIME 类型、尺寸和 `id`，不含字节数据）；`GetImage` 按 id 返回图片字节。
 
 客户端使用的其他可选元数据：
 - `Part::Tool.meta.warnings`：成功的 `edit` 结果中的警告字符串数组（例如行号已重映射或剥离了 `N:` 前缀）；为空时省略。
@@ -142,7 +142,7 @@ QT_QPA_PLATFORM=offscreen QML_IMPORT_PATH=$REF_DEPS_DIR/prefix/lib/qml \
 cmake -S gui -B gui/build -G Ninja -DCMAKE_INSTALL_BINDIR=. -DCMAKE_PREFIX_PATH=…
 cmake --build gui/build
 cmake --install gui/build --prefix stage
-scripts/package.sh --version v0.2.3 --target x86_64-unknown-linux-gnu \
+scripts/package.sh --version v0.2.4 --target x86_64-unknown-linux-gnu \
   --bin-dir target/release --out dist --gui-dir stage      # 需要先完成 Rust 构建，见上文
 ```
 
@@ -160,7 +160,7 @@ scripts/package.sh --version v0.2.3 --target x86_64-unknown-linux-gnu \
 
 `.github/workflows/` 中有两个 GitHub Actions 工作流。两者都先用 `.github/actions/` 中的 action 构建前端（Node 24、带缓存的 pnpm、`pnpm install --frozen-lockfile`、`pnpm build`）。
 
-- **`ci.yml`** 在每次推送和拉取请求时运行：在 Linux 上执行 `cargo fmt --check` 和 `cargo clippy -D warnings`，在 Linux、macOS（Intel）和 Windows 上执行 `cargo test`，运行前端的 `pnpm check`，并在同样三个系统上构建 GUI 并运行它的测试（`ctest`）。GUI 的依赖库来自 `gui/scripts`，按这些脚本的哈希缓存。测试或前端检查失败时，失败输出会在运行摘要中再显示一次。
+- **`ci.yml`** 在每次推送和拉取请求时运行：在 Linux 上执行 `cargo fmt --check` 和 `cargo clippy -D warnings`，在 Linux、macOS（Intel）和 Windows 上执行 `cargo test`，运行前端的 `pnpm check`，在同样三个系统上构建 GUI 并运行它的测试（`ctest`），并在 Linux 上运行 `gui tests with ASan and UBSan`（`gui-sanitizers`）。GUI 的依赖库来自 `gui/scripts`，按这些脚本的哈希缓存。测试或前端检查失败时，失败输出会在运行摘要中再显示一次。
 - **`release.yml`** 在推送 `v*` 标签时运行。它的任务依次是：构建一次前端；在原生 runner 上为六个目标构建 `ref`、`ref-server` 和 `ref-web`（每个目标一次 `cargo build --release --workspace`）；为每个目标构建并部署 GUI，用 `scripts/package.sh` 打出四个压缩包，再用 `scripts/verify-gui-package.sh` 检查 GUI 压缩包；生成 `SHA256SUMS` 文件，标签触发时发布 GitHub Release。每个打包任务都会在运行摘要中列出各压缩包的体积。
 
 | 目标 | Runner（Linux 的 GUI 与打包） | 压缩包 |
@@ -184,7 +184,7 @@ scripts/package.sh --version v0.2.3 --target x86_64-unknown-linux-gnu \
 在 `cargo build --release` 之后手动打包：
 
 ```bash
-scripts/package.sh --version v0.2.3 --target x86_64-unknown-linux-gnu \
+scripts/package.sh --version v0.2.4 --target x86_64-unknown-linux-gnu \
   --bin-dir target/release --out dist [--gui-dir stage]
 ```
 
@@ -195,10 +195,10 @@ scripts/package.sh --version v0.2.3 --target x86_64-unknown-linux-gnu \
 ```bash
 # 1. 修改 Cargo.toml 中的版本（[workspace.package] version），并运行
 #    `cargo update --workspace` 刷新 Cargo.lock（CI 用 --locked 构建）。
-#    把发布说明写进 .github/release-notes/v0.2.3.md。提交并推送。
+#    把发布说明写进 .github/release-notes/v0.2.4.md。提交并推送。
 # 2. 打标签并推送标签：
-git tag v0.2.3
-git push origin v0.2.3
+git tag v0.2.4
+git push origin v0.2.4
 ```
 
 `ref-gui` 的版本、Windows 和 macOS 的元数据以及压缩包名称都由标签和 `Cargo.toml` 决定。标签与 `Cargo.toml` 中的版本不一致时，工作流的第一个任务会失败。发布说明取自文件 `.github/release-notes/<标签>.md`；文件不存在时，由 GitHub 根据提交生成。
