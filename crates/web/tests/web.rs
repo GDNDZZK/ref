@@ -265,16 +265,24 @@ async fn upstream_close_is_passed_on() {
 #[tokio::test]
 async fn unreachable_backend_closes_the_tab_with_a_fixed_reason() {
     let env = Env::new("down");
-    let dead = format!("ws://{LOOPBACK}:{}/", free_port());
+    // Hold the port bound and drop connections immediately so no parallel test can steal it.
+    let listener = tokio::net::TcpListener::bind((LOOPBACK, 0)).await.unwrap();
+    let dead_port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            drop(stream);
+        }
+    });
+    let dead = format!("ws://{LOOPBACK}:{dead_port}/");
     let web = env.start(&["--server", &dead]).await;
     // The backend is contacted after connect_upstream, so frame 0 succeeds first.
     let mut chan = Channel::sign_in_only(web.ws().await, &web.key)
         .await
         .unwrap();
     let closed = chan.connect_upstream("cli_default", None, None).await.err();
-    assert!(chan.upstream_error.is_some());
     // The address of the backend is in the log, not in the close reason.
     assert_eq!(closed, Some((1011, "backend unavailable".to_string())));
+    assert!(chan.upstream_error.is_some());
 }
 
 #[tokio::test]

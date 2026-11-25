@@ -4275,7 +4275,12 @@ void TestMainWindow::floatingBallModeTransitionsBetweenBallHoverCardAndMiniPanel
 		QCoreApplication::processEvents();
 		QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 		QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+		engine.clearSingletons();
+		engine.clearComponentCache();
 		engine.collectGarbage();
+		QCoreApplication::processEvents();
+		QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+		QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 	});
 	QVERIFY(QTest::qWaitForWindowExposed(window));
 	window->requestActivate();
