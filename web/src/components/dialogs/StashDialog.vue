@@ -14,8 +14,8 @@ import Icon from '../Icon.vue'
 import ModalDialog from '../ModalDialog.vue'
 
 type DragPayload =
-  | { kind: 'running'; sessionId: string }
-  | { kind: 'member'; groupId: string; sessionId: string }
+  | { kind: 'running'; sessionId: string; pinned: boolean }
+  | { kind: 'member'; groupId: string; sessionId: string; pinned: boolean }
   | { kind: 'group'; groupId: string }
 
 const { t } = useI18n()
@@ -27,6 +27,8 @@ const dragState = ref<DragPayload>()
 const dropGroupId = ref<string>()
 const dropNewGroup = ref(false)
 const dropRestore = ref(false)
+const dropReorderRunning = ref(false)
+const dropRunningIndex = ref<number>()
 const dropOutside = ref(false)
 const dropMemberKey = ref<string>() // `${groupId}:${sessionId}`
 
@@ -75,23 +77,30 @@ function clearDragState(): void {
   dropGroupId.value = undefined
   dropNewGroup.value = false
   dropRestore.value = false
+  dropReorderRunning.value = false
+  dropRunningIndex.value = undefined
   dropOutside.value = false
   dropMemberKey.value = undefined
 }
 
-function startRunningDrag(event: DragEvent, sessionId: string): void {
-  dragState.value = { kind: 'running', sessionId }
-  event.dataTransfer?.setData('text/plain', sessionId)
+function startRunningDrag(event: DragEvent, session: SessionInfo): void {
+  dragState.value = { kind: 'running', sessionId: session.id, pinned: session.pinned_at != null }
+  event.dataTransfer?.setData('text/plain', session.id)
   if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
 }
 
-function startMemberDrag(event: DragEvent, group: StashGroup, sessionId: string): void {
+function startMemberDrag(event: DragEvent, group: StashGroup, member: StashMember): void {
   if (group.locked) {
     event.preventDefault()
     return
   }
-  dragState.value = { kind: 'member', groupId: group.id, sessionId }
-  event.dataTransfer?.setData('text/plain', sessionId)
+  dragState.value = {
+    kind: 'member',
+    groupId: group.id,
+    sessionId: member.session_id,
+    pinned: member.info.pinned_at != null,
+  }
+  event.dataTransfer?.setData('text/plain', member.session_id)
   if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
 }
 
@@ -113,6 +122,8 @@ function onDragOverNewGroup(event: DragEvent): void {
   dropGroupId.value = undefined
   dropMemberKey.value = undefined
   dropRestore.value = false
+  dropReorderRunning.value = false
+  dropRunningIndex.value = undefined
   dropOutside.value = false
 }
 
@@ -143,6 +154,8 @@ function onDragOverGroup(event: DragEvent, group: StashGroup): void {
   dropGroupId.value = group.id
   dropNewGroup.value = false
   dropRestore.value = false
+  dropReorderRunning.value = false
+  dropRunningIndex.value = undefined
   dropOutside.value = false
   dropMemberKey.value = undefined
 }
@@ -185,6 +198,8 @@ function onDragOverMember(event: DragEvent, group: StashGroup, member: StashMemb
   dropGroupId.value = group.id
   dropNewGroup.value = false
   dropRestore.value = false
+  dropReorderRunning.value = false
+  dropRunningIndex.value = undefined
   dropOutside.value = false
 }
 
@@ -219,15 +234,73 @@ function onDropMember(event: DragEvent, targetGroup: StashGroup, targetIndex: nu
   )
 }
 
+function runningInsertIndex(event: DragEvent, pinned: boolean): number | undefined {
+  const column = event.currentTarget as HTMLElement | null
+  if (!column) return undefined
+  const cards = Array.from(column.querySelectorAll<HTMLElement>('.running-card'))
+  const hasPointer = Boolean(event.clientX || event.clientY)
+  const hasMeasuredCards = cards.some((card) => card.getBoundingClientRect().height > 0)
+  if (!hasPointer && !hasMeasuredCards) return undefined
+
+  const count = workspace.live.length
+  let insertIndex = count
+  if (count > 0 && cards.length > 0) {
+    const firstTop = cards[0]!.getBoundingClientRect().top
+    if (event.clientY < firstTop) {
+      insertIndex = 0
+    } else {
+      for (let i = 0; i < cards.length; ++i) {
+        const rect = cards[i]!.getBoundingClientRect()
+        if (event.clientY < rect.top + rect.height / 2) {
+          insertIndex = i
+          break
+        }
+        if (event.clientY <= rect.bottom) {
+          insertIndex = i + 1
+          break
+        }
+      }
+    }
+  }
+  const pinnedCount = workspace.live.filter((session) => session.pinned_at != null).length
+  const minIndex = pinned ? 0 : pinnedCount
+  const maxIndex = pinned ? pinnedCount : count
+  return Math.max(minIndex, Math.min(maxIndex, insertIndex))
+}
+
 function onDragOverRunning(event: DragEvent): void {
-  if (dragState.value?.kind !== 'member') return
+  const payload = dragState.value
+  if (!payload || payload.kind === 'group') return
   event.preventDefault()
   event.stopPropagation()
-  dropRestore.value = true
   dropOutside.value = false
   dropGroupId.value = undefined
   dropMemberKey.value = undefined
   dropNewGroup.value = false
+
+  if (payload.kind === 'running') {
+    dropRestore.value = false
+    const insertIndex = runningInsertIndex(event, payload.pinned)
+    if (insertIndex === undefined) {
+      dropReorderRunning.value = false
+      dropRunningIndex.value = undefined
+      return
+    }
+    const fromIndex = workspace.live.findIndex((session) => session.id === payload.sessionId)
+    const toIndex = fromIndex < insertIndex ? insertIndex - 1 : insertIndex
+    if (fromIndex >= 0 && toIndex !== fromIndex) {
+      dropReorderRunning.value = true
+      dropRunningIndex.value = insertIndex
+    } else {
+      dropReorderRunning.value = false
+      dropRunningIndex.value = undefined
+    }
+    return
+  }
+
+  dropReorderRunning.value = false
+  dropRestore.value = true
+  dropRunningIndex.value = runningInsertIndex(event, payload.pinned)
 }
 
 function onDragLeaveRunning(event: DragEvent): void {
@@ -235,19 +308,46 @@ function onDragLeaveRunning(event: DragEvent): void {
   const relatedTarget = event.relatedTarget as Node | null
   if (currentTarget && relatedTarget && currentTarget.contains(relatedTarget)) return
   dropRestore.value = false
+  dropReorderRunning.value = false
+  dropRunningIndex.value = undefined
 }
 
 function onDropRunning(event: DragEvent): void {
   event.preventDefault()
   event.stopPropagation()
   const payload = dragState.value
+  const savedIndex = dropRunningIndex.value
   clearDragState()
-  if (payload?.kind !== 'member') return
-  report(workspace.restoreGroupMember(payload.groupId, payload.sessionId))
+  if (!payload || payload.kind === 'group') return
+
+  const insertIndex = runningInsertIndex(event, payload.pinned) ?? savedIndex
+  if (payload.kind === 'running') {
+    if (insertIndex === undefined) return
+    const fromIndex = workspace.live.findIndex((session) => session.id === payload.sessionId)
+    const toIndex = fromIndex < insertIndex ? insertIndex - 1 : insertIndex
+    if (fromIndex >= 0 && toIndex !== fromIndex) {
+      workspace.moveRunningSession(payload.sessionId, toIndex)
+    }
+    return
+  }
+
+  if (insertIndex === undefined) {
+    report(workspace.restoreGroupMember(payload.groupId, payload.sessionId))
+    return
+  }
+  report(
+    workspace.restoreGroupMember(payload.groupId, payload.sessionId, {
+      targetIndex: insertIndex,
+      pinned: payload.pinned,
+    }),
+  )
 }
+
 function onDragOverGroupsColumn(): void {
   dropOutside.value = false
   dropRestore.value = false
+  dropReorderRunning.value = false
+  dropRunningIndex.value = undefined
 }
 
 function onDragOverOutside(event: DragEvent): void {
@@ -255,6 +355,8 @@ function onDragOverOutside(event: DragEvent): void {
   event.preventDefault()
   dropOutside.value = true
   dropRestore.value = false
+  dropReorderRunning.value = false
+  dropRunningIndex.value = undefined
   dropGroupId.value = undefined
   dropMemberKey.value = undefined
   dropNewGroup.value = false
@@ -420,11 +522,22 @@ function createEmptyGroup(): void {
         </div>
         <TransitionGroup v-else tag="div" name="stash-list" class="list">
           <div
-            v-for="session in workspace.live"
+            v-for="(session, index) in workspace.live"
             :key="session.id"
             class="running-card"
+            :class="{
+              'drop-before':
+                (dropReorderRunning || dropRestore) &&
+                workspace.live.length > 0 &&
+                dropRunningIndex === index,
+              'drop-after':
+                (dropReorderRunning || dropRestore) &&
+                workspace.live.length > 0 &&
+                index === workspace.live.length - 1 &&
+                dropRunningIndex === workspace.live.length,
+            }"
             draggable="true"
-            @dragstart="startRunningDrag($event, session.id)"
+            @dragstart="startRunningDrag($event, session)"
             @dragend="clearDragState"
           >
             <span class="tint-bar" :style="{ background: creatorTint(session) }" />
@@ -544,7 +657,7 @@ function createEmptyGroup(): void {
                   'drop-before': dropMemberKey === `${group.id}:${member.session_id}`,
                 }"
                 :draggable="!group.locked"
-                @dragstart="startMemberDrag($event, group, member.session_id)"
+                @dragstart="startMemberDrag($event, group, member)"
                 @dragend="clearDragState"
                 @dragover="onDragOverMember($event, group, member)"
                 @drop="onDropMember($event, group, index)"
@@ -747,9 +860,16 @@ function createEmptyGroup(): void {
   box-shadow: inset 0 0 0 1px var(--user-bubble-border);
 }
 
-.member-row.drop-before {
+.member-row.drop-before,
+.running-card.drop-before {
   box-shadow:
     inset 0 2px 0 var(--accent-text),
+    inset 0 0 0 1px var(--accent-text);
+}
+
+.running-card.drop-after {
+  box-shadow:
+    inset 0 -2px 0 var(--accent-text),
     inset 0 0 0 1px var(--accent-text);
 }
 

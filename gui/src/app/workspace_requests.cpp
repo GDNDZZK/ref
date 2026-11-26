@@ -338,6 +338,7 @@ void Workspace::applyBackendSwitch(refgui::client::Backend::Source source)
 	}
 	m_seenLive.clear();
 	m_pinnedLive.clear();
+	m_pendingRestoreOrderIds.clear();
 	m_leaving.clear();
 	m_tileAttaching.clear();
 	m_unzooming.clear();

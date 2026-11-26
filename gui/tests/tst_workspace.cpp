@@ -162,6 +162,16 @@ public:
 	}
 	void pushHistoryChanged() { m_fake.send({{u"kind"_s, u"history_changed"_s}}); }
 	void setSessionPinnedAt(const QString& id, qint64 pinnedAt) { m_sessions[id][u"pinned_at"_s] = pinnedAt; }
+	void holdRestoreGroupMember(bool hold) { m_holdRestoreGroupMember = hold; }
+	void setRestoreGroupMemberError(const QString& error) { m_restoreGroupMemberError = error; }
+	void releaseRestoreGroupMember()
+	{
+		const QList<QJsonObject> held = std::exchange(m_heldRestoreGroupMembers, {});
+		for(const QJsonObject& req : held)
+		{
+			respondRestoreGroupMember(req);
+		}
+	}
 	QJsonArray list() const
 	{
 		QJsonArray array;
@@ -604,19 +614,36 @@ public:
 		}
 		else if(op == u"restore_group_member"_s)
 		{
-			const QString sid = request.value(u"session_id"_s).toString();
-			bool restored = false;
-			if(m_sessions.contains(sid) && !m_sessions[sid].value(u"live"_s).toBool(true))
+			if(m_holdRestoreGroupMember)
 			{
-				m_sessions[sid][u"live"_s] = true;
-				restored = true;
+				m_heldRestoreGroupMembers.append(request);
+				return;
 			}
-			m_fake.respond(request, {{u"restored"_s, restored}, {u"groups"_s, m_groups}});
-			broadcast();
+			respondRestoreGroupMember(request);
 		}
 		else
 		{
 			m_fake.respond(request, {});
+		}
+	}
+	void respondRestoreGroupMember(const QJsonObject& request)
+	{
+		if(!m_restoreGroupMemberError.isEmpty())
+		{
+			m_fake.fail(request, m_restoreGroupMemberError);
+			return;
+		}
+		const QString sid = request.value(u"session_id"_s).toString();
+		bool restored = false;
+		if(m_sessions.contains(sid) && !m_sessions[sid].value(u"live"_s).toBool(true))
+		{
+			m_sessions[sid][u"live"_s] = true;
+			restored = true;
+		}
+		m_fake.respond(request, {{u"restored"_s, restored}, {u"groups"_s, m_groups}});
+		if(restored)
+		{
+			broadcast();
 		}
 	}
 	void respondAttach(const QJsonObject& request)
@@ -662,6 +689,9 @@ public:
 	QJsonArray m_groups;
 	int m_groupSeq = 0;
 	int m_pinSeq = 0;
+	bool m_holdRestoreGroupMember = false;
+	QList<QJsonObject> m_heldRestoreGroupMembers;
+	QString m_restoreGroupMemberError;
 };
 
 // An assistant message whose only tool call waits for the user's permission.
@@ -809,6 +839,7 @@ private slots:
 	void switchBackendResetsWorkspaceAndConnectsToNewEndpoint();
 	void pinningSortsSessionsRefreshesHistoryAndClampsLiveReorder();
 	void splitViewThrottlesTileAttachesAndSkipsNoOpVisibleBroadcasts();
+	void restoreStashedSessionAtPreservesOrderAcrossBroadcastsRollsBackAndClampsPins();
 };
 
 void TestWorkspace::opensTheSessionFromTheCommandLine()
@@ -2419,5 +2450,78 @@ void TestWorkspace::splitViewThrottlesTileAttachesAndSkipsNoOpVisibleBroadcasts(
 	}
 }
 
+void TestWorkspace::restoreStashedSessionAtPreservesOrderAcrossBroadcastsRollsBackAndClampsPins()
+{
+	Fixture f(refgui::proto::ProtocolVersion, true, {}, [](StubServer& stub) {
+		stub.add(u"ses_c"_s, 3);
+		stub.add(u"ses_d"_s, 4);
+		stub.add(u"ses_e"_s, 5);
+		stub.add(u"ses_p1"_s, 6);
+		stub.add(u"ses_p2"_s, 7);
+		stub.setSessionPinnedAt(u"ses_p1"_s, 100);
+		stub.setSessionPinnedAt(u"ses_p2"_s, 200);
+	});
+	const auto liveIds = [&]() {
+		QStringList out;
+		const auto* model = f.workspace->sessions();
+		for(int row = 0; row < model->rowCount(); ++row)
+		{
+			out.append(model->index(row).data(refgui::workspace::SessionListModel::SessionIdRole).toString());
+		}
+		return out;
+	};
+	QTRY_COMPARE(liveIds(), (QStringList{u"ses_p2"_s, u"ses_p1"_s, u"ses_e"_s, u"ses_d"_s, u"ses_c"_s, u"ses_b"_s, u"ses_a"_s}));
+
+	f.workspace->stash()->createGroup(u"g"_s, {u"ses_c"_s, u"ses_d"_s, u"ses_e"_s, u"ses_p2"_s}, true);
+	QTRY_COMPARE(f.workspace->stash()->groupCount(), 1);
+	QTRY_COMPARE(liveIds(), (QStringList{u"ses_p1"_s, u"ses_b"_s, u"ses_a"_s}));
+	const QString gid = f.workspace->stash()->groupsVariant().first().toMap().value(u"id"_s).toString();
+	const QVariantList members = f.workspace->stash()->groupsVariant().first().toMap().value(u"members"_s).toList();
+	QVERIFY(members.at(3).toMap().value(u"pinned"_s).toBool());
+	QVERIFY(!members.at(0).toMap().value(u"pinned"_s).toBool());
+
+	// Optimistic insertion stays protected across intermediate Sessions broadcasts before RPC completes.
+	f.stub.holdRestoreGroupMember(true);
+	f.workspace->restoreStashedSessionAt(gid, u"ses_c"_s, 2, false);
+	QCOMPARE(f.workspace->settings()->sidebarRunningOrder(), (QStringList{u"ses_p1"_s, u"ses_b"_s, u"ses_c"_s, u"ses_a"_s}));
+	f.stub.broadcast();
+	QTest::qWait(QuietMs);
+	QCOMPARE(f.workspace->settings()->sidebarRunningOrder(), (QStringList{u"ses_p1"_s, u"ses_b"_s, u"ses_c"_s, u"ses_a"_s}));
+
+	// Concurrent second restore and live reorder preserve pending restore slots.
+	f.workspace->restoreStashedSessionAt(gid, u"ses_d"_s, 1, false);
+	QCOMPARE(f.workspace->settings()->sidebarRunningOrder(), (QStringList{u"ses_p1"_s, u"ses_d"_s, u"ses_b"_s, u"ses_c"_s, u"ses_a"_s}));
+	f.workspace->moveRunningSession(u"ses_a"_s, 1);
+	QCOMPARE(f.workspace->settings()->sidebarRunningOrder(), (QStringList{u"ses_p1"_s, u"ses_d"_s, u"ses_a"_s, u"ses_b"_s, u"ses_c"_s}));
+
+	f.stub.releaseRestoreGroupMember();
+	f.stub.holdRestoreGroupMember(false);
+	QTRY_COMPARE(liveIds(), (QStringList{u"ses_p1"_s, u"ses_d"_s, u"ses_a"_s, u"ses_b"_s, u"ses_c"_s}));
+
+	// Pin boundaries are clamped separately for unpinned and pinned restores.
+	f.workspace->restoreStashedSessionAt(gid, u"ses_e"_s, 0, false);
+	QTRY_COMPARE(liveIds(), (QStringList{u"ses_p1"_s, u"ses_e"_s, u"ses_d"_s, u"ses_a"_s, u"ses_b"_s, u"ses_c"_s}));
+	f.workspace->restoreStashedSessionAt(gid, u"ses_p2"_s, 99, true);
+	QTRY_COMPARE(liveIds(), (QStringList{u"ses_p1"_s, u"ses_p2"_s, u"ses_e"_s, u"ses_d"_s, u"ses_a"_s, u"ses_b"_s, u"ses_c"_s}));
+
+	// RPC failure rolls back pending order entry and emits error toast.
+	QSignalSpy toastSpy(f.workspace.get(), &Workspace::toastRequested);
+	f.stub.setRestoreGroupMemberError(u"restore failed"_s);
+	f.workspace->restoreStashedSessionAt(gid, u"ses_fail"_s, 2, false);
+	QCOMPARE(f.workspace->settings()->sidebarRunningOrder(), (QStringList{u"ses_p1"_s, u"ses_p2"_s, u"ses_fail"_s, u"ses_e"_s, u"ses_d"_s, u"ses_a"_s, u"ses_b"_s, u"ses_c"_s}));
+	QTRY_VERIFY(!f.workspace->settings()->sidebarRunningOrder().contains(u"ses_fail"_s));
+	QVERIFY(!toastSpy.isEmpty());
+	f.stub.setRestoreGroupMemberError({});
+
+	// Non-restored non-live result also rolls back pending order entry.
+	f.workspace->restoreStashedSessionAt(gid, u"ses_missing"_s, 2, false);
+	QTRY_VERIFY(!f.workspace->settings()->sidebarRunningOrder().contains(u"ses_missing"_s));
+
+	// Already-live member moves directly via moveRunningSession without rollback when restored=false.
+	f.workspace->restoreStashedSessionAt(gid, u"ses_a"_s, 2, false);
+	QTRY_COMPARE(liveIds(), (QStringList{u"ses_p1"_s, u"ses_p2"_s, u"ses_a"_s, u"ses_e"_s, u"ses_d"_s, u"ses_b"_s, u"ses_c"_s}));
+	QTest::qWait(QuietMs);
+	QCOMPARE(liveIds(), (QStringList{u"ses_p1"_s, u"ses_p2"_s, u"ses_a"_s, u"ses_e"_s, u"ses_d"_s, u"ses_b"_s, u"ses_c"_s}));
+}
 QTEST_MAIN(TestWorkspace)
 #include "tst_workspace.moc"

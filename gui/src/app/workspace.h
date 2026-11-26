@@ -192,6 +192,7 @@ public:
 	Q_INVOKABLE void renameSession(const QString& sessionId, const QString& name, const QJSValue& cb = {});
 	Q_INVOKABLE void setSessionPinned(const QString& sessionId, bool pinned, const QJSValue& cb = {});
 	Q_INVOKABLE void moveRunningSession(const QString& sessionId, int toIndex);
+	Q_INVOKABLE void restoreStashedSessionAt(const QString& groupId, const QString& sessionId, int targetIndex, bool pinned = false);
 	Q_INVOKABLE void setSessionCwd(const QString& sessionId, const QString& path, const QJSValue& cb = {});
 	Q_INVOKABLE void setModel(const QString& sessionId, const QString& provider, const QString& model, const QString& variant = {});
 	Q_INVOKABLE void setAgent(const QString& sessionId, const QString& agent);
@@ -305,6 +306,7 @@ private:
 	void updateHistoryCreatorLabel();
 	void updateHighlight();
 	void onLiveChanged();
+	void preservePendingRestoreOrder(QStringList& order) const;
 	void dropChat(const QString& sessionId);
 	ChatSession& chat(const QString& sessionId);
 	QString nameOf(const QString& sessionId) const;
@@ -379,6 +381,7 @@ private:
 	ChatSession* m_current = nullptr;
 	QHash<QString, QString> m_seenLive; // sessions that were in the live list, with their directory; one that leaves it was closed
 	QSet<QString> m_pinnedLive;
+	QSet<QString> m_pendingRestoreOrderIds;
 	QSet<QString> m_leaving; // closed sessions that the backend may still list; they must not come back
 	QString m_failure;
 	QString m_dialog;

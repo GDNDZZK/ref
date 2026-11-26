@@ -19,6 +19,7 @@ const api = {
   setAgent: vi.fn(),
   setCwd: vi.fn(),
   listGroups: vi.fn(),
+  restoreGroupMember: vi.fn(),
   setPinned: vi.fn(),
 }
 const connection = {
@@ -690,6 +691,156 @@ describe('stash groups and splitFilter', () => {
     expect(workspace.groups).toEqual([group1])
     await workspace.restoreGroup('g1')
     expect(workspace.groups).toEqual([])
+  })
+
+  it('restores a group member at targetIndex, protects pending order across setLive, clamps pins, and rolls back on failure', async () => {
+    let resolveRestore!: (value: { restored: boolean; groups: unknown[] }) => void
+    const restorePromise = new Promise<{ restored: boolean; groups: unknown[] }>((resolve) => {
+      resolveRestore = resolve
+    })
+    const workspace = setup([session('ses_p1', { pinned_at: 100 }), session('ses_1'), session('ses_2')])
+    const settingsStore = useSettingsStore()
+    const restoredSession = session('ses_stashed', { created_at: 999 })
+    api.listSessions.mockResolvedValue([
+      session('ses_p1', { pinned_at: 100 }),
+      session('ses_1'),
+      session('ses_2'),
+      restoredSession,
+    ])
+    api.restoreGroupMember.mockReturnValueOnce(restorePromise)
+
+    // Optimistic insert at index 2 (between ses_1 and ses_2).
+    const pendingCall = workspace.restoreGroupMember('g1', 'ses_stashed', {
+      targetIndex: 2,
+      pinned: false,
+    })
+    expect(settingsStore.settings.sidebarRunningOrder).toEqual(['ses_p1', 'ses_1', 'ses_stashed', 'ses_2'])
+
+    // Intermediate sessions broadcast before restore settles must not prune ses_stashed.
+    workspace.onFrame({
+      kind: 'sessions',
+      sessions: [session('ses_p1', { pinned_at: 100 }), session('ses_1'), session('ses_2')],
+    })
+    expect(settingsStore.settings.sidebarRunningOrder).toEqual(['ses_p1', 'ses_1', 'ses_stashed', 'ses_2'])
+
+    // Concurrent second restore and live reorder while ses_stashed is pending preserve ses_stashed's slot.
+    let resolveSecond!: (value: { restored: boolean; groups: unknown[] }) => void
+    const secondPromise = new Promise<{ restored: boolean; groups: unknown[] }>((resolve) => {
+      resolveSecond = resolve
+    })
+    const unpinnedInserted = session('ses_unpinned', { created_at: 1000 })
+    api.restoreGroupMember.mockReturnValueOnce(secondPromise)
+    api.listSessions.mockResolvedValue([
+      session('ses_p1', { pinned_at: 100 }),
+      session('ses_1'),
+      session('ses_2'),
+      restoredSession,
+      unpinnedInserted,
+    ])
+    const secondCall = workspace.restoreGroupMember('g1', 'ses_unpinned', {
+      targetIndex: 1,
+      pinned: false,
+    })
+    expect(settingsStore.settings.sidebarRunningOrder).toEqual([
+      'ses_p1',
+      'ses_unpinned',
+      'ses_1',
+      'ses_stashed',
+      'ses_2',
+    ])
+    workspace.moveRunningSession('ses_2', 1)
+    expect(settingsStore.settings.sidebarRunningOrder).toEqual([
+      'ses_p1',
+      'ses_unpinned',
+      'ses_2',
+      'ses_1',
+      'ses_stashed',
+    ])
+
+    resolveRestore({ restored: true, groups: [] })
+    resolveSecond({ restored: true, groups: [] })
+    await expect(pendingCall).resolves.toBe(true)
+    await expect(secondCall).resolves.toBe(true)
+    expect(workspace.live.map((entry) => entry.id)).toEqual([
+      'ses_p1',
+      'ses_unpinned',
+      'ses_2',
+      'ses_1',
+      'ses_stashed',
+    ])
+
+    // Pin boundary clamping: unpinned cannot precede pinned; pinned cannot follow unpinned.
+    const unpinnedClamped = session('ses_unpinned_2', { created_at: 1002 })
+    api.restoreGroupMember.mockResolvedValueOnce({ restored: true, groups: [] })
+    api.listSessions.mockResolvedValueOnce([
+      session('ses_p1', { pinned_at: 100 }),
+      unpinnedClamped,
+      unpinnedInserted,
+      session('ses_2'),
+      session('ses_1'),
+      restoredSession,
+    ])
+    await workspace.restoreGroupMember('g1', 'ses_unpinned_2', { targetIndex: 0, pinned: false })
+    expect(workspace.live.map((entry) => entry.id)).toEqual([
+      'ses_p1',
+      'ses_unpinned_2',
+      'ses_unpinned',
+      'ses_2',
+      'ses_1',
+      'ses_stashed',
+    ])
+
+    const pinnedInserted = session('ses_p2', { pinned_at: 50, created_at: 1001 })
+    api.restoreGroupMember.mockResolvedValueOnce({ restored: true, groups: [] })
+    api.listSessions.mockResolvedValueOnce([
+      session('ses_p1', { pinned_at: 100 }),
+      pinnedInserted,
+      unpinnedClamped,
+      unpinnedInserted,
+      session('ses_2'),
+      session('ses_1'),
+      restoredSession,
+    ])
+    await workspace.restoreGroupMember('g1', 'ses_p2', { targetIndex: 99, pinned: true })
+    expect(workspace.live.map((entry) => entry.id)).toEqual([
+      'ses_p1',
+      'ses_p2',
+      'ses_unpinned_2',
+      'ses_unpinned',
+      'ses_2',
+      'ses_1',
+      'ses_stashed',
+    ])
+
+    // Failure rollback and restored=false rollback.
+    api.restoreGroupMember.mockRejectedValueOnce(new Error('rpc failed'))
+    await expect(
+      workspace.restoreGroupMember('g1', 'ses_fail', { targetIndex: 2, pinned: false }),
+    ).rejects.toThrow('rpc failed')
+    expect(settingsStore.settings.sidebarRunningOrder).not.toContain('ses_fail')
+
+    api.restoreGroupMember.mockResolvedValueOnce({ restored: false, groups: [] })
+    api.listSessions.mockResolvedValueOnce(workspace.live)
+    await expect(
+      workspace.restoreGroupMember('g1', 'ses_missing', { targetIndex: 2, pinned: false }),
+    ).resolves.toBe(false)
+    expect(settingsStore.settings.sidebarRunningOrder).not.toContain('ses_missing')
+
+    // Already-live member moves directly without rolling back when restored=false.
+    api.restoreGroupMember.mockResolvedValueOnce({ restored: false, groups: [] })
+    api.listSessions.mockResolvedValueOnce(workspace.live)
+    await expect(
+      workspace.restoreGroupMember('g1', 'ses_2', { targetIndex: 2, pinned: false }),
+    ).resolves.toBe(false)
+    expect(workspace.live.map((entry) => entry.id)).toEqual([
+      'ses_p1',
+      'ses_p2',
+      'ses_2',
+      'ses_unpinned_2',
+      'ses_unpinned',
+      'ses_1',
+      'ses_stashed',
+    ])
   })
 
   it('keeps background sessions attached across splitFilter switches until leaving split', async () => {

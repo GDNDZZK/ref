@@ -87,6 +87,21 @@ Workspace::Workspace(refgui::cli::LaunchOptions options, QString settingsPath, Q
 	connect(&m_configEditor, &refgui::workspace::ConfigEditorController::mutationFinished, this, &Workspace::endLocalConfigMutation);
 	connect(&m_configEditor, &refgui::workspace::ConfigEditorController::toastRequested, this, &Workspace::toast);
 	connect(&m_stash, &refgui::workspace::StashController::toastRequested, this, &Workspace::toast);
+	connect(&m_stash, &refgui::workspace::StashController::restoreGroupMemberFinished, this, [this](const QString& sessionId, bool restored) {
+		if(restored || m_seenLive.contains(sessionId))
+		{
+			return;
+		}
+		if(!m_pendingRestoreOrderIds.remove(sessionId))
+		{
+			return;
+		}
+		QStringList order = m_settings.sidebarRunningOrder();
+		if(order.removeAll(sessionId) > 0)
+		{
+			m_settings.setSidebarRunningOrder(order);
+		}
+	});
 	connect(&m_settings, &refgui::workspace::Settings::saveFailed, this, [this](const QString& reason) {
 		toast(refgui::workspace::ToastLevel::Warn, tr("Could not save the settings: %1").arg(reason));
 	});
@@ -956,7 +971,80 @@ void Workspace::moveRunningSession(const QString& sessionId, int toIndex)
 		return;
 	}
 	order.move(fromIndex, clamped);
+	preservePendingRestoreOrder(order);
 	m_settings.setSidebarRunningOrder(order);
+}
+
+void Workspace::restoreStashedSessionAt(const QString& groupId, const QString& sessionId, int targetIndex, bool pinned)
+{
+	if(groupId.isEmpty() || sessionId.isEmpty())
+	{
+		return;
+	}
+	if(targetIndex < 0)
+	{
+		m_stash.restoreGroupMember(groupId, sessionId);
+		return;
+	}
+	const auto& live = m_directory.live();
+	const int count = live.count();
+	QStringList order;
+	order.reserve(count + 1);
+	int existingIndex = -1;
+	for(int row = 0; row < count; ++row)
+	{
+		const QString id = live.data(live.index(row), refgui::workspace::SessionListModel::SessionIdRole).toString();
+		if(id == sessionId)
+		{
+			existingIndex = row;
+		}
+		order.append(id);
+	}
+	if(existingIndex >= 0)
+	{
+		const int toIndex = existingIndex < targetIndex ? targetIndex - 1 : targetIndex;
+		moveRunningSession(sessionId, toIndex);
+		m_stash.restoreGroupMember(groupId, sessionId);
+		return;
+	}
+	const int pinnedCount = live.pinnedCount();
+	const int minIndex = pinned ? 0 : pinnedCount;
+	const int maxIndex = pinned ? pinnedCount : count;
+	const int clamped = std::clamp(targetIndex, minIndex, maxIndex);
+	order.removeAll(sessionId);
+	order.insert(clamped, sessionId);
+	m_pendingRestoreOrderIds.insert(sessionId);
+	preservePendingRestoreOrder(order);
+	m_settings.setSidebarRunningOrder(order);
+	m_stash.restoreGroupMember(groupId, sessionId);
+}
+
+void Workspace::preservePendingRestoreOrder(QStringList& order) const
+{
+	if(m_pendingRestoreOrderIds.isEmpty())
+	{
+		return;
+	}
+	const QStringList previous = m_settings.sidebarRunningOrder();
+	for(qsizetype i = 0; i < previous.size(); ++i)
+	{
+		const QString& id = previous.at(i);
+		if(!m_pendingRestoreOrderIds.contains(id) || order.contains(id))
+		{
+			continue;
+		}
+		int insertAt = 0;
+		for(qsizetype prevIdx = i - 1; prevIdx >= 0; --prevIdx)
+		{
+			const int anchorIndex = static_cast<int>(order.indexOf(previous.at(prevIdx)));
+			if(anchorIndex >= 0)
+			{
+				insertAt = anchorIndex + 1;
+				break;
+			}
+		}
+		order.insert(insertAt, id);
+	}
 }
 
 // A session ended, closed here or elsewhere: forgets it, and when it was the current one in single view
@@ -1059,6 +1147,7 @@ void Workspace::onLiveChanged()
 	}
 	// Closed sessions the backend no longer lists cannot come back.
 	m_leaving.removeIf([this, &now](const QString& id) { return !now.contains(id) && !m_chats.contains(id); });
+	m_pendingRestoreOrderIds.removeIf([&now](const QString& id) { return now.contains(id); });
 	const QStringList currentOrder = m_settings.sidebarRunningOrder();
 	if(!currentOrder.isEmpty())
 	{
@@ -1066,7 +1155,7 @@ void Workspace::onLiveChanged()
 		pruned.reserve(currentOrder.size());
 		for(const QString& id : currentOrder)
 		{
-			if(now.contains(id))
+			if(now.contains(id) || m_pendingRestoreOrderIds.contains(id))
 			{
 				pruned.append(id);
 			}

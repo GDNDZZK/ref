@@ -45,9 +45,10 @@ ModalDialog {
 	property string dragSessionId: ""
 	property string dragGroupId: ""
 	property string dragTitle: ""
+	property bool dragPinned: false
 	property real dragSceneX: 0
 	property real dragSceneY: 0
-	property string dropTargetKind: "" // "", "newGroup", "group", "member", "restore", "outside"
+	property string dropTargetKind: "" // "", "newGroup", "group", "member", "reorderRunning", "restore", "outside"
 	property string dropGroupId: ""
 	property string dropMemberSessionId: ""
 	property int dropIndex: -1
@@ -217,20 +218,52 @@ ModalDialog {
 		dragSessionId = ""
 		dragGroupId = ""
 		dragTitle = ""
+		dragPinned = false
 		dropTargetKind = ""
 		dropGroupId = ""
 		dropMemberSessionId = ""
 		dropIndex = -1
 	}
 
-	function startDrag(kind, sessionId, groupId, title, sceneX, sceneY) {
+	function startDrag(kind, sessionId, groupId, title, sceneX, sceneY, pinned = false) {
 		dragKind = kind
 		dragSessionId = sessionId
 		dragGroupId = groupId
 		dragTitle = title
+		dragPinned = pinned === true
 		dragSceneX = sceneX
 		dragSceneY = sceneY
 		updateDropTarget(sceneX, sceneY)
+	}
+
+	function runningInsertIndexAt(sceneX, sceneY, pinned) {
+		const count = Workspace.sessions.count
+		let insertIndex = count
+		if (count > 0) {
+			const listPt = runningListView.mapFromItem(null, sceneX, sceneY)
+			if (listPt.y < 0) {
+				insertIndex = 0
+			} else {
+				for (let i = 0; i < count; ++i) {
+					const rowItem = runningListView.itemAtIndex(i)
+					if (!rowItem)
+						continue
+					const rowPt = rowItem.mapFromItem(null, sceneX, sceneY)
+					if (rowPt.y < rowItem.height / 2) {
+						insertIndex = i
+						break
+					}
+					if (rowPt.y <= rowItem.height) {
+						insertIndex = i + 1
+						break
+					}
+				}
+			}
+		}
+		const pinnedCount = Workspace.sessions.pinnedCount
+		const minIndex = pinned ? 0 : pinnedCount
+		const maxIndex = pinned ? pinnedCount : count
+		return Math.max(minIndex, Math.min(maxIndex, insertIndex))
 	}
 
 	function updateDropTarget(sceneX, sceneY) {
@@ -273,11 +306,24 @@ ModalDialog {
 			return
 		}
 
+		if (dragKind === "running" && pointInItem(runningColumn, sceneX, sceneY)) {
+			const insertIdx = runningInsertIndexAt(sceneX, sceneY, dragPinned)
+			const fromIdx = Workspace.sessions.indexOf(dragSessionId)
+			const toIdx = fromIdx < insertIdx ? insertIdx - 1 : insertIdx
+			if (fromIdx >= 0 && toIdx !== fromIdx) {
+				dropTargetKind = "reorderRunning"
+				dropIndex = insertIdx
+			}
+			return
+		}
+
 		if (dragKind === "member") {
-			if (pointInItem(runningColumn, sceneX, sceneY))
+			if (pointInItem(runningColumn, sceneX, sceneY)) {
 				dropTargetKind = "restore"
-			else if (!pointInItem(groupsColumn, sceneX, sceneY))
+				dropIndex = runningInsertIndexAt(sceneX, sceneY, dragPinned)
+			} else if (!pointInItem(groupsColumn, sceneX, sceneY)) {
 				dropTargetKind = "outside"
+			}
 		}
 	}
 
@@ -291,6 +337,7 @@ ModalDialog {
 		const kind = dragKind
 		const sessionId = dragSessionId
 		const sourceGroupId = dragGroupId
+		const pinned = dragPinned
 		const targetKind = dropTargetKind
 		const targetGroupId = dropGroupId
 		const targetIndex = dropIndex
@@ -319,8 +366,15 @@ ModalDialog {
 				Workspace.stash.moveGroupMember(sourceGroupId, targetGroupId, sessionId, targetIndex, true)
 			return
 		}
+		if (targetKind === "reorderRunning" && kind === "running") {
+			const fromIdx = Workspace.sessions.indexOf(sessionId)
+			const toIdx = fromIdx < targetIndex ? targetIndex - 1 : targetIndex
+			if (fromIdx >= 0 && toIdx !== fromIdx)
+				Workspace.moveRunningSession(sessionId, toIdx)
+			return
+		}
 		if (targetKind === "restore" && kind === "member") {
-			Workspace.stash.restoreGroupMember(sourceGroupId, sessionId)
+			Workspace.restoreStashedSessionAt(sourceGroupId, sessionId, targetIndex, pinned)
 			return
 		}
 		if (targetKind === "outside" && kind === "member")
@@ -484,13 +538,21 @@ ModalDialog {
 						displaced: Transition {
 							NumberAnimation { property: "y"; duration: Motion.standard; easing.type: Motion.ease }
 						}
+						move: Transition {
+							NumberAnimation { property: "y"; duration: Motion.standard; easing.type: Motion.ease }
+						}
+						moveDisplaced: Transition {
+							NumberAnimation { property: "y"; duration: Motion.standard; easing.type: Motion.ease }
+						}
 
 						delegate: Rectangle {
 							id: runningCard
+							objectName: "stashRunningRow"
 							required property string sessionId
 							required property string displayTitle
 							required property string dirName
 							required property string parentId
+							required property bool pinned
 							required property int index
 
 							readonly property color tint: dialog.memberTint(parentId, sessionId)
@@ -505,6 +567,25 @@ ModalDialog {
 							opacity: beingDragged ? dialog.draggedOpacity : 1
 
 							Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+
+							Rectangle {
+								visible: (dialog.dropTargetKind === "reorderRunning" || dialog.dropTargetKind === "restore")
+									&& Workspace.sessions.count > 0
+									&& dialog.dropIndex === runningCard.index
+								anchors { top: parent.top; left: parent.left; right: parent.right }
+								height: dialog.dropIndicatorHeight
+								color: Theme.accentText
+							}
+
+							Rectangle {
+								visible: (dialog.dropTargetKind === "reorderRunning" || dialog.dropTargetKind === "restore")
+									&& Workspace.sessions.count > 0
+									&& runningCard.index === Workspace.sessions.count - 1
+									&& dialog.dropIndex === Workspace.sessions.count
+								anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
+								height: dialog.dropIndicatorHeight
+								color: Theme.accentText
+							}
 
 							Rectangle {
 								x: 0
@@ -564,7 +645,7 @@ ModalDialog {
 									const pt = mapToItem(null, mouse.x, mouse.y)
 									if (!started && Math.hypot(mouse.x - pressX, mouse.y - pressY) >= dialog.dragThresholdPx) {
 										started = true
-										dialog.startDrag("running", runningCard.sessionId, "", runningCard.displayTitle, pt.x, pt.y)
+										dialog.startDrag("running", runningCard.sessionId, "", runningCard.displayTitle, pt.x, pt.y, runningCard.pinned)
 									} else if (started) {
 										dialog.updateDropTarget(pt.x, pt.y)
 									}
@@ -962,6 +1043,7 @@ ModalDialog {
 										readonly property string displayTitle: memberData ? String(memberData.displayTitle ?? sessionId) : sessionId
 										readonly property string dirName: memberData ? String(memberData.dirName ?? "") : ""
 										readonly property bool live: memberData ? memberData.live === true : false
+										readonly property bool pinned: memberData ? memberData.pinned === true : false
 										readonly property string parentId: memberData ? String(memberData.parentId ?? "") : ""
 										readonly property color tint: dialog.memberTint(parentId, sessionId)
 										readonly property bool isDropTarget: dialog.dropTargetKind === "member"
@@ -1049,7 +1131,7 @@ ModalDialog {
 												const pt = mapToItem(null, mouse.x, mouse.y)
 												if (!started && Math.hypot(mouse.x - pressX, mouse.y - pressY) >= dialog.dragThresholdPx) {
 													started = true
-													dialog.startDrag("member", memberRow.sessionId, groupCard.groupId, memberRow.displayTitle, pt.x, pt.y)
+													dialog.startDrag("member", memberRow.sessionId, groupCard.groupId, memberRow.displayTitle, pt.x, pt.y, memberRow.pinned)
 												} else if (started) {
 													dialog.updateDropTarget(pt.x, pt.y)
 												}

@@ -57,6 +57,7 @@ signals:
 	void groupsChanged();
 	void busyChanged();
 	void toastRequested(const QString& level, const QString& text);
+	void restoreGroupMemberFinished(const QString& sessionId, bool restored);
 
 private:
 	void onFrame(const proto::ServerFrame& frame);
@@ -68,6 +69,7 @@ private:
 	template<typename T, typename OnOk>
 	QCoro::Task<> run(QCoro::Task<client::Result<T>> request, OnOk onOk);
 	QCoro::Task<> refreshTask();
+	QCoro::Task<> restoreGroupMemberTask(QString groupId, QString sessionId);
 	QCoro::Task<> assignSessionTask(QString sessionId, QStringList targetGroupIds);
 	QCoro::Task<> createGroupFromMemberTask(QString fromGroupId, QString sessionId, QString name);
 

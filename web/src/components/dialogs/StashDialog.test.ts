@@ -275,4 +275,115 @@ describe('StashDialog', () => {
     }
     wrapper.unmount()
   })
+
+  it('reorders running sessions via drag-and-drop and restores stashed members at exact drop slot with pin clamping', async () => {
+    const { wrapper, workspace } = mountStashDialog()
+    const moveRunningSpy = vi.spyOn(workspace, 'moveRunningSession')
+    const restoreMemberSpy = vi.spyOn(workspace, 'restoreGroupMember').mockResolvedValue(true)
+
+    workspace.onFrame({
+      kind: 'sessions',
+      sessions: [
+        info({ id: 's_pin', name: 'pinned', pinned_at: 100, created_at: 1 }),
+        info({ id: 's1', name: 'first', created_at: 2 }),
+        info({ id: 's2', name: 'second', created_at: 3 }),
+      ],
+    })
+    workspace.onFrame({
+      kind: 'groups_changed',
+      groups: [
+        group('g1', {
+          name: 'Work',
+          members: [
+            {
+              session_id: 'm_unpinned',
+              position: 0,
+              info: info({ id: 'm_unpinned', name: 'archived-u', live: false }),
+            },
+            {
+              session_id: 'm_pinned',
+              position: 1,
+              info: info({ id: 'm_pinned', name: 'archived-p', live: false, pinned_at: 200 }),
+            },
+          ],
+        }),
+      ],
+    })
+    await nextTick()
+
+    const mockRunningCardRects = () => {
+      const cards = wrapper.findAll('.running-card')
+      cards.forEach((card, idx) => {
+        const top = 100 + idx * 46
+        vi.spyOn(card.element, 'getBoundingClientRect').mockReturnValue({
+          x: 20,
+          y: top,
+          left: 20,
+          right: 260,
+          top,
+          bottom: top + 40,
+          width: 240,
+          height: 40,
+          toJSON: () => ({}),
+        } as DOMRect)
+      })
+      return cards
+    }
+
+    let cards = mockRunningCardRects()
+    const runningCol = wrapper.get('.running-column')
+
+    // No-op drag on s1 bottom half (insertIndex=2 -> toIndex=1 === fromIndex) shows no indicator.
+    await cards[1]!.trigger('dragstart')
+    await runningCol.trigger('dragover', { clientX: 50, clientY: 178 })
+    expect(runningCol.classes()).not.toContain('drop-restore')
+    expect(cards[1]!.classes()).not.toContain('drop-before')
+    expect(cards[2]!.classes()).not.toContain('drop-before')
+    await runningCol.trigger('drop', { clientX: 50, clientY: 178 })
+    expect(moveRunningSpy).not.toHaveBeenCalled()
+
+    // Downward drag: s1 (index 1) onto bottom half of s2 (index 2) -> target index 2.
+    await cards[1]!.trigger('dragstart')
+    await runningCol.trigger('dragover', { clientX: 50, clientY: 224 })
+    expect(cards[2]!.classes()).toContain('drop-after')
+    await runningCol.trigger('drop', { clientX: 50, clientY: 224 })
+    expect(moveRunningSpy).toHaveBeenCalledWith('s1', 2)
+    await nextTick()
+    expect(workspace.live.map((s) => s.id)).toEqual(['s_pin', 's2', 's1'])
+
+    // Upward drag: s1 (now index 2) onto top half of s_pin (index 0) clamps to pinnedCount=1.
+    cards = mockRunningCardRects()
+    await cards[2]!.trigger('dragstart')
+    await runningCol.trigger('dragover', { clientX: 50, clientY: 108 })
+    expect(cards[1]!.classes()).toContain('drop-before')
+    await runningCol.trigger('drop', { clientX: 50, clientY: 108 })
+    expect(moveRunningSpy).toHaveBeenLastCalledWith('s1', 1)
+    await nextTick()
+    expect(workspace.live.map((s) => s.id)).toEqual(['s_pin', 's1', 's2'])
+
+    // Drag unpinned member onto top half of s2 (index 2) -> targetIndex: 2, pinned: false.
+    cards = mockRunningCardRects()
+    const memberRows = wrapper.findAll('.member-row')
+    await memberRows[0]!.trigger('dragstart')
+    await runningCol.trigger('dragover', { clientX: 50, clientY: 200 })
+    expect(runningCol.classes()).toContain('drop-restore')
+    expect(cards[2]!.classes()).toContain('drop-before')
+    await runningCol.trigger('drop', { clientX: 50, clientY: 200 })
+    expect(restoreMemberSpy).toHaveBeenLastCalledWith('g1', 'm_unpinned', {
+      targetIndex: 2,
+      pinned: false,
+    })
+
+    // Drag pinned member below list -> clamped to pinnedCount (1), pinned: true.
+    await memberRows[1]!.trigger('dragstart')
+    await runningCol.trigger('dragover', { clientX: 50, clientY: 260 })
+    expect(cards[1]!.classes()).toContain('drop-before')
+    await runningCol.trigger('drop', { clientX: 50, clientY: 260 })
+    expect(restoreMemberSpy).toHaveBeenLastCalledWith('g1', 'm_pinned', {
+      targetIndex: 1,
+      pinned: true,
+    })
+
+    wrapper.unmount()
+  })
 })

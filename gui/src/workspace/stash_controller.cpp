@@ -293,13 +293,7 @@ void StashController::restoreGroupMember(const QString& groupId, const QString& 
 	{
 		return;
 	}
-	run(m_backend.client().restoreGroupMember(groupId, sessionId), [this](const proto::RestoreGroupMemberResult& res) {
-		setGroups(res.groups);
-		if(res.restored)
-		{
-			emit toastRequested(ToastLevel::Info, tr("Restored session to background."));
-		}
-	});
+	restoreGroupMemberTask(groupId, sessionId);
 }
 
 void StashController::assignSessionToGroups(const QString& sessionId, const QStringList& targetGroupIds)
@@ -429,6 +423,7 @@ QVariantMap StashController::memberToMap(const proto::StashMember& member) const
 		{u"cwd"_s, info.cwd},
 		{u"dirName"_s, lastComponent(info.cwd)},
 		{u"live"_s, live},
+		{u"pinned"_s, info.isPinned()},
 		{u"activity"_s, stateName(info.status.state)},
 		{u"hasError"_s, info.lastError.has_value() && !info.lastError->isEmpty()},
 		{u"hasPermission"_s, info.status.state == proto::SessionStatus::State::WaitingPermission || info.status.state == proto::SessionStatus::State::WaitingQuestion},
@@ -466,6 +461,33 @@ QCoro::Task<> StashController::refreshTask()
 		co_return;
 	}
 	setGroups(*result);
+}
+
+QCoro::Task<> StashController::restoreGroupMemberTask(QString groupId, QString sessionId)
+{
+	const QPointer<StashController> self(this);
+	const int serial = m_serial;
+	const InFlightGuard guard(m_inFlight, m_serial, serial, this);
+	const auto result = co_await m_backend.client().restoreGroupMember(groupId, sessionId);
+	if(!self || serial != m_serial)
+	{
+		co_return;
+	}
+	if(!result)
+	{
+		if(!client::isConnectionLost(result.error()))
+		{
+			emit toastRequested(ToastLevel::Error, result.error());
+		}
+		emit restoreGroupMemberFinished(sessionId, false);
+		co_return;
+	}
+	setGroups(result->groups);
+	if(result->restored)
+	{
+		emit toastRequested(ToastLevel::Info, tr("Restored session to background."));
+	}
+	emit restoreGroupMemberFinished(sessionId, result->restored);
 }
 
 QCoro::Task<> StashController::assignSessionTask(QString sessionId, QStringList targetGroupIds)

@@ -113,6 +113,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const goneListeners = new Set<(id: string) => void>()
   const attachingTiles = new Set<string>() // tiles whose first Attach has not been answered yet
   const detachingTiles = new Set<string>()
+  const pendingRestoreOrderIds = new Set<string>()
   let historySerial = 0
   let sidebarHistorySerial = 0
   let sidebarHistoryInFlight = 0
@@ -617,8 +618,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   function setLive(sessions: readonly SessionInfo[]): void {
     const gone = live.value.some((old) => !sessions.some((session) => session.id === old.id))
     const liveIds = new Set(sessions.map((session) => session.id))
+    for (const id of liveIds) pendingRestoreOrderIds.delete(id)
     const currentOrder = settingsStore.settings.sidebarRunningOrder
-    const pruned = currentOrder.filter((id) => liveIds.has(id))
+    const pruned = currentOrder.filter((id) => liveIds.has(id) || pendingRestoreOrderIds.has(id))
     if (pruned.length !== currentOrder.length) {
       settingsStore.update((draft) => {
         draft.sidebarRunningOrder = pruned
@@ -627,6 +629,25 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     live.value = sortLive(sessions, pruned)
     for (const info of sessions) chats.get(info.id)?.setInfo(info)
     if (gone) void refreshAllHistory().catch(notices.pushError)
+  }
+
+  function preservePendingRestoreOrder(order: string[]): string[] {
+    if (pendingRestoreOrderIds.size === 0) return order
+    const previous = settingsStore.settings.sidebarRunningOrder
+    for (let i = 0; i < previous.length; ++i) {
+      const id = previous[i]!
+      if (!pendingRestoreOrderIds.has(id) || order.includes(id)) continue
+      let insertAt = 0
+      for (let prevIdx = i - 1; prevIdx >= 0; --prevIdx) {
+        const anchorIndex = order.indexOf(previous[prevIdx]!)
+        if (anchorIndex >= 0) {
+          insertAt = anchorIndex + 1
+          break
+        }
+      }
+      order.splice(insertAt, 0, id)
+    }
+    return order
   }
 
   function moveRunningSession(id: string, toIndex: number): void {
@@ -647,7 +668,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!moved) return
     list.splice(clamped, 0, moved)
     live.value = list
-    const nextOrder = list.map((session) => session.id)
+    const nextOrder = preservePendingRestoreOrder(list.map((session) => session.id))
     settingsStore.update((draft) => {
       draft.sidebarRunningOrder = nextOrder
     })
@@ -769,12 +790,55 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return result.restored_ids
   }
 
-  async function restoreGroupMember(groupId: string, sessionId: string): Promise<boolean> {
-    const result = await connection.getApi().restoreGroupMember(groupId, sessionId)
-    groupsSerial++
-    groups.value = result.groups
-    await syncSessionsAfterStashChange()
-    return result.restored
+  function rollbackPendingRestore(sessionId: string): void {
+    pendingRestoreOrderIds.delete(sessionId)
+    if (live.value.some((session) => session.id === sessionId)) return
+    const currentOrder = settingsStore.settings.sidebarRunningOrder
+    if (!currentOrder.includes(sessionId)) return
+    settingsStore.update((draft) => {
+      draft.sidebarRunningOrder = draft.sidebarRunningOrder.filter((id) => id !== sessionId)
+    })
+  }
+
+  async function restoreGroupMember(
+    groupId: string,
+    sessionId: string,
+    options: { targetIndex?: number; pinned?: boolean } = {},
+  ): Promise<boolean> {
+    let reservedOrder = false
+    if (options.targetIndex != null && options.targetIndex >= 0) {
+      const existingIndex = live.value.findIndex((session) => session.id === sessionId)
+      if (existingIndex >= 0) {
+        const toIndex = existingIndex < options.targetIndex ? options.targetIndex - 1 : options.targetIndex
+        moveRunningSession(sessionId, toIndex)
+      } else {
+        const order = live.value.map((session) => session.id)
+        const pinnedCount = live.value.filter((session) => session.pinned_at != null).length
+        const minIndex = options.pinned ? 0 : pinnedCount
+        const maxIndex = options.pinned ? pinnedCount : live.value.length
+        const clamped = clamp(options.targetIndex, minIndex, maxIndex)
+        order.splice(clamped, 0, sessionId)
+        pendingRestoreOrderIds.add(sessionId)
+        preservePendingRestoreOrder(order)
+        settingsStore.update((draft) => {
+          draft.sidebarRunningOrder = order
+        })
+        reservedOrder = true
+      }
+    }
+    try {
+      const result = await connection.getApi().restoreGroupMember(groupId, sessionId)
+      groupsSerial++
+      groups.value = result.groups
+      await syncSessionsAfterStashChange()
+      if (reservedOrder && !result.restored && !live.value.some((session) => session.id === sessionId)) {
+        rollbackPendingRestore(sessionId)
+      }
+      return result.restored
+    } catch (err) {
+      if (reservedOrder) rollbackPendingRestore(sessionId)
+      throw err
+    }
   }
 
   function resetForBackendSwitch(): void {
@@ -790,6 +854,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     chats.clear()
     attachingTiles.clear()
     detachingTiles.clear()
+    pendingRestoreOrderIds.clear()
     live.value = []
     history.value = []
     historyLoaded.value = false

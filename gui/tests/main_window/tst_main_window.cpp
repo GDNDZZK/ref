@@ -4409,6 +4409,56 @@ void TestMainWindow::stashButtonDialogAndSplitFilterCapsuleWorkWithoutWarnings()
 	QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, outsidePt);
 	QTRY_VERIFY(f.workspace->stash()->groupIdsForSession(u"ses_b"_s).isEmpty());
 	QCOMPARE(f.workspace->sessions()->rowCount(), 1);
+
+	// Dragging a stashed member onto the bottom half of an existing running row inserts at index 1.
+	auto findRunningRow = [&](const QString& sid) {
+		return findItem(stashDialog, [&sid](QQuickItem* item) {
+			return item->objectName() == u"stashRunningRow"_s && item->property("sessionId").toString() == sid && item->isVisible();
+		});
+	};
+	auto runningIds = [&]() {
+		QStringList out;
+		const auto* model = f.workspace->sessions();
+		for(int row = 0; row < model->rowCount(); ++row)
+		{
+			out.append(model->index(row).data(refgui::workspace::SessionListModel::SessionIdRole).toString());
+		}
+		return out;
+	};
+	QQuickItem* runningA = nullptr;
+	QQuickItem* memberChild = nullptr;
+	QTRY_VERIFY([&] {
+		runningA = findRunningRow(u"ses_a"_s);
+		memberChild = findMemberRow(u"ses_child"_s);
+		return runningA != nullptr && runningA->height() > 0.0 && memberChild != nullptr && memberChild->height() > 0.0;
+	}());
+	const QPoint startChild = memberChild->mapToScene(QPointF(24.0, memberChild->height() / 2.0)).toPoint();
+	const QPoint bottomHalfA = runningA->mapToScene(QPointF(runningA->width() / 2.0, runningA->height() - 6.0)).toPoint();
+	QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, startChild);
+	QTest::mouseMove(window, startChild + QPoint(-12, 0));
+	QTest::mouseMove(window, bottomHalfA);
+	QTRY_COMPARE(stashDialog->property("dropTargetKind").toString(), u"restore"_s);
+	QTRY_COMPARE(stashDialog->property("dropIndex").toInt(), 1);
+	QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, bottomHalfA);
+	QTRY_COMPARE(runningIds(), (QStringList{u"ses_a"_s, u"ses_child"_s}));
+
+	// Dragging a running row within the left column reorders running sessions directly.
+	QQuickItem* runningChild = nullptr;
+	QTRY_VERIFY([&] {
+		runningA = findRunningRow(u"ses_a"_s);
+		runningChild = findRunningRow(u"ses_child"_s);
+		return runningA != nullptr && runningChild != nullptr && runningChild->y() > runningA->y() && runningChild->opacity() > 0.99;
+	}());
+	const QPoint startRunChild = runningChild->mapToScene(QPointF(24.0, runningChild->height() / 2.0)).toPoint();
+	const QPoint topHalfA = runningA->mapToScene(QPointF(runningA->width() / 2.0, 8.0)).toPoint();
+	QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, startRunChild);
+	QTest::mouseMove(window, startRunChild + QPoint(0, -10));
+	QTest::mouseMove(window, topHalfA);
+	QTRY_COMPARE(stashDialog->property("dropTargetKind").toString(), u"reorderRunning"_s);
+	QTRY_COMPARE(stashDialog->property("dropIndex").toInt(), 0);
+	QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, topHalfA);
+	QTRY_COMPARE(runningIds(), (QStringList{u"ses_child"_s, u"ses_a"_s}));
+
 	QTest::qWait(50);
 	QCOMPARE(f.workspace->dialog(), u"stash"_s);
 	QVERIFY2(warningSpy.isEmpty(), "Stash UI or split filter capsule emitted QML warnings");
@@ -4727,7 +4777,7 @@ void TestMainWindow::switchingToLongSessionJumpsToEndAndScrollBarReleaseLoadsSke
 	QCOMPARE(model->index(0, 0).data(refgui::session::ConversationModel::KindRole).toString(), u"skeleton"_s);
 
 	// Drag the vertical scrollbar handle to the top skeleton zone and release to trigger range loading.
-	QQuickItem* scrollBar = findByTypePrefix(chatView, "QQuickScrollBar");
+	QQuickItem* scrollBar = findItem(chatView, [](QQuickItem* item) { return item->objectName() == u"chatScrollBar"_s; });
 	QVERIFY(scrollBar);
 	QQuickItem* handle = findByTypePrefix(scrollBar, "ScrollHandle");
 	QVERIFY(handle);
