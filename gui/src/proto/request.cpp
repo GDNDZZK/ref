@@ -255,6 +255,13 @@ QJsonObject rename(const QString& sessionId, const QString& name)
 	return json;
 }
 
+QJsonObject setPinned(const QString& sessionId, bool pinned)
+{
+	QJsonObject json = sessionOp(u"set_pinned"_s, sessionId);
+	json.insert(u"pinned"_s, pinned);
+	return json;
+}
+
 QJsonObject setCwd(const QString& sessionId, const QString& path)
 {
 	QJsonObject json = sessionOp(u"set_cwd"_s, sessionId);

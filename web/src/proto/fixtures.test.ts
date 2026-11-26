@@ -47,6 +47,7 @@ const SERVER_FRAME_KINDS = {
   notify: 0,
   config_changed: 0,
   groups_changed: 0,
+  history_changed: 0,
 } satisfies Record<ServerFrame['kind'], 0>
 const REQUEST_OPS = [
   'hello',
@@ -68,6 +69,7 @@ const REQUEST_OPS = [
   'set_model',
   'set_agent',
   'rename',
+  'set_pinned',
   'set_cwd',
   'compact',
   'undo',

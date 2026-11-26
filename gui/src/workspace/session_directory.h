@@ -65,6 +65,7 @@ public:
 	// Requests about one session by id, attached here or not. Those that answer with the
 	// session's new info take it in with update().
 	QCoro::Task<Result<void>> rename(QString sessionId, QString name);
+	QCoro::Task<Result<proto::SessionInfo>> setPinned(QString sessionId, bool pinned);
 	QCoro::Task<Result<void>> setCwd(QString sessionId, QString path);
 	QCoro::Task<Result<void>> setModel(QString sessionId, proto::ModelRef model);
 	QCoro::Task<Result<void>> setAgent(QString sessionId, QString agent);
@@ -106,6 +107,7 @@ private:
 	QCoro::Task<> loadUnfilteredHistory();
 	bool hasSidebarFilter() const;
 	void setLive(QList<proto::SessionInfo> sessions);
+	void updatePersisted(const proto::SessionInfo& info);
 	void applyHistory();
 	void onFrame(const proto::ServerFrame& frame);
 

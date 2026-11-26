@@ -360,6 +360,30 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> Reply {
             crate::ops::persist(hub, &s);
             Ok(json!({ "session": s.info() }))
         }
+        Request::SetPinned { session_id, pinned } => {
+            let pinned_at = pinned.then(ref_proto::now_ms);
+            if let Some(s) = hub.session(&session_id) {
+                let info = {
+                    let mut st = s.lock();
+                    st.info.pinned_at = pinned_at;
+                    hub.emit_info(&st);
+                    st.info.clone()
+                };
+                crate::ops::persist(hub, &s);
+                Ok(json!({ "session": info }))
+            } else {
+                let store = hub.store.clone();
+                let sid = session_id.clone();
+                let info = tokio::task::spawn_blocking(move || store.set_pinned(&sid, pinned_at))
+                    .await
+                    .map_err(|e| e.to_string())??;
+                let Some(info) = info else {
+                    return Err(format!("Session {session_id} not found").into());
+                };
+                hub.broadcast_history_changed();
+                Ok(json!({ "session": info }))
+            }
+        }
         Request::SetCwd { session_id, path } => {
             let s = live(hub, &session_id)?;
             set_cwd(hub, &s, &path).await?;
@@ -533,7 +557,13 @@ async fn list_history(
     .map_err(|e| e.to_string())?;
 
     list.extend(matched_live);
-    list.sort_by_key(|i| std::cmp::Reverse(i.updated_at));
+    list.sort_by_key(|s| {
+        (
+            std::cmp::Reverse(s.pinned_at.is_some()),
+            std::cmp::Reverse(s.pinned_at.unwrap_or(0)),
+            std::cmp::Reverse(s.updated_at),
+        )
+    });
     list.truncate(limit);
     Ok(json!({ "sessions": list }))
 }
@@ -1958,6 +1988,7 @@ mod tests {
             todos: Vec::new(),
             busy_since: None,
             last_error: None,
+            pinned_at: None,
         };
         hub.store.save(crate::store::Persisted {
             info,

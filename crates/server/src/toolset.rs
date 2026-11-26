@@ -508,6 +508,7 @@ mod tests {
                 todos: Vec::new(),
                 busy_since: None,
                 last_error: None,
+                pinned_at: None,
             },
             Vec::new(),
             Arc::new(Config::default()),

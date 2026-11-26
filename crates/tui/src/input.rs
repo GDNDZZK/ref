@@ -299,6 +299,11 @@ fn dialog_key(app: &mut App, k: KeyEvent) {
                     app.dialog_delete();
                 }
             }
+            KeyCode::Char('k') if k.modifiers == CTRL => {
+                if d.asking_arg.is_none() && d.kind == Kind::Sessions {
+                    app.dialog_toggle_pin();
+                }
+            }
             KeyCode::Char('c') if k.modifiers == CTRL => {
                 if d.filter.text.is_empty() {
                     if !d.cancel_arg_prompt() {

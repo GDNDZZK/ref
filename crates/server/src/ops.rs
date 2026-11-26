@@ -184,6 +184,7 @@ pub async fn create_session(
         todos: Vec::new(),
         busy_since: None,
         last_error: None,
+        pinned_at: None,
     };
     let cfg = Arc::new(cfg);
     // Start connecting MCP servers in the background.

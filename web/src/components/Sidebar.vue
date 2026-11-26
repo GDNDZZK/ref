@@ -436,8 +436,19 @@ function measureRowStride(): number {
   return firstRect.height + (Number.isFinite(gap) ? gap : RUNNING_ROW_GAP)
 }
 
+function dragBounds(id: string): { minIndex: number; maxIndex: number } | undefined {
+  const dragged = workspace.live.find((session) => session.id === id)
+  if (!dragged) return undefined
+  const pinnedCount = workspace.live.filter((session) => session.pinned_at != null).length
+  const isPinned = dragged.pinned_at != null
+  const minIndex = isPinned ? 0 : pinnedCount
+  const maxIndex = isPinned ? pinnedCount - 1 : workspace.live.length - 1
+  if (minIndex >= maxIndex) return undefined
+  return { minIndex, maxIndex }
+}
+
 function startSessionDrag(id: string, clientY: number): void {
-  if (workspace.live.length <= 1) return
+  if (workspace.live.length <= 1 || !dragBounds(id)) return
   const index = workspace.live.findIndex((session) => session.id === id)
   if (index < 0) return
   draggingId.value = id
@@ -452,17 +463,18 @@ function startSessionDrag(id: string, clientY: number): void {
 function applyDragPosition(clientY: number): void {
   const id = draggingId.value
   if (!id) return
-  const count = workspace.live.length
-  if (count <= 1) {
+  const bounds = dragBounds(id)
+  if (!bounds) {
     endSessionDrag()
     return
   }
+  const { minIndex, maxIndex } = bounds
   const scrollTop = runningListElement()?.scrollTop ?? 0
   const totalDelta = clientY - dragStartClientY + (scrollTop - dragStartScrollTop)
-  const minDelta = -dragStartIndex * dragStride
-  const maxDelta = (count - 1 - dragStartIndex) * dragStride
+  const minDelta = (minIndex - dragStartIndex) * dragStride
+  const maxDelta = (maxIndex - dragStartIndex) * dragStride
   const clampedDelta = clamp(totalDelta, minDelta, maxDelta)
-  const targetIndex = clamp(dragStartIndex + Math.round(clampedDelta / dragStride), 0, count - 1)
+  const targetIndex = clamp(dragStartIndex + Math.round(clampedDelta / dragStride), minIndex, maxIndex)
   workspace.moveRunningSession(id, targetIndex)
   const currentIndex = workspace.live.findIndex((session) => session.id === id)
   if (currentIndex < 0) {
@@ -660,13 +672,14 @@ onBeforeUnmount(() => {
                   :current="info.id === workspace.focusedId"
                   :tile="workspace.mode === 'split' && workspace.tileIds.includes(info.id)"
                   :can-detach="workspace.mode === 'single' && info.id === workspace.currentId"
-                  :reorderable="workspace.live.length > 1"
+                  :reorderable="dragBounds(info.id) !== undefined"
                   :dragging="draggingId === info.id"
                   :drag-offset="draggingId === info.id ? dragOffset : 0"
                   @open="open(info.id)"
                   @detach="report(workspace.detachCurrent())"
                   @close="close(info.id)"
                   @rename="(name) => report(workspace.renameSession(info.id, name))"
+                  @pin="(pinned) => report(workspace.setSessionPinned(info.id, pinned))"
                   @drag-start="(y) => startSessionDrag(info.id, y)"
                   @drag-move="moveSessionDrag"
                   @drag-end="endSessionDrag"
@@ -754,6 +767,7 @@ onBeforeUnmount(() => {
                   :creator-name="info.parent ? creatorLabel(sessionById, info.parent) : undefined"
                   @open="open(info.id)"
                   @remove="dialogs.open({ kind: 'deleteHistory', sessionId: info.id })"
+                  @pin="(pinned) => report(workspace.setSessionPinned(info.id, pinned))"
                   @filter-by-creator="filterHistoryByCreator"
                 />
                 <p v-if="!workspace.sidebarHistoryLoaded" class="empty">{{ t('sidebar.loading') }}</p>

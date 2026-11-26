@@ -40,6 +40,7 @@ QJsonObject setAgent(const QString& sessionId, const QString& agent);
 // An empty `variant` rotates to the model's next one.
 QJsonObject setVariant(const QString& sessionId, const std::optional<QString>& variant);
 QJsonObject rename(const QString& sessionId, const QString& name);
+QJsonObject setPinned(const QString& sessionId, bool pinned);
 QJsonObject setCwd(const QString& sessionId, const QString& path);
 QJsonObject compact(const QString& sessionId);
 QJsonObject close(const QString& sessionId);

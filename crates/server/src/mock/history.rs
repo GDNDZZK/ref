@@ -176,6 +176,7 @@ pub fn save(store: &Store, cfg: &Config, cwd: &str) -> Result<(), String> {
             todos: vec![],
             busy_since: None,
             last_error: None,
+            pinned_at: None,
         };
         store.save(Persisted {
             info,

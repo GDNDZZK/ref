@@ -351,6 +351,11 @@ QCoro::Task<Result<proto::SessionInfo>> ServerClient::rename(QString sessionId, 
 	co_return asResult(co_await request(proto::request::rename(sessionId, name)), proto::parseSessionResult);
 }
 
+QCoro::Task<Result<proto::SessionInfo>> ServerClient::setPinned(QString sessionId, bool pinned)
+{
+	co_return asResult(co_await request(proto::request::setPinned(sessionId, pinned)), proto::parseSessionResult);
+}
+
 QCoro::Task<Result<proto::SessionInfo>> ServerClient::setCwd(QString sessionId, QString path)
 {
 	co_return asResult(co_await request(proto::request::setCwd(sessionId, path)), proto::parseSessionResult);

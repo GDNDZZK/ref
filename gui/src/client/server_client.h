@@ -100,6 +100,7 @@ public:
 	// No `variant` rotates to the model's next one.
 	QCoro::Task<Result<proto::SessionInfo>> setVariant(QString sessionId, std::optional<QString> variant);
 	QCoro::Task<Result<proto::SessionInfo>> rename(QString sessionId, QString name);
+	QCoro::Task<Result<proto::SessionInfo>> setPinned(QString sessionId, bool pinned);
 	QCoro::Task<Result<proto::SessionInfo>> setCwd(QString sessionId, QString path);
 	QCoro::Task<Result<void>> compact(QString sessionId);
 	QCoro::Task<Result<void>> closeSession(QString sessionId);

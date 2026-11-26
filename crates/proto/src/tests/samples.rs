@@ -69,6 +69,7 @@ pub fn info() -> SessionInfo {
         todos: todos(),
         busy_since: Some(T0 + 60 * SECOND),
         last_error: None,
+        pinned_at: None,
     }
 }
 

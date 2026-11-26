@@ -436,6 +436,14 @@ impl Hub {
             }
         }
     }
+
+    pub fn broadcast_history_changed(&self) {
+        for c in self.conns() {
+            if c.lock().hello {
+                c.send(ServerFrame::HistoryChanged);
+            }
+        }
+    }
     // ----- connections -----
 
     pub(crate) fn conns(&self) -> Vec<Arc<Conn>> {

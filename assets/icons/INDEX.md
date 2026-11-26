@@ -92,6 +92,7 @@ Sets: `20`, `16` or both. Names are the file names without the set suffix.
 | `float` | 20 | Window frame with a floating orb | Toggle floating ball mode |
 | `stash` | 16, 20 | Archive tray | Stash sessions; open stash groups |
 | `stash-count` | 20 | Open-centre archive tray | Stash button with embedded group count |
+| `pin` | 16 | Pushpin | Pin a session in the sidebar |
 | `command` | 20 | Command key | Command palette |
 | `sliders` | 20 | Three sliders | Settings |
 | `bell` | 20 | Bell | Notification settings |

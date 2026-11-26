@@ -20,8 +20,10 @@ Item {
 	required property bool todoAllDone
 	required property bool isCurrent
 	required property bool isTile
+	required property bool pinned
 	required property int index
 
+	property int pinnedCount: 0
 	property bool renaming: false
 	property bool anyDragging: false
 	property bool dragging: false
@@ -34,8 +36,16 @@ Item {
 	readonly property bool failed: Activity.isFailed(activity, hasError)
 	readonly property bool retrying: activity === Activity.retrying
 	readonly property bool attention: hasPermission || failed
+	readonly property int groupCount: {
+		const view = ListView.view
+		if (!view)
+			return 0
+		return pinned ? Math.min(view.count, pinnedCount) : Math.max(0, view.count - pinnedCount)
+	}
 	readonly property bool hovered: hover.hovered
-	readonly property bool showCloseButton: hover.hovered && !row.anyDragging && !row.renaming
+	readonly property bool showHoverActions: hover.hovered && !row.anyDragging && !row.renaming
+	readonly property bool showPinButton: row.pinned || row.showHoverActions
+	readonly property bool showCloseButton: row.showHoverActions
 	readonly property bool canDetach: isCurrent && !Workspace.splitView
 	readonly property int renameEntry: 0 // index in the context menu
 	// What the line under the title says.
@@ -178,16 +188,22 @@ Item {
 			elide: Text.ElideRight
 		}
 
-		// Right side: the mark that needs attention, else the to-do progress; the close button on hover.
+		// Right side: status/to-do badges, persistent pin indicator when pinned, and pin/close buttons on hover.
 		Item {
 			id: tail
-			x: parent.width - width - 12
-			y: 8
-			width: 22
+			anchors { right: parent.right; rightMargin: 12; top: parent.top; topMargin: 8 }
 			height: 20
+			width: {
+				if (row.showCloseButton)
+					return 46
+				if (row.pinned)
+					return statusRow.width > 0 ? 22 + 4 + statusRow.width : 22
+				return 22
+			}
 
 			Row {
-				anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+				id: statusRow
+				anchors { right: row.pinned ? pinButton.left : parent.right; rightMargin: row.pinned ? 4 : 0; verticalCenter: parent.verticalCenter }
 				spacing: 4
 				opacity: row.showCloseButton ? 0 : 1
 
@@ -224,8 +240,25 @@ Item {
 			}
 
 			IconButton {
+				id: pinButton
+				anchors { right: row.showCloseButton ? closeButton.left : parent.right; rightMargin: row.showCloseButton ? 2 : 0; verticalCenter: parent.verticalCenter }
+				buttonSize: 22
+				iconName: "pin"
+				iconSize: 16
+				iconColor: row.pinned ? Theme.accentText : Theme.textMuted
+				opacity: row.showPinButton ? 1 : 0
+				visible: opacity > 0
+				enabled: !row.anyDragging && !row.renaming
+				tooltipText: row.pinned ? qsTr("Unpin") : qsTr("Pin")
+				Accessible.name: row.pinned ? qsTr("Unpin") : qsTr("Pin")
+				onClicked: Workspace.setSessionPinned(row.sessionId, !row.pinned)
+
+				Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+			}
+
+			IconButton {
 				id: closeButton
-				anchors.centerIn: parent
+				anchors { right: parent.right; verticalCenter: parent.verticalCenter }
 				buttonSize: 22
 				iconName: "close"
 				iconSize: 16
@@ -267,26 +300,44 @@ Item {
 		readonly property real autoScrollMargin: 24
 		readonly property real autoScrollStep: 4
 
+		function minGroupIndex(view) {
+			return row.pinned ? 0 : Math.max(0, Math.min(view.count - 1, row.pinnedCount))
+		}
+
+		function maxGroupIndex(view) {
+			return row.pinned ? Math.max(0, Math.min(view.count - 1, row.pinnedCount - 1)) : Math.max(0, view.count - 1)
+		}
+
+		function hitsAction(button, mouse) {
+			if (!button.visible)
+				return false
+			const p = row.mapToItem(button, mouse.x, mouse.y)
+			return p.x >= 0 && p.y >= 0 && p.x <= button.width && p.y <= button.height
+		}
+
 		function updateDrag() {
 			const view = row.ListView.view
 			if (!row.dragging || !view)
 				return
-			if (view.count <= 1) {
+			if (view.count <= 1 || row.groupCount <= 1) {
 				finishDrag(false)
 				return
 			}
 			const contentPt = view.contentItem.mapFromItem(null, lastSceneX, lastSceneY)
+			const stride = Theme.sidebarRowHeight + view.spacing
+			const minIdx = minGroupIndex(view)
+			const maxIdx = maxGroupIndex(view)
 			const maxTop = Math.max(0, view.contentHeight - row.height)
-			const relY = Math.max(0, Math.min(maxTop, contentPt.y - view.originY - pressOffsetY))
+			const minRelY = Math.min(maxTop, minIdx * stride)
+			const maxRelY = Math.min(maxTop, maxIdx * stride)
+			const relY = Math.max(minRelY, Math.min(maxRelY, contentPt.y - view.originY - pressOffsetY))
 			dragVisualTop = view.originY + relY
 			row.dragCardY = dragVisualTop - row.y
-			const stride = Theme.sidebarRowHeight + view.spacing
 			const targetIndex = stride > 0
-				? Math.max(0, Math.min(view.count - 1, Math.round(relY / stride)))
+				? Math.max(minIdx, Math.min(maxIdx, Math.round(relY / stride)))
 				: row.index
 			if (targetIndex !== row.index)
 				row.reorderRequested(row.sessionId, targetIndex)
-
 			if (view.contentHeight > view.height) {
 				const minY = view.originY
 				const maxY = view.originY + Math.max(0, view.contentHeight - view.height)
@@ -324,16 +375,13 @@ Item {
 				if (!dragArea.pressed || dragArea.movedBeforeHold || row.renaming)
 					return
 				const view = row.ListView.view
-				if (!view || view.count <= 1)
+				if (!view || view.count <= 1 || row.groupCount <= 1)
 					return
 				row.settlingDrag = false
 				row.dragging = true
 				dragArea.wasDragging = true
 				row.dragActiveChanged(row.sessionId, true)
-				const maxTop = Math.max(0, view.contentHeight - row.height)
-				const relY = Math.max(0, Math.min(maxTop, row.y - view.originY))
-				dragArea.dragVisualTop = view.originY + relY
-				row.dragCardY = dragArea.dragVisualTop - row.y
+				dragArea.updateDrag()
 			}
 		}
 
@@ -361,12 +409,9 @@ Item {
 		}
 
 		onPressed: mouse => {
-			if (closeButton.visible) {
-				const p = row.mapToItem(closeButton, mouse.x, mouse.y)
-				if (p.x >= 0 && p.y >= 0 && p.x <= closeButton.width && p.y <= closeButton.height) {
-					mouse.accepted = false
-					return
-				}
+			if (hitsAction(closeButton, mouse) || hitsAction(pinButton, mouse)) {
+				mouse.accepted = false
+				return
 			}
 			pressX = mouse.x
 			pressY = mouse.y
@@ -377,7 +422,7 @@ Item {
 			movedBeforeHold = false
 			wasDragging = false
 			scrollDirection = 0
-			if (row.ListView.view && row.ListView.view.count > 1)
+			if (row.ListView.view && row.ListView.view.count > 1 && row.groupCount > 1)
 				holdTimer.start()
 		}
 		onPositionChanged: mouse => {
@@ -416,7 +461,7 @@ Item {
 		target: row.ListView.view
 		function onCountChanged() {
 			const view = row.ListView.view
-			if (row.dragging && (!view || view.count <= 1))
+			if (row.dragging && (!view || view.count <= 1 || row.groupCount <= 1))
 				dragArea.finishDrag(false)
 		}
 	}
@@ -428,22 +473,23 @@ Item {
 
 	ContextMenu {
 		id: menu
-		entries: row.canDetach
-			? [
+		entries: {
+			const items = [
 				{text: qsTr("Rename"), action: "rename"},
-				{text: qsTr("Move to background"), action: "detach"},
-				{text: qsTr("Filter spawned history"), action: "filterSpawned"},
-				{text: qsTr("Close"), danger: true, action: "close"}
+				{text: row.pinned ? qsTr("Unpin") : qsTr("Pin"), action: "pin"}
 			]
-			: [
-				{text: qsTr("Rename"), action: "rename"},
-				{text: qsTr("Filter spawned history"), action: "filterSpawned"},
-				{text: qsTr("Close"), danger: true, action: "close"}
-			]
+			if (row.canDetach)
+				items.push({text: qsTr("Move to background"), action: "detach"})
+			items.push({text: qsTr("Filter spawned history"), action: "filterSpawned"})
+			items.push({text: qsTr("Close"), danger: true, action: "close"})
+			return items
+		}
 		onTriggered: index => {
 			const action = menu.entries[index].action
 			if (action === "rename")
 				row.startRename()
+			else if (action === "pin")
+				Workspace.setSessionPinned(row.sessionId, !row.pinned)
 			else if (action === "detach")
 				Workspace.detachCurrent()
 			else if (action === "filterSpawned")

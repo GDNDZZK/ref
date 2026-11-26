@@ -117,6 +117,9 @@ export class RefApi {
   async rename(sessionId: string, name: string): Promise<SessionInfo> {
     return this.sessionResult({ op: 'rename', session_id: sessionId, name })
   }
+  async setPinned(sessionId: string, pinned: boolean): Promise<SessionInfo> {
+    return this.sessionResult({ op: 'set_pinned', session_id: sessionId, pinned })
+  }
 
   // Unloads a live session; it stays in history.
   async close(sessionId: string): Promise<void> {

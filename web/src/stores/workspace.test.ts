@@ -19,6 +19,7 @@ const api = {
   setAgent: vi.fn(),
   setCwd: vi.fn(),
   listGroups: vi.fn(),
+  setPinned: vi.fn(),
 }
 const connection = {
   getApi: () => api,
@@ -69,6 +70,32 @@ describe('sortLive', () => {
     )
     expect(sorted.map((entry) => entry.id)).toEqual(['ses_3', 'ses_1', 'ses_2', 'ses_4'])
   })
+
+  it('puts pinned sessions first (pinned_at DESC) ahead of manual order and unpinned sessions', () => {
+    const sorted = sortLive(
+      [
+        session('ses_1'),
+        session('ses_2', { pinned_at: 100 }),
+        session('ses_3', { pinned_at: 200 }),
+        session('ses_4'),
+      ],
+      ['ses_1', 'ses_4'],
+    )
+    expect(sorted.map((entry) => entry.id)).toEqual(['ses_3', 'ses_2', 'ses_1', 'ses_4'])
+  })
+
+  it('preserves manual order within pinned and unpinned groups separately', () => {
+    const sorted = sortLive(
+      [
+        session('ses_1', { pinned_at: 100 }),
+        session('ses_2', { pinned_at: 200 }),
+        session('ses_3'),
+        session('ses_4'),
+      ],
+      ['ses_4', 'ses_1', 'ses_2', 'ses_3'],
+    )
+    expect(sorted.map((entry) => entry.id)).toEqual(['ses_1', 'ses_2', 'ses_4', 'ses_3'])
+  })
 })
 
 describe('running session order', () => {
@@ -110,6 +137,22 @@ describe('running session order', () => {
       }),
     )
     expect(workspace.live.map((entry) => entry.id)).toEqual(['ses_2', 'ses_3', 'ses_1'])
+  })
+
+  it('clamps moveRunningSession strictly inside pinned and unpinned groups', () => {
+    const workspace = setup([
+      session('ses_1', { pinned_at: 200 }),
+      session('ses_2', { pinned_at: 100 }),
+      session('ses_3'),
+      session('ses_4'),
+    ])
+    expect(workspace.live.map((entry) => entry.id)).toEqual(['ses_1', 'ses_2', 'ses_3', 'ses_4'])
+
+    workspace.moveRunningSession('ses_1', 3)
+    expect(workspace.live.map((entry) => entry.id)).toEqual(['ses_2', 'ses_1', 'ses_3', 'ses_4'])
+
+    workspace.moveRunningSession('ses_4', 0)
+    expect(workspace.live.map((entry) => entry.id)).toEqual(['ses_2', 'ses_1', 'ses_4', 'ses_3'])
   })
 })
 describe('errorToast', () => {
@@ -745,5 +788,60 @@ describe('cross-directory config sync', () => {
     await nextTick()
     expect(connection.loadConfig).toHaveBeenCalledTimes(1)
     expect(connection.loadConfig).toHaveBeenCalledWith('/home/user')
+  })
+})
+
+describe('session pinning', () => {
+  it('pins and unpins a live session, promoting newly pinned sessions ahead of existing manual order', async () => {
+    const workspace = setup([session('ses_1'), session('ses_2'), session('ses_3')])
+    workspace.moveRunningSession('ses_2', 0)
+    expect(workspace.live.map((entry) => entry.id)).toEqual(['ses_2', 'ses_1', 'ses_3'])
+
+    api.setPinned.mockResolvedValueOnce(session('ses_3', { pinned_at: 500 }))
+    await workspace.setSessionPinned('ses_3', true)
+    expect(api.setPinned).toHaveBeenCalledWith('ses_3', true)
+    expect(workspace.live.map((entry) => entry.id)).toEqual(['ses_3', 'ses_2', 'ses_1'])
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({
+      sidebarRunningOrder: ['ses_3', 'ses_2', 'ses_1'],
+    })
+
+    api.setPinned.mockResolvedValueOnce(session('ses_1', { pinned_at: 600 }))
+    await workspace.setSessionPinned('ses_1', true)
+    expect(workspace.live.map((entry) => entry.id)).toEqual(['ses_1', 'ses_3', 'ses_2'])
+
+    api.setPinned.mockResolvedValueOnce(session('ses_1', { pinned_at: null }))
+    await workspace.setSessionPinned('ses_1', false)
+    expect(api.setPinned).toHaveBeenLastCalledWith('ses_1', false)
+    expect(workspace.live[0]?.id).toBe('ses_3')
+  })
+
+  it('pins and unpins history sessions and re-sorts history lists', async () => {
+    const workspace = setup([])
+    api.listHistory.mockResolvedValueOnce([
+      session('h1', { live: false, updated_at: 200 }),
+      session('h2', { live: false, updated_at: 100 }),
+    ])
+    await workspace.refreshHistory()
+    expect(workspace.history.map((entry) => entry.id)).toEqual(['h1', 'h2'])
+
+    api.setPinned.mockResolvedValueOnce(session('h2', { live: false, updated_at: 100, pinned_at: 900 }))
+    await workspace.setSessionPinned('h2', true)
+    expect(workspace.history.map((entry) => entry.id)).toEqual(['h2', 'h1'])
+    expect(workspace.sidebarHistory.map((entry) => entry.id)).toEqual(['h2', 'h1'])
+
+    api.setPinned.mockResolvedValueOnce(session('h2', { live: false, updated_at: 100, pinned_at: null }))
+    await workspace.setSessionPinned('h2', false)
+    expect(workspace.history.map((entry) => entry.id)).toEqual(['h1', 'h2'])
+    expect(workspace.sidebarHistory.map((entry) => entry.id)).toEqual(['h1', 'h2'])
+  })
+
+  it('refreshes history when a history_changed frame arrives', async () => {
+    const workspace = setup([])
+    api.listHistory.mockResolvedValueOnce([session('h1', { live: false, pinned_at: 500 })])
+    workspace.onFrame({ kind: 'history_changed' })
+    await vi.waitFor(() => {
+      expect(api.listHistory).toHaveBeenCalledWith({ cwd: undefined, limit: 200 })
+      expect(workspace.history.map((entry) => entry.id)).toEqual(['h1'])
+    })
   })
 })

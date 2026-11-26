@@ -18,6 +18,7 @@ class SessionListModel : public QAbstractListModel
 {
 	Q_OBJECT
 	Q_PROPERTY(int count READ count NOTIFY countChanged)
+	Q_PROPERTY(int pinnedCount READ pinnedCount NOTIFY pinnedCountChanged)
 	// Shows only the sessions whose title, name, directory or id contains it, ignoring case.
 	Q_PROPERTY(QString filter READ filter WRITE setFilter NOTIFY filterChanged)
 	Q_PROPERTY(CreatorFilter creatorFilter READ creatorFilter WRITE setCreatorFilter NOTIFY creatorFilterChanged)
@@ -64,6 +65,8 @@ public:
 		RootIdRole,
 		RootNameRole,
 		RootColorIndexRole,
+		PinnedRole,
+		PinnedAtRole,
 	};
 	explicit SessionListModel(QObject* parent = nullptr);
 
@@ -88,10 +91,12 @@ public:
 	// The row of the session, or -1 when it is not listed (also when filtered out).
 	Q_INVOKABLE int indexOf(const QString& sessionId) const;
 	Q_INVOKABLE bool isLiveAt(int row) const;
+	Q_INVOKABLE bool isPinnedAt(int row) const;
 	// Whether the unfiltered list has the session.
 	bool contains(const QString& sessionId) const { return m_all.contains(sessionId); }
 	const proto::SessionInfo* find(const QString& sessionId) const;
 	int count() const { return int(m_rows.size()); }
+	int pinnedCount() const { return m_pinnedCount; }
 	// All roles of the session (also when filtered out) as a map with the role names as keys; empty when unknown.
 	Q_INVOKABLE QVariantMap get(const QString& sessionId) const;
 	Q_INVOKABLE QVariantMap rowAt(int row) const;
@@ -101,11 +106,11 @@ public:
 
 signals:
 	void countChanged();
+	void pinnedCountChanged();
 	void filterChanged();
 	void creatorFilterChanged();
 	void creatorIdChanged();
 	void cwdFilterChanged();
-
 private:
 	// What the views show of a session; rows are compared to see whether one changed.
 	struct Row
@@ -135,6 +140,8 @@ private:
 		QString rootId;
 		QString rootName;
 		int rootColorIndex = -1;
+		bool pinned = false;
+		qint64 pinnedAt = 0;
 		bool operator==(const Row&) const = default;
 	};
 
@@ -161,6 +168,7 @@ private:
 	QList<Row> m_rows; // the listed ones, in order
 	QHash<QString, int> m_liveRootColorIndices;
 	QHash<QString, int> m_allRootColorIndices;
+	int m_pinnedCount = 0;
 };
 
 } // namespace refgui::workspace

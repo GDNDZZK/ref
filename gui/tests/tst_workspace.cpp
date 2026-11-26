@@ -152,6 +152,8 @@ public:
 		m_groups = groups;
 		m_fake.send({{u"kind"_s, u"groups_changed"_s}, {u"groups"_s, m_groups}});
 	}
+	void pushHistoryChanged() { m_fake.send({{u"kind"_s, u"history_changed"_s}}); }
+	void setSessionPinnedAt(const QString& id, qint64 pinnedAt) { m_sessions[id][u"pinned_at"_s] = pinnedAt; }
 	QJsonArray list() const
 	{
 		QJsonArray array;
@@ -233,6 +235,31 @@ public:
 			m_sessions[id][u"name"_s] = name;
 			m_fake.respond(request, {{u"session"_s, m_sessions.value(id)}});
 			broadcast();
+		}
+		else if(op == u"set_pinned"_s)
+		{
+			if(!m_sessions.contains(id))
+			{
+				m_fake.fail(request, u"Session not found"_s);
+				return;
+			}
+			if(request.value(u"pinned"_s).toBool())
+			{
+				m_sessions[id].insert(u"pinned_at"_s, 1000 + ++m_pinSeq);
+			}
+			else
+			{
+				m_sessions[id].remove(u"pinned_at"_s);
+			}
+			m_fake.respond(request, {{u"session"_s, m_sessions.value(id)}});
+			if(m_sessions.value(id).value(u"live"_s).toBool(true))
+			{
+				broadcast();
+			}
+			else
+			{
+				pushHistoryChanged();
+			}
 		}
 		else if(op == u"watch_all"_s && m_holdWatchAll)
 		{
@@ -614,6 +641,7 @@ public:
 	QJsonArray m_configWarnings;
 	QJsonArray m_groups;
 	int m_groupSeq = 0;
+	int m_pinSeq = 0;
 };
 
 // An assistant message whose only tool call waits for the user's permission.
@@ -759,6 +787,7 @@ private slots:
 	void stashControllerGroupLifecycleAndRealtimeSync();
 	void splitFilterFiltersByDirectParentAndUserCreated();
 	void switchBackendResetsWorkspaceAndConnectsToNewEndpoint();
+	void pinningSortsSessionsRefreshesHistoryAndClampsLiveReorder();
 };
 
 void TestWorkspace::opensTheSessionFromTheCommandLine()
@@ -2247,6 +2276,68 @@ void TestWorkspace::switchBackendResetsWorkspaceAndConnectsToNewEndpoint()
 	QVERIFY(f.workspace->sessions()->indexOf(u"ses_remote"_s) >= 0);
 	QVERIFY(f.workspace->sessions()->indexOf(u"ses_a"_s) < 0);
 	QVERIFY(f.workspace->current() == nullptr);
+}
+
+void TestWorkspace::pinningSortsSessionsRefreshesHistoryAndClampsLiveReorder()
+{
+	Fixture f(refgui::proto::ProtocolVersion, true, {}, [](StubServer& stub) {
+		stub.add(u"ses_c"_s, 3);
+		stub.addHistory(u"hist_old"_s, 10);
+		stub.addHistory(u"hist_new"_s, 20);
+	});
+	const auto liveIds = [&]() {
+		QStringList out;
+		const auto* model = f.workspace->sessions();
+		for(int row = 0; row < model->rowCount(); ++row)
+		{
+			out.append(model->index(row).data(refgui::workspace::SessionListModel::SessionIdRole).toString());
+		}
+		return out;
+	};
+	const auto historyIds = [&]() {
+		QStringList out;
+		const auto* model = f.workspace->history();
+		for(int row = 0; row < model->rowCount(); ++row)
+		{
+			out.append(model->index(row).data(refgui::workspace::SessionListModel::SessionIdRole).toString());
+		}
+		return out;
+	};
+	QTRY_COMPARE(liveIds(), (QStringList{u"ses_c"_s, u"ses_b"_s, u"ses_a"_s}));
+	QTRY_COMPARE(historyIds(), (QStringList{u"hist_new"_s, u"hist_old"_s}));
+
+	// Pinning ses_a then ses_b puts most-recently-pinned first.
+	f.workspace->setSessionPinned(u"ses_a"_s, true);
+	QTRY_COMPARE(liveIds(), (QStringList{u"ses_a"_s, u"ses_c"_s, u"ses_b"_s}));
+	f.workspace->setSessionPinned(u"ses_b"_s, true);
+	QTRY_COMPARE(liveIds(), (QStringList{u"ses_b"_s, u"ses_a"_s, u"ses_c"_s}));
+	QCOMPARE(f.workspace->sessions()->pinnedCount(), 2);
+
+	// Reordering within pinned group works, while dragging across the pin boundary is clamped.
+	f.workspace->moveRunningSession(u"ses_a"_s, 0);
+	QCOMPARE(liveIds(), (QStringList{u"ses_a"_s, u"ses_b"_s, u"ses_c"_s}));
+	f.workspace->moveRunningSession(u"ses_a"_s, 2);
+	QCOMPARE(liveIds(), (QStringList{u"ses_b"_s, u"ses_a"_s, u"ses_c"_s}));
+	f.workspace->moveRunningSession(u"ses_c"_s, 0);
+	QCOMPARE(liveIds(), (QStringList{u"ses_b"_s, u"ses_a"_s, u"ses_c"_s}));
+
+	// Newly pinning ses_c while sidebarRunningOrder is non-empty promotes it to the top of the pinned group.
+	f.workspace->setSessionPinned(u"ses_c"_s, true);
+	QTRY_COMPARE(liveIds(), (QStringList{u"ses_c"_s, u"ses_b"_s, u"ses_a"_s}));
+	f.workspace->setSessionPinned(u"ses_c"_s, false);
+	QTRY_COMPARE(liveIds(), (QStringList{u"ses_b"_s, u"ses_a"_s, u"ses_c"_s}));
+
+	// Pinning a history session updates and sorts history immediately.
+	f.workspace->setSessionPinned(u"hist_old"_s, true);
+	QTRY_COMPARE(historyIds(), (QStringList{u"hist_old"_s, u"hist_new"_s}));
+	QVERIFY(f.workspace->history()->isPinnedAt(0));
+
+	// Server-pushed history_changed refreshes history immediately (e.g. pinned on another client).
+	f.stub.setSessionPinnedAt(u"hist_new"_s, 999999);
+	const qsizetype historyCallsBefore = f.stub.requests(u"list_history"_s).size();
+	f.stub.pushHistoryChanged();
+	QTRY_VERIFY(f.stub.requests(u"list_history"_s).size() > historyCallsBefore);
+	QTRY_COMPARE(historyIds(), (QStringList{u"hist_new"_s, u"hist_old"_s}));
 }
 
 QTEST_MAIN(TestWorkspace)

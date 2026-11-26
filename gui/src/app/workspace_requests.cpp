@@ -76,6 +76,10 @@ void Workspace::renameSession(const QString& sessionId, const QString& name, con
 	perform(m_directory.rename(sessionId, name), wrap(cb), noPayload);
 }
 
+void Workspace::setSessionPinned(const QString& sessionId, bool pinned, const QJSValue& cb)
+{
+	perform(m_directory.setPinned(sessionId, pinned), wrap(cb), [](const refgui::proto::SessionInfo&) { return QVariant(); });
+}
 void Workspace::setSessionCwd(const QString& sessionId, const QString& path, const QJSValue& cb)
 {
 	perform(m_directory.setCwd(sessionId, path), wrap(cb), noPayload);
@@ -331,6 +335,7 @@ void Workspace::applyBackendSwitch(refgui::client::Backend::Source source)
 		}
 	}
 	m_seenLive.clear();
+	m_pinnedLive.clear();
 	m_leaving.clear();
 	m_tileAttaching.clear();
 	m_unzooming.clear();

@@ -172,9 +172,12 @@ ServerFrame readServerFrame(const Fields& fields)
 	{
 		return GroupsChangedFrame{.groups = fields.listOrEmpty<StashGroup>("groups"_L1, readStashGroup)};
 	}
+	if(kind == "history_changed"_L1)
+	{
+		return HistoryChangedFrame{};
+	}
 	failUnknown(fields.childPath("kind"_L1), u"unknown frame kind \"%1\""_s.arg(kind));
 }
-
 SessionSnapshot readSnapshot(const Fields& fields)
 {
 	return {.info = readSessionInfo(fields.child("info"_L1)),

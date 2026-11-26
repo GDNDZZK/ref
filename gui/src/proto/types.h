@@ -106,6 +106,9 @@ struct SessionInfo
 	QList<Todo> todos{};
 	std::optional<qint64> busySince{}; // when the current run started
 	std::optional<QString> lastError{}; // the last run ended with this error
+	std::optional<qint64> pinnedAt{};   // epoch ms; nullopt when unpinned
+
+	bool isPinned() const { return pinnedAt.has_value(); }
 };
 
 // Image bytes are left out of messages: `data` is empty and `id` names the image for GetImage.
@@ -576,7 +579,11 @@ struct GroupsChangedFrame
 	QList<StashGroup> groups{};
 };
 
-using ServerFrame = std::variant<ResponseFrame, EventFrame, SessionsFrame, ToastFrame, NotifyFrame, ConfigChangedFrame, GroupsChangedFrame>;
+struct HistoryChangedFrame
+{
+};
+
+using ServerFrame = std::variant<ResponseFrame, EventFrame, SessionsFrame, ToastFrame, NotifyFrame, ConfigChangedFrame, GroupsChangedFrame, HistoryChangedFrame>;
 
 // ---- Results of requests --------------------------------------------------------------
 

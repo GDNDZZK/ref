@@ -249,6 +249,8 @@
     "compacting": "Compacting",
     "retrying": "Retrying",
     "rename": "Rename",
+    "pin": "Pin",
+    "unpin": "Unpin",
     "moveToBackground": "Move to background",
     "close": "Close",
     "delete": "Delete",

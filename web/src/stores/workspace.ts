@@ -40,19 +40,39 @@ export interface HistoryFilterOptions {
 const HISTORY_LIMIT = 200
 const ERROR_TOAST_MAX_CHARS = 200
 
-// Live sessions in custom order first, then by creation time and id.
+// Live sessions pinned first, then in custom order, then by creation time and id.
 export function sortLive(sessions: readonly SessionInfo[], order: readonly string[] = []): SessionInfo[] {
   const rank = new Map<string, number>()
   for (const id of order) {
     if (!rank.has(id)) rank.set(id, rank.size)
   }
   return [...sessions].sort((a, b) => {
+    const aPinned = a.pinned_at != null
+    const bPinned = b.pinned_at != null
+    if (aPinned !== bPinned) return aPinned ? -1 : 1
     const ia = rank.get(a.id)
     const ib = rank.get(b.id)
     if (ia !== undefined && ib !== undefined) return ia - ib
     if (ia !== undefined) return -1
     if (ib !== undefined) return 1
+    if (aPinned && bPinned) {
+      const pinDiff = (b.pinned_at ?? 0) - (a.pinned_at ?? 0)
+      if (pinDiff !== 0) return pinDiff
+    }
     return a.created_at - b.created_at || a.id.localeCompare(b.id)
+  })
+}
+
+function sortHistory(sessions: readonly SessionInfo[]): SessionInfo[] {
+  return [...sessions].sort((a, b) => {
+    const aPinned = a.pinned_at != null
+    const bPinned = b.pinned_at != null
+    if (aPinned !== bPinned) return aPinned ? -1 : 1
+    if (aPinned && bPinned) {
+      const pinDiff = (b.pinned_at ?? 0) - (a.pinned_at ?? 0)
+      if (pinDiff !== 0) return pinDiff
+    }
+    return b.updated_at - a.updated_at || a.id.localeCompare(b.id)
   })
 }
 
@@ -323,6 +343,29 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     showInfo(await connection.getApi().rename(id, name))
   }
 
+  function replaceHistoryEntry(list: readonly SessionInfo[], updated: SessionInfo): SessionInfo[] {
+    return sortHistory(list.map((session) => (session.id === updated.id ? updated : session)))
+  }
+
+  async function setSessionPinned(id: string, pinned: boolean): Promise<void> {
+    const updated = await connection.getApi().setPinned(id, pinned)
+    if (updated.live) {
+      if (pinned && settingsStore.settings.sidebarRunningOrder.length > 0) {
+        const nextOrder = [id, ...settingsStore.settings.sidebarRunningOrder.filter((entry) => entry !== id)]
+        settingsStore.update((draft) => {
+          draft.sidebarRunningOrder = nextOrder
+        })
+      }
+      showInfo(updated)
+    }
+    if (history.value.some((session) => session.id === updated.id)) {
+      history.value = replaceHistoryEntry(history.value, updated)
+    }
+    if (sidebarHistory.value.some((session) => session.id === updated.id)) {
+      sidebarHistory.value = replaceHistoryEntry(sidebarHistory.value, updated)
+    }
+  }
+
   async function deleteHistory(id: string): Promise<void> {
     await connection.getApi().deleteSession(id)
     history.value = history.value.filter((session) => session.id !== id)
@@ -590,7 +633,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (live.value.length <= 1) return
     const fromIndex = live.value.findIndex((session) => session.id === id)
     if (fromIndex < 0) return
-    const clamped = clamp(toIndex, 0, live.value.length - 1)
+    const target = live.value[fromIndex]
+    if (!target) return
+    const pinnedCount = live.value.filter((session) => session.pinned_at != null).length
+    const isPinned = target.pinned_at != null
+    const minIndex = isPinned ? 0 : pinnedCount
+    const maxIndex = isPinned ? pinnedCount - 1 : live.value.length - 1
+    if (minIndex >= maxIndex) return
+    const clamped = clamp(toIndex, minIndex, maxIndex)
     if (fromIndex === clamped) return
     const list = [...live.value]
     const [moved] = list.splice(fromIndex, 1)
@@ -617,6 +667,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (frame.kind === 'sessions') setLive(frame.sessions)
     if (frame.kind === 'event') onSessionEvent(frame)
     if (frame.kind === 'groups_changed') groups.value = frame.groups
+    if (frame.kind === 'history_changed') void refreshAllHistory().catch(notices.pushError)
   }
 
   function setSplitFilter(filter: SplitFilter): void {
@@ -821,6 +872,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     detachCurrent,
     closeSession,
     renameSession,
+    setSessionPinned,
     deleteHistory,
     setSessionCwd,
     setModel,

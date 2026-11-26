@@ -225,9 +225,9 @@ SessionInfo readSessionInfo(const Fields& fields)
 	});
 	info.busySince = fields.optionalInteger("busy_since"_L1);
 	info.lastError = fields.optionalString("last_error"_L1);
+	info.pinnedAt = fields.optionalInteger("pinned_at"_L1);
 	return info;
 }
-
 Part readPart(const Fields& fields)
 {
 	const QString type = fields.string("type"_L1);

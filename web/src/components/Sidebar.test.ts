@@ -93,8 +93,8 @@ describe('Sidebar', () => {
     const currentMenu = [...document.body.querySelectorAll('[role="menuitem"]')].map((el) =>
       el.textContent?.trim(),
     )
-    expect(currentMenu).toEqual(['Rename', 'Move to background', 'Filter spawned history', 'Close'])
-    ;(document.body.querySelectorAll('[role="menuitem"]')[1] as HTMLElement).click()
+    expect(currentMenu).toEqual(['Pin', 'Rename', 'Move to background', 'Filter spawned history', 'Close'])
+    ;(document.body.querySelectorAll('[role="menuitem"]')[2] as HTMLElement).click()
     expect(detachSpy).toHaveBeenCalledTimes(1)
     await nextTick()
 
@@ -102,7 +102,7 @@ describe('Sidebar', () => {
     const otherMenu = [...document.body.querySelectorAll('[role="menuitem"]')].map((el) =>
       el.textContent?.trim(),
     )
-    expect(otherMenu).toEqual(['Rename', 'Filter spawned history', 'Close'])
+    expect(otherMenu).toEqual(['Pin', 'Rename', 'Filter spawned history', 'Close'])
     wrapper.unmount()
   })
 
@@ -844,11 +844,12 @@ describe('Sidebar', () => {
       await nextTick()
       const histMenu = [...document.body.querySelectorAll('[role="menuitem"]')]
       expect(histMenu.map((el) => el.textContent?.trim())).toEqual([
+        'Pin',
         'Filter history by creator',
         'Filter spawned history',
         'Delete',
       ])
-      ;(histMenu[0] as HTMLElement).click()
+      ;(histMenu[1] as HTMLElement).click()
       await nextTick()
       expect(workspace.historyCreator).toBe('s1')
       expect(wrapper.findAll('.history-row .title').map((el) => el.text())).toEqual(['Sub Hist'])
@@ -926,5 +927,88 @@ describe('Sidebar', () => {
       expect(btn.get('.stash-count').text()).toBe('9+')
       wrapper.unmount()
     })
+  })
+})
+
+describe('session pinning', () => {
+  it('shows pin button on running and history rows and toggles pin without opening rows', async () => {
+    const { workspace, wrapper } = mountSidebar()
+    const pinSpy = vi.spyOn(workspace, 'setSessionPinned').mockResolvedValue(undefined)
+    const openSpy = vi.spyOn(workspace, 'openSession').mockResolvedValue(undefined)
+    const detachSpy = vi.spyOn(workspace, 'detachCurrent').mockResolvedValue(undefined)
+    workspace.onFrame({
+      kind: 'sessions',
+      sessions: [
+        info({ id: 's1', name: 'alpha', pinned_at: 200 }),
+        info({ id: 's2', name: 'beta', created_at: 2 }),
+      ],
+    })
+    workspace.sidebarHistoryLoaded = true
+    workspace.sidebarHistory = [
+      info({ id: 'h1', name: 'hist-pinned', title: 'Pinned hist', pinned_at: 300, live: false }),
+      info({ id: 'h2', name: 'hist-plain', title: 'Plain hist', live: false }),
+    ]
+    await nextTick()
+
+    const runningPinButtons = wrapper.findAll('.running .row button.pin')
+    expect(runningPinButtons).toHaveLength(2)
+    expect(runningPinButtons[0]!.classes()).toContain('pinned')
+    expect(runningPinButtons[0]!.attributes('aria-label')).toBe('Unpin')
+    expect(runningPinButtons[1]!.classes()).not.toContain('pinned')
+    expect(runningPinButtons[1]!.attributes('aria-label')).toBe('Pin')
+
+    await runningPinButtons[0]!.trigger('click')
+    await runningPinButtons[1]!.trigger('click')
+    expect(pinSpy).toHaveBeenNthCalledWith(1, 's1', false)
+    expect(pinSpy).toHaveBeenNthCalledWith(2, 's2', true)
+    expect(openSpy).not.toHaveBeenCalled()
+    expect(detachSpy).not.toHaveBeenCalled()
+
+    const historyPinButtons = wrapper.findAll('.history .history-row button.pin')
+    expect(historyPinButtons).toHaveLength(2)
+    expect(historyPinButtons[0]!.classes()).toContain('pinned')
+    expect(historyPinButtons[0]!.attributes('aria-label')).toBe('Unpin')
+    expect(historyPinButtons[1]!.classes()).not.toContain('pinned')
+    expect(historyPinButtons[1]!.attributes('aria-label')).toBe('Pin')
+
+    await historyPinButtons[0]!.trigger('click')
+    await historyPinButtons[1]!.trigger('click')
+    expect(pinSpy).toHaveBeenNthCalledWith(3, 'h1', false)
+    expect(pinSpy).toHaveBeenNthCalledWith(4, 'h2', true)
+    expect(openSpy).not.toHaveBeenCalled()
+
+    await wrapper.findAll('.running .row')[0]!.trigger('contextmenu')
+    const menuItems = [...document.body.querySelectorAll('[role="menuitem"]')]
+    expect(menuItems[0]?.textContent?.trim()).toBe('Unpin')
+    ;(menuItems[0] as HTMLElement).click()
+    expect(pinSpy).toHaveBeenNthCalledWith(5, 's1', false)
+    wrapper.unmount()
+  })
+
+  it('clamps running session drag strictly within its pin group', async () => {
+    vi.useFakeTimers()
+    const { workspace, wrapper } = mountSidebar()
+    workspace.onFrame({
+      kind: 'sessions',
+      sessions: [
+        info({ id: 'p1', name: 'pin-1', pinned_at: 200 }),
+        info({ id: 'u1', name: 'unpin-1', created_at: 2, attached: 0 }),
+        info({ id: 'u2', name: 'unpin-2', created_at: 3, attached: 0 }),
+      ],
+    })
+    await nextTick()
+
+    const stride = metrics.sidebarRowHeight + 2
+    const unpinnedSecond = wrapper.findAll('.running .row')[2]!
+    await unpinnedSecond.trigger('pointerdown', { button: 0, pointerId: 1, clientX: 40, clientY: 200 })
+    vi.advanceTimersByTime(280)
+    await nextTick()
+    expect(unpinnedSecond.classes()).toContain('dragging')
+
+    await unpinnedSecond.trigger('pointermove', { pointerId: 1, clientX: 40, clientY: 200 - stride * 5 })
+    await nextTick()
+    expect(workspace.live.map((s) => s.id)).toEqual(['p1', 'u2', 'u1'])
+    await unpinnedSecond.trigger('pointerup', { pointerId: 1, clientX: 40, clientY: 200 - stride * 5 })
+    wrapper.unmount()
   })
 })

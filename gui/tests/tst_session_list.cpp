@@ -84,6 +84,7 @@ private slots:
 	void configLoadsAgentsModelsAndMcp();
 	void liveOrderSortsRunningSessionsAndPlacesNewSessionsFirst();
 	void historyFiltersCwdResolvesLiveCreatorsDebouncesAndDropsStale();
+	void pinnedSessionsSortFirstByPinnedAtAndExposePinnedRoles();
 };
 
 void TstSessionList::sortsLiveByCreationAndHistoryByUpdate()
@@ -680,5 +681,38 @@ void TstSessionList::historyFiltersCwdResolvesLiveCreatorsDebouncesAndDropsStale
 	QCOMPARE(directory.history().count(), 0);
 }
 
+void TstSessionList::pinnedSessionsSortFirstByPinnedAtAndExposePinnedRoles()
+{
+	SessionListModel live;
+	proto::SessionInfo a = session(u"a"_s, 10);
+	a.pinnedAt = 100;
+	proto::SessionInfo b = session(u"b"_s, 20);
+	b.pinnedAt = 200;
+	proto::SessionInfo c = session(u"c"_s, 30);
+	live.setSessions({a, b, c});
+	QCOMPARE(ids(live), (QStringList{u"b"_s, u"a"_s, u"c"_s}));
+	QCOMPARE(live.pinnedCount(), 2);
+	QVERIFY(live.isPinnedAt(0));
+	QVERIFY(live.isPinnedAt(1));
+	QVERIFY(!live.isPinnedAt(2));
+	QVERIFY(live.index(0).data(SessionListModel::PinnedRole).toBool());
+	QCOMPARE(live.index(0).data(SessionListModel::PinnedAtRole).toLongLong(), qint64(200));
+	QVERIFY(!live.index(2).data(SessionListModel::PinnedRole).toBool());
+	QCOMPARE(live.index(2).data(SessionListModel::PinnedAtRole).toLongLong(), qint64(0));
+
+	// Even if liveOrder places an unpinned session before pinned ones, pinned sessions stay ahead.
+	live.setLiveOrder({u"c"_s, u"a"_s, u"b"_s});
+	QCOMPARE(ids(live), (QStringList{u"a"_s, u"b"_s, u"c"_s}));
+
+	SessionListModel history;
+	proto::SessionInfo hOldPinned = stored(u"h_old_pinned"_s, 1, 10);
+	hOldPinned.pinnedAt = 500;
+	proto::SessionInfo hNewPinned = stored(u"h_new_pinned"_s, 2, 20);
+	hNewPinned.pinnedAt = 900;
+	proto::SessionInfo hNewestUnpinned = stored(u"h_unpinned"_s, 3, 9999);
+	history.setSessions({hOldPinned, hNewPinned, hNewestUnpinned});
+	QCOMPARE(ids(history), (QStringList{u"h_new_pinned"_s, u"h_old_pinned"_s, u"h_unpinned"_s}));
+	QCOMPARE(history.pinnedCount(), 2);
+}
 QTEST_MAIN(TstSessionList)
 #include "tst_session_list.moc"

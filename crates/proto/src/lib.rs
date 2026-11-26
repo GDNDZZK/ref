@@ -215,6 +215,9 @@ pub struct SessionInfo {
     /// Error that ended the last run; cleared when the next run starts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
+    /// When the session was pinned (epoch ms); `None` when not pinned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, TS)]
@@ -1477,6 +1480,11 @@ pub enum Request {
     },
     Shutdown,
     Ping,
+    /// Pins or unpins a session (live or history).
+    SetPinned {
+        session_id: String,
+        pinned: bool,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -1527,6 +1535,8 @@ pub enum ServerFrame {
     },
     /// Stash groups changed (sent to every client).
     GroupsChanged { groups: Vec<StashGroup> },
+    /// Persisted history metadata changed (e.g. a history session was pinned or unpinned).
+    HistoryChanged,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

@@ -618,6 +618,7 @@ Rectangle {
 			interactive: !sidebar.reorderingRunning
 			delegate: SessionRow {
 				anyDragging: sidebar.reorderingRunning
+				pinnedCount: Workspace.sessions.pinnedCount
 				onDragActiveChanged: (sessionId, active) => {
 					if (active)
 						sidebar.draggingSessionId = sessionId

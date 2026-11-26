@@ -249,6 +249,8 @@
     "compacting": "正在压缩",
     "retrying": "正在重试",
     "rename": "重命名",
+    "pin": "置顶",
+    "unpin": "取消置顶",
     "moveToBackground": "挂到后台",
     "close": "关闭",
     "delete": "删除",

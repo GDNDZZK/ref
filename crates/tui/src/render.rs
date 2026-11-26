@@ -853,7 +853,13 @@ fn live_section(
     if live.is_empty() {
         return None;
     }
-    live.sort_by_key(|s| s.created_at);
+    live.sort_by_key(|s| {
+        (
+            std::cmp::Reverse(s.pinned_at.is_some()),
+            std::cmp::Reverse(s.pinned_at.unwrap_or(0)),
+            s.created_at,
+        )
+    });
     let header = vec![
         Span::styled("Live sessions", theme::bold(theme::ACCENT)),
         Span::styled(format!("  {}", live.len()), theme::muted()),
@@ -878,11 +884,12 @@ fn live_section(
             } else {
                 theme::text()
             };
-            let left = vec![
-                Span::styled(format!("{dot} "), theme::fg(dc)),
-                Span::styled(s.name.clone(), name_st),
-                Span::styled(format!(" {fgbg}"), theme::fg(theme::DIM)),
-            ];
+            let mut left = vec![Span::styled(format!("{dot} "), theme::fg(dc))];
+            if s.pinned_at.is_some() {
+                left.push(Span::styled("✦ ", theme::fg(theme::ACCENT)));
+            }
+            left.push(Span::styled(s.name.clone(), name_st));
+            left.push(Span::styled(format!(" {fgbg}"), theme::fg(theme::DIM)));
             // Right-aligned: todo count, then the working time of the current run (same source
             // as the status line). `compose` truncates the name first, these stay whole.
             let todos = if let Some(cur) = v.filter(|_| me) {

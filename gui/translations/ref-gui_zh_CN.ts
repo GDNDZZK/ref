@@ -2558,6 +2558,16 @@ $ARGUMENTS</translation>
         <source>Delete</source>
         <translation>删除</translation>
     </message>
+    <message>
+        <location filename="../src/app/HistoryRow.qml" line="74"/>
+        <source>Pin</source>
+        <translation>置顶</translation>
+    </message>
+    <message>
+        <location filename="../src/app/HistoryRow.qml" line="74"/>
+        <source>Unpin</source>
+        <translation>取消置顶</translation>
+    </message>
 </context>
 <context>
     <name>KeyValueEditor</name>
@@ -3413,6 +3423,16 @@ $ARGUMENTS</translation>
         <location filename="../src/app/SessionRow.qml" line="441"/>
         <source>Close</source>
         <translation>关闭</translation>
+    </message>
+    <message>
+        <location filename="../src/app/SessionRow.qml" line="241"/>
+        <source>Pin</source>
+        <translation>置顶</translation>
+    </message>
+    <message>
+        <location filename="../src/app/SessionRow.qml" line="241"/>
+        <source>Unpin</source>
+        <translation>取消置顶</translation>
     </message>
 </context>
 <context>

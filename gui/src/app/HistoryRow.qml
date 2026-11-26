@@ -11,6 +11,7 @@ Item {
 	required property double updatedAt
 	required property string parentId
 	required property string creatorName
+	required property bool pinned
 
 	readonly property string creatorLabel: row.parentId !== "" ? (row.creatorName !== "" ? row.creatorName : row.parentId) : ""
 	readonly property string detailText: creatorLabel !== ""
@@ -24,16 +25,17 @@ Item {
 		anchors { fill: parent; leftMargin: Theme.sidebarPadding; rightMargin: Theme.sidebarPadding }
 		radius: Theme.radius
 		color: hover.hovered ? Theme.surfaceHover : "transparent"
-		scale: tap.pressed ? Motion.pressedScaleRow : 1
+		scale: openTap.pressed ? Motion.pressedScaleRow : 1
 
 		Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 		Behavior on scale { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 
 		Text {
+			id: title
 			textFormat: Text.PlainText
 			x: 12
 			y: 5
-			width: parent.width - 2 * 12
+			width: (pinButton.visible ? pinButton.x - 4 : parent.width - 12) - x
 			height: 18
 			verticalAlignment: Text.AlignVCenter
 			text: row.displayTitle
@@ -51,15 +53,34 @@ Item {
 			font.pixelSize: Theme.smallFontSize
 			elide: Text.ElideRight
 		}
+		Item {
+			anchors { left: parent.left; top: parent.top; bottom: parent.bottom; right: pinButton.visible ? pinButton.left : parent.right }
+
+			TapHandler {
+				id: openTap
+				onTapped: Workspace.openSession(row.sessionId)
+			}
+		}
+		IconButton {
+			id: pinButton
+			anchors { right: parent.right; rightMargin: 10; verticalCenter: title.verticalCenter }
+			buttonSize: 22
+			iconName: "pin"
+			iconSize: 16
+			iconColor: row.pinned ? Theme.accentText : Theme.textMuted
+			opacity: row.pinned || hover.hovered ? 1 : 0
+			visible: opacity > 0
+			tooltipText: row.pinned ? qsTr("Unpin") : qsTr("Pin")
+			Accessible.name: row.pinned ? qsTr("Unpin") : qsTr("Pin")
+			onClicked: Workspace.setSessionPinned(row.sessionId, !row.pinned)
+
+			Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+		}
 	}
 
 	HoverHandler {
 		id: hover
 		cursorShape: Qt.PointingHandCursor
-	}
-	TapHandler {
-		id: tap
-		onTapped: Workspace.openSession(row.sessionId)
 	}
 	TapHandler {
 		acceptedButtons: Qt.RightButton
@@ -68,19 +89,21 @@ Item {
 
 	ContextMenu {
 		id: menu
-		entries: row.parentId !== ""
-			? [
-				{text: qsTr("Filter history by creator"), action: "filterCreator"},
-				{text: qsTr("Filter spawned history"), action: "filterSpawned"},
-				{text: qsTr("Delete"), danger: true, action: "delete"}
+		entries: {
+			const items = [
+				{text: row.pinned ? qsTr("Unpin") : qsTr("Pin"), action: "pin"}
 			]
-			: [
-				{text: qsTr("Filter spawned history"), action: "filterSpawned"},
-				{text: qsTr("Delete"), danger: true, action: "delete"}
-			]
+			if (row.parentId !== "")
+				items.push({text: qsTr("Filter history by creator"), action: "filterCreator"})
+			items.push({text: qsTr("Filter spawned history"), action: "filterSpawned"})
+			items.push({text: qsTr("Delete"), danger: true, action: "delete"})
+			return items
+		}
 		onTriggered: index => {
 			const action = menu.entries[index].action
-			if (action === "filterCreator")
+			if (action === "pin")
+				Workspace.setSessionPinned(row.sessionId, !row.pinned)
+			else if (action === "filterCreator")
 				Workspace.filterHistoryByCreator(row.parentId)
 			else if (action === "filterSpawned")
 				Workspace.filterHistoryByCreator(row.sessionId)

@@ -33,4 +33,8 @@ busy_since?: number | null,
 /**
  * Error that ended the last run; cleared when the next run starts.
  */
-last_error?: string | null, };
+last_error?: string | null, 
+/**
+ * When the session was pinned (epoch ms); `None` when not pinned.
+ */
+pinned_at?: number | null, };

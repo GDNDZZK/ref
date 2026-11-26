@@ -149,6 +149,8 @@ SessionListModel::Row SessionListModel::toRow(const proto::SessionInfo& info) co
 	row.lastError = info.lastError.value_or(QString());
 	row.attached = int(info.attached);
 	row.live = info.live;
+	row.pinned = info.isPinned();
+	row.pinnedAt = info.pinnedAt.value_or(0);
 	row.parentId = info.parent.value_or(QString());
 	if(!row.parentId.isEmpty())
 	{
@@ -223,6 +225,10 @@ bool SessionListModel::before(const Row& a, const Row& b) const
 	{
 		return a.live;
 	}
+	if(a.pinned != b.pinned)
+	{
+		return a.pinned;
+	}
 	if(a.live && !m_liveOrder.isEmpty())
 	{
 		const int orderA = m_liveOrder.value(a.id, -1);
@@ -239,6 +245,10 @@ bool SessionListModel::before(const Row& a, const Row& b) const
 			}
 			return orderA < orderB;
 		}
+	}
+	if(a.pinned && b.pinned && a.pinnedAt != b.pinnedAt)
+	{
+		return a.pinnedAt > b.pinnedAt;
 	}
 	const qint64 left = a.live ? a.createdAt : a.updatedAt;
 	const qint64 right = a.live ? b.createdAt : b.updatedAt;
@@ -424,6 +434,11 @@ bool SessionListModel::isLiveAt(int row) const
 	return row >= 0 && row < m_rows.size() && m_rows[row].live;
 }
 
+bool SessionListModel::isPinnedAt(int row) const
+{
+	return row >= 0 && row < m_rows.size() && m_rows[row].pinned;
+}
+
 const proto::SessionInfo* SessionListModel::find(const QString& sessionId) const
 {
 	const auto it = m_all.constFind(sessionId);
@@ -543,14 +558,20 @@ void SessionListModel::rebuild()
 	std::ranges::sort(wanted, [this](const Row& a, const Row& b) { return before(a, b); });
 
 	const int oldCount = count();
+	const int oldPinnedCount = m_pinnedCount;
 	removeGone(wanted);
 	for(qsizetype i = 0; i < wanted.size(); ++i)
 	{
 		placeRow(i, wanted[i]);
 	}
+	m_pinnedCount = static_cast<int>(std::ranges::count_if(m_rows, [](const Row& row) { return row.pinned; }));
 	if(count() != oldCount)
 	{
 		emit countChanged();
+	}
+	if(m_pinnedCount != oldPinnedCount)
+	{
+		emit pinnedCountChanged();
 	}
 }
 
@@ -668,6 +689,10 @@ QVariant SessionListModel::roleData(const Row& row, int role) const
 		return row.rootName;
 	case RootColorIndexRole:
 		return row.rootColorIndex;
+	case PinnedRole:
+		return row.pinned;
+	case PinnedAtRole:
+		return row.pinnedAt;
 	default:
 		return {};
 	}
@@ -706,6 +731,8 @@ QHash<int, QByteArray> SessionListModel::roleNames() const
 		{RootIdRole, "rootId"},
 		{RootNameRole, "rootName"},
 		{RootColorIndexRole, "rootColorIndex"},
+		{PinnedRole, "pinned"},
+		{PinnedAtRole, "pinnedAt"},
 	};
 }
 

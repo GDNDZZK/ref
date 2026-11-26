@@ -7,11 +7,18 @@ import { relativeTimeText } from '../shell/relativeTimeText.ts'
 import { dirName, historyLabel, relativeTime } from '../shell/sessionRow.ts'
 import ContextMenu from './ContextMenu.vue'
 import type { MenuItem } from './ContextMenu.vue'
+import Icon from './Icon.vue'
 
 const props = defineProps<{ info: SessionInfo; creatorName?: string }>()
-const emit = defineEmits<{ open: []; remove: []; filterByCreator: [creatorId: string] }>()
+const emit = defineEmits<{
+  open: []
+  remove: []
+  filterByCreator: [creatorId: string]
+  pin: [pinned: boolean]
+}>()
 
 const { t, locale } = useI18n()
+const pinned = computed(() => props.info.pinned_at != null)
 
 const subtitle = computed(() => {
   const when = relativeTimeText(relativeTime(props.info.updated_at, Date.now()), t, locale.value)
@@ -24,6 +31,7 @@ const menuCoords = ref({ x: 0, y: 0 })
 const menuOpen = ref(false)
 const menuMounted = ref(false)
 const menuItems = computed<MenuItem[]>(() => [
+  { label: pinned.value ? t('sidebar.unpin') : t('sidebar.pin'), run: () => emit('pin', !pinned.value) },
   ...(props.info.parent
     ? [{ label: t('sidebar.filterByCreator'), run: () => emit('filterByCreator', props.info.parent!) }]
     : []),
@@ -41,14 +49,27 @@ function openMenu(event: MouseEvent): void {
 <template>
   <div
     class="history-row"
+    :class="{ pinned }"
     role="button"
     tabindex="0"
     @click="emit('open')"
     @keydown.enter.self="emit('open')"
     @contextmenu.prevent="openMenu"
   >
-    <span class="title">{{ historyLabel(info) }}</span>
-    <span class="subtitle">{{ subtitle }}</span>
+    <div class="main">
+      <span class="title">{{ historyLabel(info) }}</span>
+      <span class="subtitle">{{ subtitle }}</span>
+    </div>
+    <button
+      type="button"
+      class="pin"
+      :class="{ pinned }"
+      :title="pinned ? t('sidebar.unpin') : t('sidebar.pin')"
+      :aria-label="pinned ? t('sidebar.unpin') : t('sidebar.pin')"
+      @click.stop="emit('pin', !pinned)"
+    >
+      <Icon icon="pin-16" />
+    </button>
     <ContextMenu
       v-if="menuMounted"
       :open="menuOpen"
@@ -62,9 +83,10 @@ function openMenu(event: MouseEvent): void {
 
 <style scoped>
 .history-row {
+  position: relative;
   display: flex;
-  flex-direction: column;
-  justify-content: center;
+  align-items: center;
+  gap: 8px;
   height: var(--sidebar-history-row-height);
   padding: 0 12px;
   border-radius: var(--radius);
@@ -74,6 +96,14 @@ function openMenu(event: MouseEvent): void {
 
 .history-row:hover {
   background: var(--surface-hover);
+}
+
+.main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
 }
 
 .title,
@@ -91,5 +121,46 @@ function openMenu(event: MouseEvent): void {
 .subtitle {
   color: var(--text-muted);
   font-size: var(--small-font-size);
+}
+
+.pin {
+  position: absolute;
+  right: 12px;
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-small);
+  color: var(--text-muted);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--motion-quick) var(--motion-ease),
+    background-color var(--motion-quick) var(--motion-ease),
+    color var(--motion-quick) var(--motion-ease);
+}
+
+.pin:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.pin.pinned {
+  position: static;
+  color: var(--accent-text);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.pin.pinned:hover {
+  color: var(--accent-text);
+}
+
+.history-row:hover .pin,
+.history-row:focus-within .pin {
+  opacity: 1;
+  pointer-events: auto;
 }
 </style>

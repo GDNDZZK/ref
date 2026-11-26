@@ -222,6 +222,28 @@ QCoro::Task<SessionDirectory::Result<void>> SessionDirectory::rename(QString ses
 	return adopt(m_backend.client().rename(std::move(sessionId), std::move(name)));
 }
 
+QCoro::Task<SessionDirectory::Result<proto::SessionInfo>> SessionDirectory::setPinned(QString sessionId, bool pinned)
+{
+	const QPointer<SessionDirectory> self(this);
+	const Result<proto::SessionInfo> updated = co_await m_backend.client().setPinned(std::move(sessionId), pinned);
+	if(!updated)
+	{
+		co_return std::unexpected(updated.error());
+	}
+	if(self)
+	{
+		if(updated->live || m_live.contains(updated->id))
+		{
+			update(*updated);
+		}
+		else
+		{
+			updatePersisted(*updated);
+			refreshHistory(true);
+		}
+	}
+	co_return updated;
+}
 QCoro::Task<SessionDirectory::Result<void>> SessionDirectory::setCwd(QString sessionId, QString path)
 {
 	return adopt(m_backend.client().setCwd(std::move(sessionId), std::move(path)));
@@ -446,15 +468,39 @@ void SessionDirectory::applyHistory()
 	emit historyUpdated();
 }
 
+void SessionDirectory::updatePersisted(const proto::SessionInfo& info)
+{
+	proto::SessionInfo stored = info;
+	stored.live = false;
+	const auto replaceIn = [&stored](QList<proto::SessionInfo>& list) {
+		for(proto::SessionInfo& item : list)
+		{
+			if(item.id == stored.id)
+			{
+				item = stored;
+				return true;
+			}
+		}
+		return false;
+	};
+	replaceIn(m_persisted);
+	replaceIn(m_sidebarPersisted);
+	m_knownSessions.insert(stored.id, stored);
+	applyHistory();
+}
+
 void SessionDirectory::onFrame(const proto::ServerFrame& frame)
 {
-	const auto* sessions = std::get_if<proto::SessionsFrame>(&frame);
-	if(sessions == nullptr)
+	if(const auto* sessions = std::get_if<proto::SessionsFrame>(&frame))
 	{
+		setLive(sessions->sessions);
+		refreshHistory();
 		return;
 	}
-	setLive(sessions->sessions);
-	refreshHistory();
+	if(std::holds_alternative<proto::HistoryChangedFrame>(frame))
+	{
+		refreshHistory(true);
+	}
 }
 
 } // namespace refgui::workspace

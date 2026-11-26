@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 /// Database file name inside the data directory.
 const DB_FILE: &str = "ref.db";
@@ -162,6 +162,7 @@ enum Cmd {
     },
     Infos(Vec<String>, Reply<Vec<SessionInfo>>),
     DeleteSession(String, Reply<bool>),
+    SetPinned(String, Option<i64>, Reply<Option<SessionInfo>>),
     SetStashedResume(String, Option<String>, Reply<()>),
     TakeStashedResume(String, Reply<Option<String>>),
     ListGroups(Reply<Vec<RawGroup>>),
@@ -467,13 +468,13 @@ impl Store {
         })
     }
 
-    /// All persisted session infos, newest `updated_at` first.
+    /// All persisted session infos, pinned first (`pinned_at` desc) then newest `updated_at` first.
     pub fn list(&self) -> Vec<SessionInfo> {
         self.list_for(None, None, None, None)
     }
 
-    /// Persisted session infos matching optional `cwd`, `creator`, and `query`, newest first,
-    /// at most `limit`.
+    /// Persisted session infos matching optional `cwd`, `creator`, and `query`, pinned first
+    /// (`pinned_at` desc) then newest `updated_at` first, at most `limit`.
     pub(crate) fn list_for(
         &self,
         cwd: Option<String>,
@@ -521,6 +522,17 @@ impl Store {
             tracing::warn!("loading session infos failed: {e}");
             Vec::new()
         })
+    }
+
+    pub fn set_pinned(
+        &self,
+        id: &str,
+        pinned_at: Option<i64>,
+    ) -> Result<Option<SessionInfo>, String> {
+        if !valid_id(id) {
+            return Ok(None);
+        }
+        self.call(|r| Cmd::SetPinned(id.to_string(), pinned_at, r))
     }
 
     pub(crate) fn set_stashed_resume(
@@ -847,6 +859,16 @@ fn migrate(conn: &Connection) -> DbResult<()> {
             .map_err(|e| format!("setting schema version 3 failed: {e}"))?;
         tx.commit()?;
     }
+    if v < 4 {
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE sessions ADD COLUMN pinned_at INTEGER;
+             CREATE INDEX IF NOT EXISTS sessions_pinned ON sessions(pinned_at DESC, updated_at DESC);
+             PRAGMA user_version = 4;
+             COMMIT;",
+        )
+        .map_err(|e| format!("migrating the schema to v4 failed: {e}"))?;
+    }
     Ok(())
 }
 
@@ -989,6 +1011,10 @@ fn db_thread(data_dir: &Path, path: &Path, rx: mpsc::Receiver<Cmd>) {
                 Cmd::DeleteSession(id, r) => {
                     cache.remove(&id);
                     answer(r, delete(db, &id));
+                }
+                Cmd::SetPinned(id, pinned_at, r) => {
+                    cache.remove(&id);
+                    answer(r, set_pinned(db, &id, pinned_at));
                 }
                 Cmd::SetStashedResume(id, resume, r) => {
                     answer(r, set_stashed_resume(db, &id, resume.as_deref()));
@@ -1135,6 +1161,7 @@ fn fail(c: Cmd, msg: &str) {
         Cmd::Infos(_, r) => answer(r, Err(m)),
         Cmd::DeleteSession(_, r) => answer(r, Err(m)),
         Cmd::Flush(r) => answer(r, Err(m)),
+        Cmd::SetPinned(_, _, r) => answer(r, Err(m)),
         Cmd::SetStashedResume(_, _, r) => answer(r, Err(m)),
         Cmd::TakeStashedResume(_, r) => answer(r, Err(m)),
         Cmd::ListGroups(r)
@@ -1185,11 +1212,11 @@ fn save(db: &mut Connection, cache: &mut HashMap<String, Cached>, p: &Persisted)
         let info = serde_json::to_string(&p.info)?;
         let extra = serde_json::to_string(&extra)?;
         tx.execute(
-            "INSERT INTO sessions (id, info, cwd, title, name, created_at, updated_at, extra, parent)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            "INSERT INTO sessions (id, info, cwd, title, name, created_at, updated_at, extra, parent, pinned_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
              ON CONFLICT(id) DO UPDATE SET info = excluded.info, cwd = excluded.cwd, title = excluded.title,
                  name = excluded.name, created_at = excluded.created_at, updated_at = excluded.updated_at,
-                 extra = excluded.extra, parent = excluded.parent",
+                 extra = excluded.extra, parent = excluded.parent, pinned_at = excluded.pinned_at",
             params![
                 id,
                 info,
@@ -1199,7 +1226,8 @@ fn save(db: &mut Connection, cache: &mut HashMap<String, Cached>, p: &Persisted)
                 p.info.created_at,
                 p.info.updated_at,
                 extra,
-                p.info.parent
+                p.info.parent,
+                p.info.pinned_at
             ],
         )?;
     }
@@ -1681,7 +1709,7 @@ fn page_excluding(
     let (where_sql, mut params) =
         build_session_where(None, creator, creator_ids, None, exclude_ids);
     let sql = format!(
-        "SELECT s.info FROM sessions s {where_sql} ORDER BY s.updated_at DESC LIMIT ? OFFSET ?"
+        "SELECT s.info FROM sessions s {where_sql} ORDER BY s.pinned_at DESC, s.updated_at DESC LIMIT ? OFFSET ?"
     );
     params.push(SqlValue::Integer(limit as i64));
     params.push(SqlValue::Integer(offset as i64));
@@ -1710,8 +1738,9 @@ fn list(
     let (where_sql, mut params) =
         build_session_where(cwd, creator, extra_creator_ids, query, exclude_ids);
     let limit = limit.map(|l| l as i64).unwrap_or(NO_LIMIT);
-    let sql =
-        format!("SELECT s.info FROM sessions s {where_sql} ORDER BY s.updated_at DESC LIMIT ?");
+    let sql = format!(
+        "SELECT s.info FROM sessions s {where_sql} ORDER BY s.pinned_at DESC, s.updated_at DESC LIMIT ?"
+    );
     params.push(SqlValue::Integer(limit));
     let mut stmt = db.prepare(&sql)?;
     let rows = stmt.query_map(params_from_iter(params), |r| r.get::<_, String>(0))?;
@@ -1769,6 +1798,32 @@ fn delete(db: &mut Connection, id: &str) -> DbResult<bool> {
     } else {
         Ok(groups_changed)
     }
+}
+
+fn set_pinned(
+    db: &mut Connection,
+    id: &str,
+    pinned_at: Option<i64>,
+) -> DbResult<Option<SessionInfo>> {
+    let tx = db.transaction()?;
+    let raw: Option<String> = tx
+        .query_row("SELECT info FROM sessions WHERE id = ?1", [id], |r| {
+            r.get(0)
+        })
+        .optional()?;
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let mut info: SessionInfo =
+        serde_json::from_str(&raw).map_err(|e| format!("Session {id} is corrupt: {e}"))?;
+    info.pinned_at = pinned_at;
+    let updated = serde_json::to_string(&info)?;
+    tx.execute(
+        "UPDATE sessions SET info = ?1, pinned_at = ?2 WHERE id = ?3",
+        params![updated, pinned_at, id],
+    )?;
+    tx.commit()?;
+    Ok(Some(info))
 }
 
 // ---------------------------------------------------------------------------
@@ -2178,8 +2233,8 @@ fn import_json(db: &mut Connection, data_dir: &Path) -> DbResult<()> {
             model_explicit: p.model_explicit,
         };
         tx.execute(
-            "INSERT INTO sessions (id, info, cwd, title, name, created_at, updated_at, extra, parent)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO sessions (id, info, cwd, title, name, created_at, updated_at, extra, parent, pinned_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 p.info.id,
                 serde_json::to_string(&p.info)?,
@@ -2189,7 +2244,8 @@ fn import_json(db: &mut Connection, data_dir: &Path) -> DbResult<()> {
                 p.info.created_at,
                 p.info.updated_at,
                 serde_json::to_string(&extra)?,
-                p.info.parent
+                p.info.parent,
+                p.info.pinned_at
             ],
         )?;
         for (seq, m) in p.messages.iter().enumerate() {
@@ -2252,6 +2308,7 @@ mod tests {
             todos: Vec::new(),
             busy_since: None,
             last_error: None,
+            pinned_at: None,
         }
     }
 
@@ -2983,6 +3040,146 @@ mod tests {
         assert_eq!(metas.len(), 2);
         assert_eq!(metas[0].id, "m2");
         assert_eq!(metas[1].id, "m3");
+
+        let _ = store.close();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn migrates_v3_to_v4_and_adds_pinned_at() {
+        let dir = tmp();
+        let db_path = dir.join(DB_FILE);
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE sessions (
+                     id TEXT PRIMARY KEY,
+                     info TEXT NOT NULL,
+                     cwd TEXT,
+                     title TEXT,
+                     name TEXT,
+                     created_at INTEGER,
+                     updated_at INTEGER,
+                     extra TEXT,
+                     parent TEXT,
+                     stashed_resume TEXT
+                 );
+                 CREATE INDEX sessions_updated ON sessions(updated_at DESC);
+                 CREATE INDEX sessions_cwd ON sessions(cwd, updated_at DESC);
+                 CREATE INDEX sessions_parent ON sessions(parent, updated_at DESC);
+                 CREATE INDEX sessions_name_nocase ON sessions(name COLLATE NOCASE);
+                 CREATE TABLE messages (
+                     session_id TEXT NOT NULL,
+                     seq INTEGER NOT NULL,
+                     id TEXT NOT NULL,
+                     time INTEGER,
+                     data TEXT NOT NULL,
+                     layout_meta TEXT,
+                     PRIMARY KEY (session_id, seq)
+                 );
+                 CREATE INDEX messages_id ON messages(session_id, id);
+                 CREATE VIRTUAL TABLE sessions_fts USING fts5(
+                     id UNINDEXED, title, name, cwd, session_id, parent, tokenize='trigram'
+                 );
+                 CREATE TABLE session_groups (
+                     id TEXT PRIMARY KEY,
+                     name TEXT NOT NULL,
+                     locked INTEGER NOT NULL DEFAULT 0,
+                     created_at INTEGER NOT NULL,
+                     updated_at INTEGER NOT NULL
+                 );
+                 CREATE TABLE session_group_members (
+                     group_id TEXT NOT NULL REFERENCES session_groups(id) ON DELETE CASCADE,
+                     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                     position INTEGER NOT NULL,
+                     PRIMARY KEY (group_id, session_id)
+                 );
+                 PRAGMA user_version = 3;",
+            )
+            .unwrap();
+            let inf = info("ses_v3", "/work/app", 100);
+            conn.execute(
+                "INSERT INTO sessions (id, info, cwd, title, name, created_at, updated_at, extra, parent)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    inf.id,
+                    serde_json::to_string(&inf).unwrap(),
+                    inf.cwd,
+                    inf.title,
+                    inf.name,
+                    inf.created_at,
+                    inf.updated_at,
+                    "{}",
+                    Option::<String>::None
+                ],
+            )
+            .unwrap();
+        }
+
+        let store = Store::new(dir.clone());
+        let updated = store.set_pinned("ses_v3", Some(42_000)).unwrap().unwrap();
+        assert_eq!(updated.pinned_at, Some(42_000));
+        let loaded = store.load("ses_v3").unwrap();
+        assert_eq!(loaded.info.pinned_at, Some(42_000));
+        store.close().unwrap();
+
+        let conn = Connection::open(&db_path).unwrap();
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        let pinned_col: Option<i64> = conn
+            .query_row(
+                "SELECT pinned_at FROM sessions WHERE id = 'ses_v3'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(pinned_col, Some(42_000));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn set_pinned_persists_and_orders_pinned_history_first() {
+        let dir = tmp();
+        let store = Store::new(dir.clone());
+        store.save(persisted("ses_old", "/a", 10, vec![msg("m1", "old")]));
+        store.save(persisted("ses_mid", "/a", 20, vec![msg("m2", "mid")]));
+        store.save(persisted("ses_new", "/a", 30, vec![msg("m3", "new")]));
+        store.flush().unwrap();
+
+        assert!(
+            store
+                .set_pinned("ses_missing", Some(100))
+                .unwrap()
+                .is_none()
+        );
+
+        let p_old = store.set_pinned("ses_old", Some(1000)).unwrap().unwrap();
+        assert_eq!(p_old.pinned_at, Some(1000));
+        let p_mid = store.set_pinned("ses_mid", Some(2000)).unwrap().unwrap();
+        assert_eq!(p_mid.pinned_at, Some(2000));
+
+        let ids =
+            |items: Vec<SessionInfo>| -> Vec<String> { items.into_iter().map(|i| i.id).collect() };
+        assert_eq!(ids(store.list()), ["ses_mid", "ses_old", "ses_new"]);
+        // Pinned sessions stay ahead even when `limit` truncates older entries.
+        assert_eq!(
+            ids(store.list_for(None, None, None, Some(2))),
+            ["ses_mid", "ses_old"]
+        );
+
+        // Unpinning restores `updated_at DESC` ordering.
+        assert_eq!(
+            store
+                .set_pinned("ses_old", None)
+                .unwrap()
+                .unwrap()
+                .pinned_at,
+            None
+        );
+        assert_eq!(ids(store.list()), ["ses_mid", "ses_new", "ses_old"]);
+        assert_eq!(store.load("ses_old").unwrap().info.pinned_at, None);
 
         let _ = store.close();
         let _ = std::fs::remove_dir_all(dir);

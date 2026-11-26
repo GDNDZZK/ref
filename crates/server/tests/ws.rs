@@ -873,3 +873,295 @@ async fn list_history_filters_by_creator_and_query() {
     assert!(ok);
     assert_eq!(list_ids(&res), vec![user_live_id]);
 }
+
+#[tokio::test]
+async fn set_pinned_live_and_history_persists_and_sorts() {
+    let (_r, url, work) = start("", -1).await;
+    let (mut ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+    hello(&mut ws, &work, vec![]).await;
+    let mut other = Vec::new();
+
+    let mut next_id = 2u64;
+    let mut req_id = || {
+        let id = next_id;
+        next_id += 1;
+        id
+    };
+
+    async fn create_named(ws: &mut Ws, cwd: &std::path::Path, id: u64, name: &str) {
+        send(
+            ws,
+            id,
+            Request::CreateSession {
+                cwd: cwd.to_string_lossy().into_owned(),
+                agent: None,
+                model: None,
+                name: Some(name.to_string()),
+            },
+        )
+        .await;
+    }
+
+    let id1 = req_id();
+    create_named(&mut ws, &work, id1, "older").await;
+    let (ok, res, err) = response(&mut ws, id1, &mut other).await;
+    assert!(ok, "{err:?}");
+    let old_id = res["session"]["id"].as_str().unwrap().to_string();
+
+    let id2 = req_id();
+    send(
+        &mut ws,
+        id2,
+        Request::Prompt {
+            session_id: old_id.clone(),
+            text: "hello old".into(),
+            images: vec![],
+        },
+    )
+    .await;
+    assert!(response(&mut ws, id2, &mut other).await.0);
+
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let id3 = req_id();
+    create_named(&mut ws, &work, id3, "newer").await;
+    let (ok, res, err) = response(&mut ws, id3, &mut other).await;
+    assert!(ok, "{err:?}");
+    let new_id = res["session"]["id"].as_str().unwrap().to_string();
+
+    let id4 = req_id();
+    send(
+        &mut ws,
+        id4,
+        Request::Prompt {
+            session_id: new_id.clone(),
+            text: "hello new".into(),
+            images: vec![],
+        },
+    )
+    .await;
+    assert!(response(&mut ws, id4, &mut other).await.0);
+
+    // Wait for both prompts to finish before closing later.
+    wait_until("turns finished", TIMEOUT, || {
+        _r.hub
+            .sessions()
+            .iter()
+            .all(|s| s.info().status == ref_proto::SessionStatus::Idle)
+    })
+    .await;
+
+    // 1. Pinning a live session updates SessionInfo.pinned_at and broadcasts ServerFrame::Sessions.
+    other.clear();
+    let id5 = req_id();
+    send(
+        &mut ws,
+        id5,
+        Request::SetPinned {
+            session_id: old_id.clone(),
+            pinned: true,
+        },
+    )
+    .await;
+    let (ok, res, err) = response(&mut ws, id5, &mut other).await;
+    assert!(ok, "{err:?}");
+    let pinned_at = res["session"]["pinned_at"]
+        .as_i64()
+        .expect("live pinned_at");
+    assert_eq!(res["session"]["id"], old_id);
+
+    let saw_sessions_pinned = async {
+        if other.iter().any(|f| {
+            matches!(f, ServerFrame::Sessions { sessions } if sessions.iter().any(|s| s.id == old_id && s.pinned_at == Some(pinned_at)))
+        }) {
+            return;
+        }
+        while let Some(m) = ws.next().await {
+            let Ok(WsMsg::Text(t)) = m else { continue };
+            let f: ServerFrame = serde_json::from_str(&t).unwrap();
+            if let ServerFrame::Sessions { sessions } = f
+                && sessions
+                    .iter()
+                    .any(|s| s.id == old_id && s.pinned_at == Some(pinned_at))
+            {
+                return;
+            }
+        }
+        panic!("socket closed before Sessions broadcast");
+    };
+    tokio::time::timeout(TIMEOUT, saw_sessions_pinned)
+        .await
+        .expect("Sessions broadcast timeout");
+
+    // Closing persists pinned_at into history and re-attaching restores it.
+    let id6 = req_id();
+    send(
+        &mut ws,
+        id6,
+        Request::Close {
+            session_id: old_id.clone(),
+        },
+    )
+    .await;
+    assert!(response(&mut ws, id6, &mut other).await.0);
+
+    let id7 = req_id();
+    send(
+        &mut ws,
+        id7,
+        Request::Attach {
+            session_id: old_id.clone(),
+            foreground: false,
+            limit: None,
+        },
+    )
+    .await;
+    let (ok, res, err) = response(&mut ws, id7, &mut other).await;
+    assert!(ok, "{err:?}");
+    assert_eq!(res["snapshot"]["info"]["pinned_at"], pinned_at);
+
+    // Unpin and close both sessions so both live only in history.
+    let id8 = req_id();
+    send(
+        &mut ws,
+        id8,
+        Request::SetPinned {
+            session_id: old_id.clone(),
+            pinned: false,
+        },
+    )
+    .await;
+    let (ok, res, err) = response(&mut ws, id8, &mut other).await;
+    assert!(ok, "{err:?}");
+    assert!(res["session"]["pinned_at"].is_null());
+
+    for sid in [&old_id, &new_id] {
+        let id = req_id();
+        send(
+            &mut ws,
+            id,
+            Request::Close {
+                session_id: sid.clone(),
+            },
+        )
+        .await;
+        assert!(response(&mut ws, id, &mut other).await.0);
+    }
+    assert!(_r.hub.sessions().is_empty());
+
+    let list_ids = |res: &Value| -> Vec<String> {
+        res["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    let id9 = req_id();
+    send(
+        &mut ws,
+        id9,
+        Request::ListHistory {
+            cwd: None,
+            limit: None,
+            creator: None,
+            query: None,
+        },
+    )
+    .await;
+    let (ok, res, err) = response(&mut ws, id9, &mut other).await;
+    assert!(ok, "{err:?}");
+    assert_eq!(list_ids(&res), vec![new_id.clone(), old_id.clone()]);
+
+    // 2. Pinning a closed history session broadcasts HistoryChanged and sorts it first.
+    other.clear();
+    let id10 = req_id();
+    send(
+        &mut ws,
+        id10,
+        Request::SetPinned {
+            session_id: old_id.clone(),
+            pinned: true,
+        },
+    )
+    .await;
+    let (ok, res, err) = response(&mut ws, id10, &mut other).await;
+    assert!(ok, "{err:?}");
+    assert!(res["session"]["pinned_at"].as_i64().is_some());
+    assert!(
+        other
+            .iter()
+            .any(|f| matches!(f, ServerFrame::HistoryChanged)),
+        "expected HistoryChanged broadcast: {other:?}"
+    );
+
+    let id11 = req_id();
+    send(
+        &mut ws,
+        id11,
+        Request::ListHistory {
+            cwd: None,
+            limit: None,
+            creator: None,
+            query: None,
+        },
+    )
+    .await;
+    let (ok, res, err) = response(&mut ws, id11, &mut other).await;
+    assert!(ok, "{err:?}");
+    assert_eq!(list_ids(&res), vec![old_id.clone(), new_id.clone()]);
+
+    // Unpinning a closed history session broadcasts HistoryChanged and restores normal order.
+    other.clear();
+    let id12 = req_id();
+    send(
+        &mut ws,
+        id12,
+        Request::SetPinned {
+            session_id: old_id.clone(),
+            pinned: false,
+        },
+    )
+    .await;
+    let (ok, res, err) = response(&mut ws, id12, &mut other).await;
+    assert!(ok, "{err:?}");
+    assert!(res["session"]["pinned_at"].is_null());
+    assert!(
+        other
+            .iter()
+            .any(|f| matches!(f, ServerFrame::HistoryChanged)),
+        "expected HistoryChanged broadcast on unpin: {other:?}"
+    );
+
+    let id13 = req_id();
+    send(
+        &mut ws,
+        id13,
+        Request::ListHistory {
+            cwd: None,
+            limit: None,
+            creator: None,
+            query: None,
+        },
+    )
+    .await;
+    let (ok, res, err) = response(&mut ws, id13, &mut other).await;
+    assert!(ok, "{err:?}");
+    assert_eq!(list_ids(&res), vec![new_id, old_id]);
+
+    // Missing session fails cleanly.
+    let id14 = req_id();
+    send(
+        &mut ws,
+        id14,
+        Request::SetPinned {
+            session_id: "ses_nonexistent".into(),
+            pinned: true,
+        },
+    )
+    .await;
+    let (ok, _, err) = response(&mut ws, id14, &mut other).await;
+    assert!(!ok);
+    assert!(err.unwrap().contains("not found"));
+}

@@ -93,6 +93,8 @@ pub struct Item {
     pub keywords: String,
     /// Creator `(parent_id, creator_name)` for child sessions.
     pub creator: Option<(String, String)>,
+    /// Whether the item is pinned (shows a leading `✦ ` indicator).
+    pub pinned: bool,
 }
 pub struct ListDialog {
     pub kind: Kind,
@@ -601,6 +603,9 @@ impl ListDialog {
         } else if let Some((m, c)) = &it.marker {
             left.push(Span::styled(format!("{m} "), Style::new().fg(fgc(*c))));
         }
+        if it.pinned {
+            left.push(Span::styled("✦ ", Style::new().fg(fgc(theme::ACCENT))));
+        }
         let tstyle = Style::new().fg(fgc(it.title_color.unwrap_or(theme::TEXT)));
         left.push(Span::styled(
             it.title.clone(),
@@ -887,7 +892,7 @@ const KEYBINDS: &[(&str, &[(&str, &str)])] = &[
             ("n", "new session"),
             (
                 "l",
-                "session list (live + history; ctrl+d closes / deletes)",
+                "session list (live + history; ctrl+k pins; ctrl+d closes / deletes)",
             ),
             ("m / a", "models / agents"),
             ("t / d", "toggle thinking / tool details"),

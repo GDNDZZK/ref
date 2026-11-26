@@ -109,6 +109,7 @@ fn info(name: &str, agent: &str, cwd: &str) -> SessionInfo {
             recommend: 600_000,
             auto: 850_000,
         },
+        pinned_at: None,
         ..placeholder_info(&id("ses"), cwd)
     }
 }
@@ -1363,6 +1364,9 @@ impl Mock {
                 self.world().history.retain(|h| h.id != session_id);
                 self.ok(request_id, json!({}));
             }
+            Request::SetPinned { session_id, pinned } => {
+                self.on_set_pinned(request_id, &session_id, pinned)
+            }
             Request::ExpandCommand { name, args, .. } => {
                 self.ok(
                     request_id,
@@ -1448,6 +1452,27 @@ impl Mock {
         self.broadcast_sessions();
     }
 
+    fn on_set_pinned(&self, request_id: Option<u64>, sid: &str, pinned: bool) {
+        let pinned_at = pinned.then(now_ms);
+        if let Some(info) = self.update_info(sid, |i| i.pinned_at = pinned_at) {
+            self.reply_with_session(request_id, sid, info);
+            return;
+        }
+        let hist_info = {
+            let mut w = self.world();
+            w.history.iter_mut().find(|h| h.id == sid).map(|h| {
+                h.pinned_at = pinned_at;
+                h.clone()
+            })
+        };
+        if let Some(info) = hist_info {
+            self.ok(request_id, json!({ "session": info }));
+            self.send(ServerFrame::HistoryChanged);
+        } else {
+            self.err(request_id, "no such session");
+        }
+    }
+
     fn on_list_sessions(&self, request_id: Option<u64>) {
         let w = self.world();
         let list: Vec<&SessionInfo> = w
@@ -1519,7 +1544,13 @@ impl Mock {
                 true
             });
         }
-        list.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
+        list.sort_by_key(|s| {
+            (
+                std::cmp::Reverse(s.pinned_at.is_some()),
+                std::cmp::Reverse(s.pinned_at.unwrap_or(0)),
+                std::cmp::Reverse(s.updated_at),
+            )
+        });
         list.truncate(limit.unwrap_or(MOCK_HISTORY_DEFAULT_LIMIT));
         self.ok(request_id, json!({ "sessions": list }));
     }

@@ -590,6 +590,16 @@ fn requests() -> Samples<ClientFrame> {
                 },
             ),
         ),
+        (
+            "set_pinned",
+            frame(
+                59,
+                Request::SetPinned {
+                    session_id: sid(),
+                    pinned: true,
+                },
+            ),
+        ),
     ]
 }
 
@@ -906,6 +916,7 @@ fn server_frames() -> Samples<ServerFrame> {
                 groups: vec![stash_group()],
             },
         ),
+        ("history_changed", ServerFrame::HistoryChanged),
     ]
 }
 

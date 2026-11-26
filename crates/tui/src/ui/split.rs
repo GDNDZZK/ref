@@ -368,6 +368,7 @@ mod tests {
             id: id.into(),
             name: name.into(),
             parent: parent.map(String::from),
+            pinned_at: None,
             ..crate::util::placeholder_info(id, "/tmp")
         };
         let live = vec![
@@ -408,6 +409,7 @@ mod tests {
             id: id.into(),
             name: name.into(),
             parent: parent.map(String::from),
+            pinned_at: None,
             ..crate::util::placeholder_info(id, "/tmp")
         };
         let live = vec![

@@ -47,6 +47,7 @@ pub mod cmd {
     pub const STASH: &str = "stash";
     pub const STASHED: &str = "stashed";
     pub const WINDOW: &str = "window";
+    pub const PIN: &str = "pin";
 }
 
 /// Session info for a session the client has not heard about yet.
@@ -69,6 +70,7 @@ pub(crate) fn placeholder_info(sid: &str, cwd: &str) -> SessionInfo {
         todos: Vec::new(),
         busy_since: None,
         last_error: None,
+        pinned_at: None,
     }
 }
 

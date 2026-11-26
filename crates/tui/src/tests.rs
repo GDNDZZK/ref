@@ -91,6 +91,7 @@ fn info() -> SessionInfo {
             recommend: 600_000,
             auto: 850_000,
         },
+        pinned_at: None,
         ..crate::util::placeholder_info(TEST_SESSION, TEST_CWD)
     }
 }
@@ -2387,7 +2388,7 @@ fn sessions_dialog_ctrl_d_closes_with_confirm() {
     ];
     app.open_sessions();
     let (_, s) = render(&mut app, 120, 34);
-    assert!(s.contains("ctrl+d close live / delete history"), "{s}");
+    assert!(s.contains("ctrl+k pin · ctrl+d close/delete"), "{s}");
     if let Some(crate::ui::dialog::Dialog::List(d)) = app.dialog.as_mut() {
         d.select_key("live:ses_bg");
     }
@@ -8629,4 +8630,222 @@ fn stash_dialog_member_accent_bars_resolve_creator_collisions() {
     assert_eq!(buf_active[(x, y0)].fg, theme::PANEL);
     assert_eq!(buf_active[(x, y1)].fg, c1);
     assert_eq!(buf_active[(x, y2)].fg, c2);
+}
+
+#[test]
+fn sidebar_live_list_sorts_pinned_first_and_renders_pin_marker() {
+    let mut app = test_app(true);
+    let mut u0 = bg_session("ses_u0", "unpinned-early", SessionStatus::Idle, 0);
+    u0.created_at = 5;
+    let mut u1 = bg_session("ses_u1", "unpinned-late", SessionStatus::Idle, 0);
+    u1.created_at = 10;
+    let mut p1 = bg_session("ses_p1", "pinned-older", SessionStatus::Idle, 0);
+    p1.created_at = 20;
+    p1.pinned_at = Some(100);
+    let mut p2 = bg_session("ses_p2", "pinned-newer", SessionStatus::Idle, 0);
+    p2.created_at = 30;
+    p2.pinned_at = Some(200);
+    app.live = vec![u1, p1, u0, p2];
+
+    let (_, s) = render(&mut app, 120, 30);
+    let ids: Vec<&str> = app.sidebar_rows.iter().map(|(_, id)| id.as_str()).collect();
+    assert_eq!(ids, vec!["ses_p2", "ses_p1", "ses_u0", "ses_u1"]);
+    assert!(s.contains("✦ pinned-newer"), "{s}");
+    assert!(s.contains("✦ pinned-older"), "{s}");
+    assert!(!s.contains("✦ unpinned-early"), "{s}");
+    assert!(!s.contains("✦ unpinned-late"), "{s}");
+}
+
+#[test]
+fn sessions_dialog_sorts_pinned_first_renders_marker_and_ctrl_k_pins_live_and_history() {
+    use crate::ui::dialog::Dialog;
+    let (mut app, mut rx) = test_app_with_requests(false);
+    let mut lu = bg_session("ses_lu", "live-unpinned", SessionStatus::Idle, 0);
+    lu.updated_at = 500;
+    let mut lp1 = bg_session("ses_lp1", "live-pin-old", SessionStatus::Idle, 0);
+    lp1.updated_at = 100;
+    lp1.pinned_at = Some(100);
+    let mut lp2 = bg_session("ses_lp2", "live-pin-new", SessionStatus::Idle, 0);
+    lp2.updated_at = 200;
+    lp2.pinned_at = Some(200);
+    let mut hu = bg_session("ses_hu", "hist-u", SessionStatus::Idle, 0);
+    hu.live = false;
+    hu.title = "Hist unpinned".into();
+    hu.updated_at = 900;
+    let mut hp = bg_session("ses_hp", "hist-p", SessionStatus::Idle, 0);
+    hp.live = false;
+    hp.title = "Hist pinned".into();
+    hp.updated_at = 50;
+    hp.pinned_at = Some(300);
+    app.live = vec![lu.clone(), lp1, lp2];
+    app.history_list = vec![hu, hp.clone()];
+    app.open_sessions();
+    if let Some(Dialog::List(d)) = app.dialog.as_mut() {
+        d.opened = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        let keys: Vec<&str> = d.items.iter().map(|i| i.key.as_str()).collect();
+        assert_eq!(
+            keys,
+            vec![
+                "live:ses_lp2",
+                "live:ses_lp1",
+                "live:ses_lu",
+                "hist:ses_hp",
+                "hist:ses_hu",
+            ]
+        );
+        let pinned_flags: Vec<bool> = d.items.iter().map(|i| i.pinned).collect();
+        assert_eq!(pinned_flags, vec![true, true, false, true, false]);
+    } else {
+        panic!("expected sessions dialog");
+    }
+    let (_, s) = render(&mut app, 120, 34);
+    assert!(s.contains("✦ live-pin-new"), "{s}");
+    assert!(s.contains("✦ Hist pinned"), "{s}");
+    assert!(!s.contains("✦ live-unpinned"), "{s}");
+    assert!(!s.contains("✦ Hist unpinned"), "{s}");
+    let _ = drain_requests(&mut rx);
+
+    // Ctrl+K on an unpinned live row sends SetPinned { pinned: true }.
+    if let Some(Dialog::List(d)) = app.dialog.as_mut() {
+        d.select_key("live:ses_lu");
+    }
+    press_with(&mut app, KeyCode::Char('k'), KeyModifiers::CONTROL);
+    let live_pin_req = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(f.req, Request::SetPinned { .. }))
+        .expect("ctrl+k on live row sends SetPinned");
+    assert!(matches!(
+        &live_pin_req.req,
+        Request::SetPinned { session_id, pinned: true } if session_id == "ses_lu"
+    ));
+    let mut lu_pinned = lu;
+    lu_pinned.pinned_at = Some(999);
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: live_pin_req.id.unwrap(),
+        ok: true,
+        result: json!({ "session": lu_pinned }),
+        error: None,
+        code: None,
+    }));
+    if let Some(Dialog::List(d)) = app.dialog.as_ref() {
+        assert_eq!(d.items[0].key, "live:ses_lu");
+        assert!(d.items[0].pinned);
+    }
+
+    // Ctrl+K on a pinned history row sends SetPinned { pinned: false }.
+    if let Some(Dialog::List(d)) = app.dialog.as_mut() {
+        d.select_key("hist:ses_hp");
+    }
+    press_with(&mut app, KeyCode::Char('k'), KeyModifiers::CONTROL);
+    let hist_unpin_req = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(f.req, Request::SetPinned { .. }))
+        .expect("ctrl+k on history row sends SetPinned");
+    assert!(matches!(
+        &hist_unpin_req.req,
+        Request::SetPinned { session_id, pinned: false } if session_id == "ses_hp"
+    ));
+    let mut hp_unpinned = hp;
+    hp_unpinned.pinned_at = None;
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: hist_unpin_req.id.unwrap(),
+        ok: true,
+        result: json!({ "session": hp_unpinned }),
+        error: None,
+        code: None,
+    }));
+    if let Some(Dialog::List(d)) = app.dialog.as_ref() {
+        let hist_keys: Vec<&str> = d
+            .items
+            .iter()
+            .filter(|i| i.key.starts_with("hist:"))
+            .map(|i| i.key.as_str())
+            .collect();
+        assert_eq!(hist_keys, vec!["hist:ses_hu", "hist:ses_hp"]);
+    }
+}
+
+#[test]
+fn pin_command_toggles_current_and_named_sessions() {
+    let (mut app, mut rx) = test_app_with_requests(false);
+    let _ = drain_requests(&mut rx);
+
+    app.run_command("pin", "");
+    let pin_req = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(f.req, Request::SetPinned { .. }))
+        .expect("/pin sends SetPinned");
+    assert!(matches!(
+        &pin_req.req,
+        Request::SetPinned { session_id, pinned: true } if session_id == TEST_SESSION
+    ));
+    let mut cur_pinned = app.views[TEST_SESSION].info.clone();
+    cur_pinned.pinned_at = Some(500);
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: pin_req.id.unwrap(),
+        ok: true,
+        result: json!({ "session": cur_pinned }),
+        error: None,
+        code: None,
+    }));
+    assert_eq!(app.views[TEST_SESSION].info.pinned_at, Some(500));
+
+    app.run_command("pin", "");
+    let unpin_req = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(f.req, Request::SetPinned { .. }))
+        .expect("second /pin unpins current session");
+    assert!(matches!(
+        &unpin_req.req,
+        Request::SetPinned { session_id, pinned: false } if session_id == TEST_SESSION
+    ));
+
+    let mut hist = bg_session("ses_hist_named", "arch-notes", SessionStatus::Idle, 0);
+    hist.live = false;
+    app.history_list = vec![hist];
+    app.run_command("pin", "arch-notes");
+    let named_req = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(f.req, Request::SetPinned { .. }))
+        .expect("/pin <name> sends SetPinned");
+    assert!(matches!(
+        &named_req.req,
+        Request::SetPinned { session_id, pinned: true } if session_id == "ses_hist_named"
+    ));
+
+    app.current = None;
+    app.run_command("pin", "");
+    assert!(
+        !drain_requests(&mut rx)
+            .iter()
+            .any(|f| matches!(f.req, Request::SetPinned { .. }))
+    );
+    let (_, s) = render(&mut app, 100, 30);
+    assert!(s.contains("No active session to pin"), "{s}");
+}
+
+#[test]
+fn history_changed_frame_triggers_list_history_refresh() {
+    let (mut app, mut rx) = test_app_with_requests(false);
+    app.history_list = vec![bg_session("ses_h1", "h1", SessionStatus::Idle, 0)];
+    let _ = drain_requests(&mut rx);
+
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::HistoryChanged));
+    assert!(
+        drain_requests(&mut rx)
+            .iter()
+            .any(|f| matches!(f.req, Request::ListHistory { .. })),
+        "HistoryChanged refreshes cached history"
+    );
+
+    app.history_list.clear();
+    app.open_sessions();
+    let _ = drain_requests(&mut rx);
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::HistoryChanged));
+    assert!(
+        drain_requests(&mut rx)
+            .iter()
+            .any(|f| matches!(f.req, Request::ListHistory { .. })),
+        "HistoryChanged refreshes open /sessions dialog"
+    );
 }

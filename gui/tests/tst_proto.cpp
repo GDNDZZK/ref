@@ -622,6 +622,32 @@ private slots:
 		QCOMPARE(groupsChanged.groups.at(0).members.size(), 1);
 		QCOMPARE(groupsChanged.groups.at(0).members.at(0).sessionId, u"ses_a1b2c3d4"_s);
 	}
+
+	void pinningInfoRequestAndHistoryChangedFrame()
+	{
+		QJsonObject infoJson = fixtureObject(u"server_frame"_s, u"response_create_session"_s)
+		                           .value(u"result"_s)
+		                           .toObject()
+		                           .value(u"session"_s)
+		                           .toObject();
+		QVERIFY(!parsedOrFail(parseSessionInfo(infoJson)).isPinned());
+
+		infoJson.insert(u"pinned_at"_s, QJsonValue::Null);
+		QVERIFY(!parsedOrFail(parseSessionInfo(infoJson)).isPinned());
+
+		infoJson.insert(u"pinned_at"_s, qint64(1700000123456));
+		const SessionInfo pinned = parsedOrFail(parseSessionInfo(infoJson));
+		QVERIFY(pinned.isPinned());
+		QCOMPARE(pinned.pinnedAt, qint64(1700000123456));
+
+		const QJsonObject pinReq = request::setPinned(u"ses_a1b2c3d4"_s, true);
+		QCOMPARE(pinReq, (QJsonObject{{u"op"_s, u"set_pinned"_s}, {u"session_id"_s, u"ses_a1b2c3d4"_s}, {u"pinned"_s, true}}));
+		const QJsonObject unpinReq = request::setPinned(u"ses_a1b2c3d4"_s, false);
+		QCOMPARE(unpinReq, (QJsonObject{{u"op"_s, u"set_pinned"_s}, {u"session_id"_s, u"ses_a1b2c3d4"_s}, {u"pinned"_s, false}}));
+
+		const auto historyChanged = parsedOrFail(parseServerFrame({{u"kind"_s, u"history_changed"_s}}));
+		QVERIFY(std::holds_alternative<HistoryChangedFrame>(historyChanged));
+	}
 };
 QTEST_GUILESS_MAIN(TestProto)
 #include "tst_proto.moc"

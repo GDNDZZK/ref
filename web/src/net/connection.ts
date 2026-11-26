@@ -215,6 +215,7 @@ export class RefConnection {
       case 'notify':
       case 'config_changed':
       case 'groups_changed':
+      case 'history_changed':
         for (const listener of [...this.frameListeners]) this.callListener(() => listener(frame))
         return
       default:

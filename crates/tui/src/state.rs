@@ -948,6 +948,7 @@ mod tests {
             name: "n".into(),
             agent: "build".into(),
             attached: 1,
+            pinned_at: None,
             ..crate::util::placeholder_info("s", "/")
         }
     }

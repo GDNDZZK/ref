@@ -6,7 +6,7 @@ use std::time::Duration;
 use futures_util::{SinkExt as _, StreamExt as _};
 use ref_proto::{
     ClientFrame, ERR_PROTOCOL_MISMATCH, Message, NotifyKind, PROTOCOL_VERSION, Request,
-    ServerFrame, SessionSnapshot, StashGroup,
+    ServerFrame, SessionInfo, SessionSnapshot, StashGroup,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -209,6 +209,20 @@ impl RefClient {
             })
             .await?;
         parse_field(&res, "retried")
+    }
+
+    pub async fn set_pinned(
+        &self,
+        session_id: &str,
+        pinned: bool,
+    ) -> Result<SessionInfo, ClientError> {
+        let res = self
+            .request(Request::SetPinned {
+                session_id: session_id.to_string(),
+                pinned,
+            })
+            .await?;
+        parse_field(&res, "session")
     }
 
     pub async fn list_groups(&self) -> Result<Vec<StashGroup>, ClientError> {
@@ -762,9 +776,7 @@ fn handle_text_frame(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ref_proto::{
-        MessageLayoutMeta, PartLayoutMeta, Role, SessionInfo, SessionStatus, StashMember,
-    };
+    use ref_proto::{MessageLayoutMeta, PartLayoutMeta, Role, SessionStatus, StashMember};
     use serde_json::json;
     use tokio::net::TcpListener;
 
@@ -813,6 +825,7 @@ mod tests {
             todos: Vec::new(),
             busy_since: None,
             last_error: None,
+            pinned_at: None,
         }
     }
 
@@ -893,6 +906,11 @@ mod tests {
                     "end_seq": end_seq.unwrap_or(1),
                 }))],
                 Request::RetryNow { .. } => vec![ok(json!({ "retried": true }))],
+                Request::SetPinned { session_id, pinned } => {
+                    let mut info = sample_info(&session_id);
+                    info.pinned_at = pinned.then_some(12345);
+                    vec![ok(json!({ "session": info }))]
+                }
                 Request::ListGroups => vec![ok(json!({ "groups": [sample_group("g1", "Work")] }))],
                 Request::StashAll { .. } => vec![ok(json!({
                     "group": sample_group("g1", "Stash"),
@@ -947,6 +965,10 @@ mod tests {
         assert_eq!(page.messages.len(), 1);
 
         assert!(client.retry_now("ses_1").await.unwrap());
+        assert_eq!(
+            client.set_pinned("ses_1", true).await.unwrap().pinned_at,
+            Some(12345)
+        );
         assert_eq!(client.list_groups().await.unwrap().len(), 1);
         assert!(
             client

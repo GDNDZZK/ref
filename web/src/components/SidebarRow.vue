@@ -38,6 +38,7 @@ const emit = defineEmits<{
   detach: []
   close: []
   rename: [name: string]
+  pin: [pinned: boolean]
   dragStart: [clientY: number]
   dragMove: [clientY: number]
   dragEnd: []
@@ -53,6 +54,7 @@ const state = computed(() => rowState(props.info))
 const attention = computed(() => needsAttention(state.value))
 const progress = computed(() => todoProgress(props.info.todos))
 const title = computed(() => liveLabel(props.info))
+const pinned = computed(() => props.info.pinned_at != null)
 
 // Line 2: what the session is doing, or else where it is and for how long.
 const note = computed(() => {
@@ -120,6 +122,7 @@ const menuCoords = ref({ x: 0, y: 0 })
 const menuOpen = ref(false)
 const menuMounted = ref(false)
 const menuItems = computed<MenuItem[]>(() => [
+  { label: pinned.value ? t('sidebar.unpin') : t('sidebar.pin'), run: () => emit('pin', !pinned.value) },
   { label: t('sidebar.rename'), run: () => void startRename() },
   ...(props.canDetach ? [{ label: t('sidebar.moveToBackground'), run: () => emit('detach') }] : []),
   { label: t('sidebar.filterSpawnedHistory'), run: () => emit('filterSpawned') },
@@ -187,7 +190,7 @@ function cancelPendingHold(): void {
 function onPointerDown(event: PointerEvent): void {
   if (!props.reorderable || editing.value || event.button !== 0 || activePointerId !== undefined) return
   const target = event.target instanceof Element ? event.target : null
-  if (target?.closest('button.close, input.edit')) return
+  if (target?.closest('button.close, button.pin, input.edit')) return
   clearSuppressTimer()
   suppressNextClick = false
   activePointerId = event.pointerId
@@ -315,9 +318,27 @@ onBeforeUnmount(() => {
           {{ progress.done }}/{{ progress.total }}
         </span>
       </span>
-      <button type="button" class="close" :aria-label="t('sidebar.close')" @click.stop="emit('close')">
-        <Icon icon="close-16" />
-      </button>
+      <span class="actions" :class="{ pinned }">
+        <button
+          type="button"
+          class="action pin"
+          :class="{ pinned }"
+          :title="pinned ? t('sidebar.unpin') : t('sidebar.pin')"
+          :aria-label="pinned ? t('sidebar.unpin') : t('sidebar.pin')"
+          @click.stop="emit('pin', !pinned)"
+        >
+          <Icon icon="pin-16" />
+        </button>
+        <button
+          type="button"
+          class="action close"
+          :title="t('sidebar.close')"
+          :aria-label="t('sidebar.close')"
+          @click.stop="emit('close')"
+        >
+          <Icon icon="close-16" />
+        </button>
+      </span>
     </span>
     <span class="subtitle" :class="note?.tone">{{ note ? note.text : locationLabel }}</span>
     <ContextMenu
@@ -430,6 +451,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  gap: 4px;
   min-width: 22px;
   height: 22px;
 }
@@ -461,9 +483,20 @@ onBeforeUnmount(() => {
   color: var(--warning-text);
 }
 
-.close {
+.actions {
   position: absolute;
   right: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.actions.pinned {
+  position: relative;
+  gap: 0;
+}
+
+.action {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -475,16 +508,39 @@ onBeforeUnmount(() => {
   pointer-events: none;
   transition:
     opacity var(--motion-quick) var(--motion-ease),
-    background-color var(--motion-quick) var(--motion-ease);
+    background-color var(--motion-quick) var(--motion-ease),
+    color var(--motion-quick) var(--motion-ease),
+    width var(--motion-quick) var(--motion-ease);
 }
 
-.close:hover {
+.action:hover {
   background: var(--surface);
   color: var(--text);
 }
 
-.row:hover .close,
-.row:focus-within .close {
+.actions.pinned .close {
+  width: 0;
+  overflow: hidden;
+}
+
+.pin.pinned {
+  color: var(--accent-text);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.pin.pinned:hover {
+  color: var(--accent-text);
+}
+
+.row:hover .actions.pinned,
+.row:focus-within .actions.pinned {
+  gap: 2px;
+}
+
+.row:hover .action,
+.row:focus-within .action {
+  width: 22px;
   opacity: 1;
   pointer-events: auto;
 }

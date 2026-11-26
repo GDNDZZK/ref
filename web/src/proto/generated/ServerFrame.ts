@@ -15,4 +15,4 @@ code?: string | null, } | { "kind": "event", session_id: string, event: SessionE
 /**
  * Not called `kind`: that is the tag of `ServerFrame`.
  */
-notify_kind: NotifyKind, session_title: string, detail: string | null, } | { "kind": "config_changed", warnings: Array<string>, } | { "kind": "groups_changed", groups: Array<StashGroup>, };
+notify_kind: NotifyKind, session_title: string, detail: string | null, } | { "kind": "config_changed", warnings: Array<string>, } | { "kind": "groups_changed", groups: Array<StashGroup>, } | { "kind": "history_changed" };

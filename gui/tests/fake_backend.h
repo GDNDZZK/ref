@@ -30,8 +30,8 @@ struct SessionJson
 	int attached = 0;
 	bool live = true;
 	std::optional<QString> parent{};
+	std::optional<qint64> pinnedAt{};
 };
-
 // A `SessionInfo` as the backend sends it.
 inline QJsonObject sessionInfoJson(const QString& id, const SessionJson& fields = {})
 {
@@ -49,6 +49,10 @@ inline QJsonObject sessionInfoJson(const QString& id, const SessionJson& fields 
 	if(fields.parent)
 	{
 		obj.insert(QStringLiteral("parent"), *fields.parent);
+	}
+	if(fields.pinnedAt)
+	{
+		obj.insert(QStringLiteral("pinned_at"), *fields.pinnedAt);
 	}
 	return obj;
 }

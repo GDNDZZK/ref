@@ -176,6 +176,12 @@ pub enum Pending {
     CreateGroup,
     RestoreGroup,
     RestoreGroupMember,
+    /// `ListHistory` triggered by `/pin <query>` when history was not yet loaded.
+    PinSession {
+        query: String,
+    },
+    /// `SetPinned` response carrying `{ session }`.
+    SetPinned,
 }
 
 /// Error from a `ServerFrame::Response` with `ok: false`.
@@ -284,6 +290,13 @@ pub const COMMANDS: &[Cmd] = &[
         desc: "Rename the session",
         key: "",
         requires_args: true,
+    },
+    Cmd {
+        name: cmd::PIN,
+        aliases: &[],
+        desc: "Pin or unpin session (current, or by name / id)",
+        key: "",
+        requires_args: false,
     },
     Cmd {
         name: cmd::CD,
@@ -1172,6 +1185,25 @@ impl App {
                 self.groups_loaded = true;
                 self.sync_stash_dialog();
             }
+            ServerFrame::HistoryChanged => {
+                if matches!(&self.dialog, Some(Dialog::List(d)) if d.kind == Kind::Sessions) {
+                    if self.session_dialog_filter() != Some((None, None)) {
+                        self.history_loaded = false;
+                    }
+                    self.request_sessions_history();
+                } else if self.history_loaded || !self.history_list.is_empty() {
+                    self.history_inflight = true;
+                    self.req(
+                        Request::ListHistory {
+                            cwd: None,
+                            limit: Some(HISTORY_LIST_LIMIT),
+                            creator: None,
+                            query: None,
+                        },
+                        Pending::HistoryBg,
+                    );
+                }
+            }
         }
     }
 
@@ -1263,6 +1295,10 @@ impl App {
             Pending::SwitchSession { query } => {
                 self.history_inflight = self.has_history_inflight();
                 self.switch_session_by_query(&query, true);
+            }
+            Pending::PinSession { query } => {
+                self.history_inflight = self.has_history_inflight();
+                self.pin_session_by_query(&query, true);
             }
             Pending::Continue => {
                 self.init = None;
@@ -1397,6 +1433,7 @@ impl App {
                     self.history_loaded = true;
                     self.history_list = s;
                     self.update_autocomplete();
+                    self.refresh_session_dialog();
                 }
             }
             Pending::SwitchSession { query } => {
@@ -1406,6 +1443,14 @@ impl App {
                     self.history_list = s;
                 }
                 self.switch_session_by_query(&query, true);
+            }
+            Pending::PinSession { query } => {
+                self.history_inflight = self.has_history_inflight();
+                if let Ok(s) = sessions_of(&result) {
+                    self.history_loaded = true;
+                    self.history_list = s;
+                }
+                self.pin_session_by_query(&query, true);
             }
             Pending::Continue => self.on_continue_response(&result),
             Pending::Undo { sid, count } => {
@@ -1531,6 +1576,39 @@ impl App {
                 Err(e) => self
                     .toasts
                     .error(format!("Malformed set_variant response: {e}")),
+            },
+            Pending::SetPinned => match session_info_of(&result) {
+                Ok(info) => {
+                    let pinned = info.pinned_at.is_some();
+                    let label = if info.name.is_empty() {
+                        info.id.clone()
+                    } else {
+                        info.name.clone()
+                    };
+                    if let Some(v) = self.views.get_mut(&info.id) {
+                        v.set_info(info.clone());
+                    }
+                    if let Some(s) = self.live.iter_mut().find(|s| s.id == info.id) {
+                        *s = info.clone();
+                    }
+                    if let Some(s) = self.history_list.iter_mut().find(|s| s.id == info.id) {
+                        *s = info.clone();
+                    }
+                    if let Some((_, _, list)) = &mut self.history_filtered
+                        && let Some(s) = list.iter_mut().find(|s| s.id == info.id)
+                    {
+                        *s = info;
+                    }
+                    self.refresh_session_dialog();
+                    self.toasts.info(if pinned {
+                        format!("Pinned \"{label}\"")
+                    } else {
+                        format!("Unpinned \"{label}\"")
+                    });
+                }
+                Err(e) => self
+                    .toasts
+                    .error(format!("Malformed set_pinned response: {e}")),
             },
             Pending::Export => match parse_field::<String>(&result, "path") {
                 Ok(p) => self.toasts.info(format!("Exported to {p}")),
@@ -2646,7 +2724,10 @@ impl App {
         self.pending.values().any(|p| {
             matches!(
                 p,
-                Pending::HistoryDialog { .. } | Pending::HistoryBg | Pending::SwitchSession { .. }
+                Pending::HistoryDialog { .. }
+                    | Pending::HistoryBg
+                    | Pending::SwitchSession { .. }
+                    | Pending::PinSession { .. }
             )
         })
     }
@@ -2733,7 +2814,7 @@ impl App {
         self.history_filtered = None;
         self.sessions_due = None;
         let mut d = ListDialog::new(Kind::Sessions, "Sessions", Vec::new())
-            .with_hint("enter open · tab filter · ctrl+d close live / delete history · esc");
+            .with_hint("enter open · tab filter · ctrl+k pin · ctrl+d close/delete · esc");
         if let Some(q) = initial_filter.filter(|q| !q.is_empty()) {
             d.filter.set_text(q);
         }
@@ -2812,7 +2893,13 @@ impl App {
         };
         let mut items = Vec::new();
         let mut live: Vec<&SessionInfo> = self.live.iter().filter(|s| s.live).collect();
-        live.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
+        live.sort_by_key(|s| {
+            (
+                std::cmp::Reverse(s.pinned_at.is_some()),
+                std::cmp::Reverse(s.pinned_at.unwrap_or(0)),
+                std::cmp::Reverse(s.updated_at),
+            )
+        });
         for s in &live {
             let current = self.current.as_deref() == Some(s.id.as_str());
             let model = find_model(models, &s.model)
@@ -2862,15 +2949,26 @@ impl App {
                 spinner: !s.status.is_idle() && !current,
                 keywords,
                 creator: creator_info.map(|(pid, cname, _)| (pid, cname)),
+                pinned: s.pinned_at.is_some(),
             });
         }
         let live_ids: HashSet<&str> = live.iter().map(|s| s.id.as_str()).collect();
-        let history: &[SessionInfo] = if close_only {
-            &[]
+        let mut history: Vec<&SessionInfo> = if close_only {
+            Vec::new()
         } else {
-            &active_history_owned
+            active_history_owned
+                .iter()
+                .filter(|s| !live_ids.contains(s.id.as_str()))
+                .collect()
         };
-        for s in history.iter().filter(|s| !live_ids.contains(s.id.as_str())) {
+        history.sort_by_key(|s| {
+            (
+                std::cmp::Reverse(s.pinned_at.is_some()),
+                std::cmp::Reverse(s.pinned_at.unwrap_or(0)),
+                std::cmp::Reverse(s.updated_at),
+            )
+        });
+        for s in history {
             let title = if s.title.trim().is_empty() {
                 s.name.clone()
             } else {
@@ -2895,6 +2993,7 @@ impl App {
                 section: "History".into(),
                 keywords,
                 creator: creator_info.map(|(pid, cname, _)| (pid, cname)),
+                pinned: s.pinned_at.is_some(),
                 ..Default::default()
             });
         }
@@ -3397,6 +3496,50 @@ impl App {
         }
     }
 
+    /// Sends `SetPinned` to toggle `session_id`'s pin state.
+    pub fn toggle_pin_session(&mut self, session_id: &str, currently_pinned: bool) {
+        self.req(
+            Request::SetPinned {
+                session_id: session_id.to_string(),
+                pinned: !currently_pinned,
+            },
+            Pending::SetPinned,
+        );
+    }
+
+    /// ctrl+k in the sessions dialog: pin or unpin the selected session (live or history).
+    pub fn dialog_toggle_pin(&mut self) {
+        let Some(Dialog::List(d)) = self.dialog.as_mut() else {
+            return;
+        };
+        if d.kind != Kind::Sessions {
+            return;
+        }
+        d.confirm = None;
+        let Some(key) = d.selected().map(|i| i.key.clone()) else {
+            return;
+        };
+        let (sid, currently_pinned) = if let Some(sid) = key.strip_prefix(LIVE_KEY_PREFIX) {
+            let pinned = self
+                .live
+                .iter()
+                .find(|s| s.id == sid)
+                .is_some_and(|s| s.pinned_at.is_some());
+            (sid.to_string(), pinned)
+        } else if let Some(sid) = key.strip_prefix(HISTORY_KEY_PREFIX) {
+            let pinned = self
+                .active_dialog_history()
+                .iter()
+                .chain(self.history_list.iter())
+                .find(|s| s.id == sid)
+                .is_some_and(|s| s.pinned_at.is_some());
+            (sid.to_string(), pinned)
+        } else {
+            return;
+        };
+        self.toggle_pin_session(&sid, currently_pinned);
+    }
+
     // -----------------------------------------------------------------------
     // Closing sessions / undo
     // -----------------------------------------------------------------------
@@ -3849,6 +3992,30 @@ impl App {
                             ok: format!("Renamed to \"{args}\""),
                         },
                     );
+                }
+            }
+            cmd::PIN => {
+                if args.is_empty() {
+                    match target_sid {
+                        Some(sid) => {
+                            let pinned = self
+                                .views
+                                .get(&sid)
+                                .map(|v| v.info.pinned_at.is_some())
+                                .or_else(|| {
+                                    self.live
+                                        .iter()
+                                        .chain(self.history_list.iter())
+                                        .find(|s| s.id == sid)
+                                        .map(|s| s.pinned_at.is_some())
+                                })
+                                .unwrap_or(false);
+                            self.toggle_pin_session(&sid, pinned);
+                        }
+                        None => self.toasts.info("No active session to pin"),
+                    }
+                } else {
+                    self.pin_session_by_query(args, false);
                 }
             }
             cmd::PEERS | cmd::PEERS_NAME | cmd::PEERS_INBOX | cmd::PEERS_OUTBOX => {
@@ -4784,6 +4951,64 @@ impl App {
         }
     }
 
+    fn pin_session_by_query(&mut self, raw: &str, history_checked: bool) {
+        let q = raw.trim().trim_matches(|c| c == '"' || c == '\'');
+        let mut all: Vec<SessionInfo> = self.live.iter().filter(|s| s.live).cloned().collect();
+        let live_ids: HashSet<String> = all.iter().map(|s| s.id.clone()).collect();
+        for h in &self.history_list {
+            if !live_ids.contains(&h.id) {
+                all.push(h.clone());
+            }
+        }
+        if let Some(s) = all.iter().find(|s| s.id == q || s.name == q) {
+            let sid = s.id.clone();
+            let pinned = s.pinned_at.is_some();
+            self.toggle_pin_session(&sid, pinned);
+            return;
+        }
+        let lq = q.to_lowercase();
+        let ci_exact: Vec<&SessionInfo> = all
+            .iter()
+            .filter(|s| s.id.to_lowercase() == lq || s.name.to_lowercase() == lq)
+            .collect();
+        if let [s] = ci_exact.as_slice() {
+            let sid = s.id.clone();
+            let pinned = s.pinned_at.is_some();
+            self.toggle_pin_session(&sid, pinned);
+            return;
+        }
+        if !history_checked && !self.history_loaded && self.connected {
+            if let Some(p) = self
+                .pending
+                .values_mut()
+                .find(|p| matches!(p, Pending::HistoryBg))
+            {
+                *p = Pending::PinSession {
+                    query: q.to_string(),
+                };
+                return;
+            }
+            self.history_inflight = true;
+            self.req(
+                Request::ListHistory {
+                    cwd: None,
+                    limit: Some(HISTORY_LIST_LIMIT),
+                    creator: None,
+                    query: None,
+                },
+                Pending::PinSession {
+                    query: q.to_string(),
+                },
+            );
+            return;
+        }
+        if ci_exact.len() > 1 {
+            self.toasts.warn(format!("Multiple sessions match \"{q}\""));
+        } else {
+            self.toasts.warn(format!("No session matching \"{q}\""));
+        }
+    }
+
     /// `/close-session [s1 s2 ...]`: picker without args, else closes one or more live sessions.
     fn close_by_name(&mut self, args: &str) {
         if args.is_empty() {
@@ -5268,7 +5493,7 @@ impl App {
                 );
                 true
             }
-            cmd::SESSIONS => {
+            cmd::SESSIONS | cmd::PIN => {
                 self.ensure_history_loaded();
                 let items = self.session_arg_completions(arg_raw);
                 let prev = self.ac.take();

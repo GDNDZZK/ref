@@ -946,7 +946,11 @@ void Workspace::moveRunningSession(const QString& sessionId, int toIndex)
 	{
 		return;
 	}
-	const int clamped = std::clamp(toIndex, 0, count - 1);
+	const int pinnedCount = live.pinnedCount();
+	const bool movingPinned = live.isPinnedAt(fromIndex);
+	const int minIndex = movingPinned ? 0 : pinnedCount;
+	const int maxIndex = movingPinned ? std::max(0, pinnedCount - 1) : count - 1;
+	const int clamped = std::clamp(toIndex, minIndex, maxIndex);
 	if(clamped == fromIndex)
 	{
 		return;
@@ -1025,11 +1029,27 @@ void Workspace::dropChat(const QString& sessionId)
 void Workspace::onLiveChanged()
 {
 	QHash<QString, QString> now;
+	QSet<QString> nowPinned;
+	struct NewlyPinned
+	{
+		QString id;
+		qint64 pinnedAt = 0;
+	};
+	QList<NewlyPinned> newlyPinned;
 	for(const refgui::proto::SessionInfo& info : m_directory.liveSessions())
 	{
 		now.insert(info.id, info.cwd);
+		if(info.isPinned())
+		{
+			nowPinned.insert(info.id);
+			if(m_seenLive.contains(info.id) && !m_pinnedLive.contains(info.id))
+			{
+				newlyPinned.append({info.id, info.pinnedAt.value_or(0)});
+			}
+		}
 	}
 	const QHash<QString, QString> before = std::exchange(m_seenLive, now);
+	m_pinnedLive = std::move(nowPinned);
 	for(auto it = before.cbegin(); it != before.cend(); ++it)
 	{
 		if(!now.contains(it.key()))
@@ -1049,6 +1069,17 @@ void Workspace::onLiveChanged()
 			if(now.contains(id))
 			{
 				pruned.append(id);
+			}
+		}
+		if(!newlyPinned.isEmpty())
+		{
+			std::ranges::sort(newlyPinned, [](const NewlyPinned& a, const NewlyPinned& b) {
+				return a.pinnedAt < b.pinnedAt;
+			});
+			for(const NewlyPinned& pinnedInfo : newlyPinned)
+			{
+				pruned.removeAll(pinnedInfo.id);
+				pruned.prepend(pinnedInfo.id);
 			}
 		}
 		if(pruned != currentOrder)

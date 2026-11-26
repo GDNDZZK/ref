@@ -190,6 +190,7 @@ public:
 	// Removes the session from history for good.
 	Q_INVOKABLE void deleteHistory(const QString& sessionId);
 	Q_INVOKABLE void renameSession(const QString& sessionId, const QString& name, const QJSValue& cb = {});
+	Q_INVOKABLE void setSessionPinned(const QString& sessionId, bool pinned, const QJSValue& cb = {});
 	Q_INVOKABLE void moveRunningSession(const QString& sessionId, int toIndex);
 	Q_INVOKABLE void setSessionCwd(const QString& sessionId, const QString& path, const QJSValue& cb = {});
 	Q_INVOKABLE void setModel(const QString& sessionId, const QString& provider, const QString& model, const QString& variant = {});
@@ -376,6 +377,7 @@ private:
 	TileStage m_stage{&m_tiles};
 	ChatSession* m_current = nullptr;
 	QHash<QString, QString> m_seenLive; // sessions that were in the live list, with their directory; one that leaves it was closed
+	QSet<QString> m_pinnedLive;
 	QSet<QString> m_leaving; // closed sessions that the backend may still list; they must not come back
 	QString m_failure;
 	QString m_dialog;
