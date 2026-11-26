@@ -83,10 +83,10 @@ Item {
 	}
 
 	HoverHandler { cursorShape: Qt.PointingHandCursor }
-	TapHandler { onTapped: popup.visible ? popup.close() : popup.open() }
+	TapHandler { onTapped: popup.opened ? popup.close() : popup.open() }
 	Accessible.role: Accessible.Button
 	Accessible.name: qsTr("Todo %1").arg(root.counts)
-	Accessible.onPressAction: popup.visible ? popup.close() : popup.open()
+	Accessible.onPressAction: popup.opened ? popup.close() : popup.open()
 
 	Popup {
 		id: popup
@@ -99,8 +99,16 @@ Item {
 		height: popupInner.height * uiScale
 		padding: 0
 		focus: true
-		closePolicy: Popup.CloseOnPressOutside
+		closePolicy: Popup.CloseOnPressOutsideParent
 		background: null
+
+		enter: Transition {
+			NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Motion.quick; easing.type: Motion.ease }
+			NumberAnimation { property: "scale"; from: Motion.popScale; to: 1; duration: Motion.quick; easing.type: Motion.ease }
+		}
+		exit: Transition {
+			NumberAnimation { property: "opacity"; to: 0; duration: Motion.quick; easing.type: Motion.ease }
+		}
 
 		onAboutToShow: x = Math.max(root.mapFromItem(root.bounds, 0, 0).x, root.width - popupInner.width)
 

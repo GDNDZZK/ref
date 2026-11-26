@@ -478,8 +478,12 @@ Item {
 				}
 
 				Keys.onPressed: event => {
-					if (input.inputMethodComposing)
+					const composingPreedit = input.inputMethodComposing && input.preeditText !== ""
+					if (composingPreedit) {
+						if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+							event.accepted = true
 						return
+					}
 					input.preSnapCursor = -1
 					composer.keyOffered(event)
 					if (event.accepted)

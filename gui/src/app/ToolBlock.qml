@@ -307,7 +307,8 @@ Block {
 		Item {
 			id: body
 
-			property real openProgress: block.open ? 1 : 0
+			property bool bodyLoaded: false
+			property real openProgress: block.open && bodyLoaded ? 1 : 0
 			readonly property real contentHeight: bodyLoader.item ? (bodyLoader.item as Item).height : 0
 
 			y: header.height + failure.height + previewBox.height
@@ -349,6 +350,18 @@ Block {
 					call: block
 					onShowAllRequested: block.chat.model.toggleShowAll(block.index)
 				}
+				onLoaded: {
+					if (!block.ready) {
+						body.bodyLoaded = true
+						return
+					}
+					Qt.callLater(() => {
+						if (!bodyLoader || !bodyLoader.item || !block || !block.open)
+							return
+						body.bodyLoaded = true
+					})
+				}
+				onActiveChanged: if (!active) body.bodyLoaded = false
 			}
 		}
 

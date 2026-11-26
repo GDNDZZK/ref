@@ -156,11 +156,19 @@ Item {
 			anchors.fill: parent
 			acceptedButtons: Qt.NoButton
 			onWheel: wheel => {
-				const delta = wheel.angleDelta.y !== 0 ? wheel.angleDelta.y : wheel.pixelDelta.y
-				if (delta > 0)
-					lightbox.zoomBy(lightbox.wheelZoomStep)
-				else if (delta < 0)
-					lightbox.zoomBy(1 / lightbox.wheelZoomStep)
+				const angleY = wheel.angleDelta.y
+				const pixelY = wheel.pixelDelta.y
+				const delta = pixelY !== 0 ? pixelY : angleY
+				if (delta !== 0) {
+					const isCtrl = (wheel.modifiers & Qt.ControlModifier) !== 0
+					const isSmooth = isCtrl || pixelY !== 0 || Math.abs(angleY) < 120
+					if (isSmooth)
+						lightbox.zoomBy(Math.exp(delta / 420))
+					else if (delta > 0)
+						lightbox.zoomBy(lightbox.wheelZoomStep)
+					else
+						lightbox.zoomBy(1 / lightbox.wheelZoomStep)
+				}
 				wheel.accepted = true
 			}
 		}
@@ -177,6 +185,34 @@ Item {
 		scale: lightbox.shown ? 1 : lightbox.closedScale
 
 		Behavior on scale { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+
+		PinchHandler {
+			id: pinchHandler
+			target: null
+			acceptedDevices: PointerDevice.TouchScreen | PointerDevice.TouchPad
+			enabled: lightbox.shown
+			property real startZoom: 1.0
+			property real startPanX: 0
+			property real startPanY: 0
+			onActiveChanged: {
+				if (active) {
+					startZoom = lightbox.zoom
+					startPanX = lightbox.panX
+					startPanY = lightbox.panY
+				}
+			}
+			onActiveScaleChanged: {
+				if (!active)
+					return
+				lightbox.setZoom(startZoom * activeScale)
+			}
+			onActiveTranslationChanged: {
+				if (!active || lightbox.zoom <= 1.0)
+					return
+				lightbox.panX = startPanX + activeTranslation.x
+				lightbox.panY = startPanY + activeTranslation.y
+			}
+		}
 
 		Item {
 			id: stage
@@ -203,18 +239,23 @@ Item {
 				id: panArea
 				anchors.fill: parent
 				acceptedButtons: Qt.LeftButton
+				enabled: !pinchHandler.active
 				cursorShape: lightbox.zoom > 1.0 ? (pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor) : Qt.ArrowCursor
 				property real lastX: 0
 				property real lastY: 0
 
 				onPressed: mouse => {
+					if (pinchHandler.active) {
+						mouse.accepted = false
+						return
+					}
 					const pt = panArea.mapToItem(viewport, mouse.x, mouse.y)
 					lastX = pt.x
 					lastY = pt.y
 					mouse.accepted = true
 				}
 				onPositionChanged: mouse => {
-					if (!pressed || lightbox.zoom <= 1.0)
+					if (!pressed || pinchHandler.active || lightbox.zoom <= 1.0)
 						return
 					const pt = panArea.mapToItem(viewport, mouse.x, mouse.y)
 					lightbox.panX += pt.x - lastX

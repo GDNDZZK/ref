@@ -125,6 +125,45 @@ describe('Composer', () => {
     expect(api.prompt).not.toHaveBeenCalled()
   })
 
+  it('prevents Enter from inserting a newline while an IME is composing without preventing Process', async () => {
+    const { wrapper, api } = setup()
+    await type(wrapper, 'ni')
+    const area = wrapper.get('textarea').element
+
+    const composingEnter = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      isComposing: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    area.dispatchEvent(composingEnter)
+    await flushPromises()
+    expect(composingEnter.defaultPrevented).toBe(true)
+    expect(api.prompt).not.toHaveBeenCalled()
+
+    const ime229Enter = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      keyCode: 229,
+      bubbles: true,
+      cancelable: true,
+    })
+    area.dispatchEvent(ime229Enter)
+    await flushPromises()
+    expect(ime229Enter.defaultPrevented).toBe(true)
+    expect(api.prompt).not.toHaveBeenCalled()
+
+    const imeProcess = new KeyboardEvent('keydown', {
+      key: 'Process',
+      keyCode: 229,
+      bubbles: true,
+      cancelable: true,
+    })
+    area.dispatchEvent(imeProcess)
+    await flushPromises()
+    expect(imeProcess.defaultPrevented).toBe(false)
+    expect(api.prompt).not.toHaveBeenCalled()
+  })
+
   it('does not send blank text', async () => {
     const { wrapper, api } = setup()
     await type(wrapper, '  \n ')

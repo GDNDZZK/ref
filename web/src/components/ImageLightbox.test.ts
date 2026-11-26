@@ -227,4 +227,197 @@ describe('ImageLightbox', () => {
       globalThis.ResizeObserver = originalResizeObserver
     }
   })
+
+  it('smoothly zooms on ctrl+wheel trackpad pinch without jumping by 1.15x', async () => {
+    const wrapper = mount(ImageLightbox, {
+      props: { url: 'https://example.invalid/pic.png', caption: 'pic' },
+      attachTo: document.body,
+      global: { plugins: [createAppI18n(['en'])] },
+    })
+
+    const picture = document.body.querySelector('.picture') as HTMLElement
+    const zoomReset = () => document.body.querySelector('.zoom-reset')?.textContent?.trim()
+
+    const pinchIn = new WheelEvent('wheel', {
+      deltaY: -4,
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    picture.dispatchEvent(pinchIn)
+    expect(pinchIn.defaultPrevented).toBe(true)
+    await nextTick()
+    expect(zoomReset()).toBe('104%')
+
+    picture.dispatchEvent(
+      new WheelEvent('wheel', { deltaY: -6, ctrlKey: true, bubbles: true, cancelable: true }),
+    )
+    await nextTick()
+    expect(zoomReset()).toBe('110%')
+
+    picture.dispatchEvent(
+      new WheelEvent('wheel', { deltaY: 10, ctrlKey: true, bubbles: true, cancelable: true }),
+    )
+    await nextTick()
+    expect(zoomReset()).toBe('100%')
+
+    wrapper.unmount()
+  })
+
+  it('supports 2-finger touchscreen pinch-to-zoom and cleans up on release without closing', async () => {
+    const wrapper = mount(ImageLightbox, {
+      props: { url: 'https://example.invalid/pic.png', caption: 'pic' },
+      attachTo: document.body,
+      global: { plugins: [createAppI18n(['en'])] },
+    })
+
+    const scrim = document.body.querySelector('.scrim') as HTMLElement
+    const picture = document.body.querySelector('img.picture') as HTMLElement
+    const zoomReset = () => document.body.querySelector('.zoom-reset')?.textContent?.trim()
+
+    // Two touch fingers down on the image (bubbles to .stage even at 1x).
+    picture.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        pointerId: 11,
+        pointerType: 'touch',
+        clientX: 100,
+        clientY: 100,
+        bubbles: true,
+      }),
+    )
+    picture.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        pointerId: 12,
+        pointerType: 'touch',
+        clientX: 200,
+        clientY: 100,
+        bubbles: true,
+      }),
+    )
+    await nextTick()
+    expect(picture.classList.contains('pinching')).toBe(true)
+
+    // Spread fingers to 2x distance (100px -> 200px) and shift midpoint (+20, +10).
+    picture.dispatchEvent(
+      new PointerEvent('pointermove', {
+        pointerId: 11,
+        pointerType: 'touch',
+        clientX: 70,
+        clientY: 110,
+        bubbles: true,
+      }),
+    )
+    picture.dispatchEvent(
+      new PointerEvent('pointermove', {
+        pointerId: 12,
+        pointerType: 'touch',
+        clientX: 270,
+        clientY: 110,
+        bubbles: true,
+      }),
+    )
+    await nextTick()
+    expect(zoomReset()).toBe('200%')
+    expect(picture.classList.contains('zoomed')).toBe(true)
+    expect(picture.style.transform).toContain('translate3d(20px, 10px, 0) scale(2)')
+
+    // Release fingers; immediate click on scrim must not close the lightbox.
+    picture.dispatchEvent(
+      new PointerEvent('pointerup', {
+        pointerId: 12,
+        pointerType: 'touch',
+        clientX: 270,
+        clientY: 110,
+        bubbles: true,
+      }),
+    )
+    picture.dispatchEvent(
+      new PointerEvent('pointerup', {
+        pointerId: 11,
+        pointerType: 'touch',
+        clientX: 70,
+        clientY: 110,
+        bubbles: true,
+      }),
+    )
+    await nextTick()
+    expect(picture.classList.contains('pinching')).toBe(false)
+
+    scrim.click()
+    expect(wrapper.emitted('close')).toBeUndefined()
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    scrim.click()
+    expect(wrapper.emitted('close')).toHaveLength(1)
+
+    wrapper.unmount()
+  })
+
+  it('cleans up touch pointers on lostpointercapture and clamps ctrl+wheel mouse zoom', async () => {
+    const wrapper = mount(ImageLightbox, {
+      props: { url: 'https://example.invalid/pic.png', caption: 'pic' },
+      attachTo: document.body,
+      global: { plugins: [createAppI18n(['en'])] },
+    })
+
+    const stage = document.body.querySelector('.stage') as HTMLElement
+    const picture = document.body.querySelector('img.picture') as HTMLElement
+    const zoomReset = () => document.body.querySelector('.zoom-reset')?.textContent?.trim()
+
+    picture.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        pointerId: 21,
+        pointerType: 'touch',
+        clientX: 100,
+        clientY: 100,
+        bubbles: true,
+      }),
+    )
+    picture.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        pointerId: 22,
+        pointerType: 'touch',
+        clientX: 200,
+        clientY: 100,
+        bubbles: true,
+      }),
+    )
+    await nextTick()
+    expect(picture.classList.contains('pinching')).toBe(true)
+
+    stage.dispatchEvent(new PointerEvent('lostpointercapture', { pointerId: 22, pointerType: 'touch' }))
+    stage.dispatchEvent(new PointerEvent('lostpointercapture', { pointerId: 21, pointerType: 'touch' }))
+    await nextTick()
+    expect(picture.classList.contains('pinching')).toBe(false)
+
+    // A single subsequent touch does not re-enter pinching (no lingering ghost pointer).
+    picture.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        pointerId: 23,
+        pointerType: 'touch',
+        clientX: 120,
+        clientY: 120,
+        bubbles: true,
+      }),
+    )
+    await nextTick()
+    expect(picture.classList.contains('pinching')).toBe(false)
+    picture.dispatchEvent(
+      new PointerEvent('pointerup', { pointerId: 23, pointerType: 'touch', bubbles: true }),
+    )
+
+    // Mouse Ctrl+wheel (deltaY = -120) is clamped instead of jumping ~3.32x.
+    const ctrlMouseWheel = new WheelEvent('wheel', {
+      deltaY: -120,
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    picture.dispatchEvent(ctrlMouseWheel)
+    expect(ctrlMouseWheel.defaultPrevented).toBe(true)
+    await nextTick()
+    expect(zoomReset()).toBe('149%')
+
+    wrapper.unmount()
+  })
 })

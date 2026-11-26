@@ -240,7 +240,11 @@ function onClear(event: KeyboardEvent, area: HTMLTextAreaElement): boolean {
 
 function onKeydown(event: KeyboardEvent): void {
   const area = input.value
-  if (!area || event.isComposing || event.keyCode === IME_PROCESSING_KEY_CODE) return
+  if (!area) return
+  if (event.isComposing || event.keyCode === IME_PROCESSING_KEY_CODE) {
+    if (event.key === Key.Enter) event.preventDefault()
+    return
+  }
   if (props.composer.completion && onListKey(event)) return event.preventDefault()
 
   const handlers: ((event: KeyboardEvent, area: HTMLTextAreaElement) => boolean)[] = [

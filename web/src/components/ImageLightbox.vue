@@ -17,6 +17,10 @@ const MIN_SCALE = 0.25
 const MAX_SCALE = 5
 const BUTTON_ZOOM_STEP = 0.25
 const WHEEL_ZOOM_FACTOR = 1.15
+const PINCH_WHEEL_SENSITIVITY = 0.01
+const WHEEL_LINE_PX = 16
+const WHEEL_PAGE_PX = 400
+const CTRL_WHEEL_DELTA_CLAMP = 40
 const DOUBLE_CLICK_SCALE = 2
 const DRAG_THRESHOLD_PX = 3
 const PERCENT = 100
@@ -59,13 +63,25 @@ const canNext = computed(() => currentIndex.value < items.value.length - 1)
 const scale = ref(1)
 const panX = ref(0)
 const panY = ref(0)
+interface TouchPoint {
+  x: number
+  y: number
+}
+
 const dragging = ref(false)
+const pinching = ref(false)
 let dragPointerId: number | undefined
 let dragStartX = 0
 let dragStartY = 0
 let startPanX = 0
 let startPanY = 0
 let didDrag = false
+const activeTouchPointers = new Map<number, TouchPoint>()
+let pinchStartDistance = 0
+let pinchStartMidpoint: TouchPoint = { x: 0, y: 0 }
+let pinchStartScale = 1
+let pinchStartPanX = 0
+let pinchStartPanY = 0
 let suppressScrimClick = false
 let suppressTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -80,13 +96,29 @@ function clearSuppressTimer(): void {
   suppressTimer = undefined
 }
 
+function scheduleSuppressScrimClick(): void {
+  clearSuppressTimer()
+  suppressScrimClick = true
+  suppressTimer = setTimeout(() => {
+    suppressTimer = undefined
+    suppressScrimClick = false
+  }, 0)
+}
+
+function stopDragging(): void {
+  dragging.value = false
+  dragPointerId = undefined
+  didDrag = false
+}
+
 function resetView(): void {
   scale.value = 1
   panX.value = 0
   panY.value = 0
-  dragging.value = false
-  dragPointerId = undefined
-  didDrag = false
+  stopDragging()
+  pinching.value = false
+  pinchStartDistance = 0
+  activeTouchPointers.clear()
 }
 
 function setScale(next: number): void {
@@ -125,12 +157,33 @@ function goNext(): void {
   emit('update:index', next)
 }
 
+function normalizeWheelDeltaY(event: WheelEvent): number {
+  if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+    return event.deltaY * WHEEL_LINE_PX
+  }
+  if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+    return event.deltaY * WHEEL_PAGE_PX
+  }
+  return event.deltaY
+}
+
 function onWheel(event: WheelEvent): void {
   event.preventDefault()
   event.stopPropagation()
   if (event.deltaY === 0) return
+  if (event.ctrlKey) {
+    const clampedDelta = clamp(normalizeWheelDeltaY(event), -CTRL_WHEEL_DELTA_CLAMP, CTRL_WHEEL_DELTA_CLAMP)
+    setScale(scale.value * Math.exp(-clampedDelta * PINCH_WHEEL_SENSITIVITY))
+    return
+  }
   const next = event.deltaY < 0 ? scale.value * WHEEL_ZOOM_FACTOR : scale.value / WHEEL_ZOOM_FACTOR
   setScale(next)
+}
+
+function isIgnorablePointerCaptureError(error: unknown): boolean {
+  return (
+    error instanceof DOMException && (error.name === 'NotFoundError' || error.name === 'InvalidStateError')
+  )
 }
 
 function trySetPointerCapture(target: HTMLElement | null, pointerId: number): void {
@@ -138,12 +191,79 @@ function trySetPointerCapture(target: HTMLElement | null, pointerId: number): vo
   try {
     target.setPointerCapture(pointerId)
   } catch (error) {
-    if (!(error instanceof DOMException && error.name === 'NotFoundError')) throw error
+    if (!isIgnorablePointerCaptureError(error)) throw error
+  }
+}
+
+function tryReleasePointerCapture(target: HTMLElement | null, pointerId: number): void {
+  if (!target?.hasPointerCapture?.(pointerId)) return
+  try {
+    target.releasePointerCapture(pointerId)
+  } catch (error) {
+    if (!isIgnorablePointerCaptureError(error)) throw error
+  }
+}
+
+function getPinchPoints(): [TouchPoint, TouchPoint] | undefined {
+  const iter = activeTouchPointers.values()
+  const first = iter.next().value
+  const second = iter.next().value
+  if (!first || !second) return undefined
+  return [first, second]
+}
+
+function pinchGeometry(a: TouchPoint, b: TouchPoint): { distance: number; midpoint: TouchPoint } {
+  return {
+    distance: Math.hypot(b.x - a.x, b.y - a.y),
+    midpoint: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+  }
+}
+
+function onStagePointerDown(event: PointerEvent): void {
+  if (event.pointerType !== 'touch') return
+  trySetPointerCapture(event.currentTarget as HTMLElement | null, event.pointerId)
+  activeTouchPointers.set(event.pointerId, { x: event.clientX, y: event.clientY })
+  if (activeTouchPointers.size !== 2) return
+  stopDragging()
+  const points = getPinchPoints()
+  if (!points) return
+  const { distance, midpoint } = pinchGeometry(points[0], points[1])
+  pinchStartDistance = distance
+  pinchStartMidpoint = midpoint
+  pinchStartScale = scale.value
+  pinchStartPanX = panX.value
+  pinchStartPanY = panY.value
+  pinching.value = true
+}
+
+function onStagePointerMove(event: PointerEvent): void {
+  if (event.pointerType !== 'touch') return
+  if (!activeTouchPointers.has(event.pointerId)) return
+  activeTouchPointers.set(event.pointerId, { x: event.clientX, y: event.clientY })
+  if (activeTouchPointers.size < 2 || pinchStartDistance <= 0) return
+  const points = getPinchPoints()
+  if (!points) return
+  const { distance, midpoint } = pinchGeometry(points[0], points[1])
+  setScale(pinchStartScale * (distance / pinchStartDistance))
+  if (scale.value > 1) {
+    panX.value = pinchStartPanX + (midpoint.x - pinchStartMidpoint.x)
+    panY.value = pinchStartPanY + (midpoint.y - pinchStartMidpoint.y)
+  }
+}
+
+function onStagePointerEnd(event: PointerEvent): void {
+  if (event.type !== 'lostpointercapture' && event.pointerType !== 'touch') return
+  tryReleasePointerCapture(event.currentTarget as HTMLElement | null, event.pointerId)
+  if (!activeTouchPointers.delete(event.pointerId)) return
+  if (activeTouchPointers.size < 2 && pinching.value) {
+    pinching.value = false
+    pinchStartDistance = 0
+    scheduleSuppressScrimClick()
   }
 }
 
 function onPicturePointerDown(event: PointerEvent): void {
-  if (event.button !== 0 || scale.value <= 1) return
+  if (event.button !== 0 || scale.value <= 1 || pinching.value || dragging.value) return
   event.preventDefault()
   dragging.value = true
   dragPointerId = event.pointerId
@@ -171,16 +291,9 @@ function onPicturePointerEnd(event: PointerEvent): void {
     target.releasePointerCapture(event.pointerId)
   }
   if (didDrag) {
-    clearSuppressTimer()
-    suppressScrimClick = true
-    suppressTimer = setTimeout(() => {
-      suppressTimer = undefined
-      suppressScrimClick = false
-    }, 0)
+    scheduleSuppressScrimClick()
   }
-  dragging.value = false
-  dragPointerId = undefined
-  didDrag = false
+  stopDragging()
 }
 
 function onScrimClick(): void {
@@ -246,6 +359,7 @@ watch(
 
 onBeforeUnmount(() => {
   clearSuppressTimer()
+  activeTouchPointers.clear()
   window.removeEventListener('keydown', onKeydown, true)
 })
 </script>
@@ -323,11 +437,19 @@ onBeforeUnmount(() => {
         </button>
 
         <figure class="figure" @click.self="onScrimClick">
-          <div class="stage" @click.self="onScrimClick">
+          <div
+            class="stage"
+            @click.self="onScrimClick"
+            @pointerdown="onStagePointerDown"
+            @pointermove="onStagePointerMove"
+            @pointerup="onStagePointerEnd"
+            @pointercancel="onStagePointerEnd"
+            @lostpointercapture="onStagePointerEnd"
+          >
             <img
               v-if="currentItem.url"
               class="picture"
-              :class="{ zoomed: scale > 1, dragging }"
+              :class="{ zoomed: scale > 1, dragging, pinching }"
               :src="currentItem.url"
               :alt="currentItem.caption"
               draggable="false"
@@ -462,6 +584,7 @@ onBeforeUnmount(() => {
   place-items: center;
   min-height: 0;
   overflow: visible;
+  touch-action: none;
 }
 
 .picture {
@@ -472,17 +595,21 @@ onBeforeUnmount(() => {
   max-height: calc(100vh - 2 * var(--margin) - 28px);
   cursor: zoom-in;
   user-select: none;
+  touch-action: none;
   transform-origin: center center;
   transition: transform var(--motion-quick) var(--motion-ease);
 }
 
 .picture.zoomed {
   cursor: grab;
-  touch-action: none;
 }
 
 .picture.dragging {
   cursor: grabbing;
+  transition: none;
+}
+
+.picture.pinching {
   transition: none;
 }
 

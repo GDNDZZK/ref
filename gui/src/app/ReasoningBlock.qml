@@ -82,7 +82,8 @@ Block {
 		Item {
 			id: body
 
-			property real openProgress: block.expanded ? 1 : 0
+			property bool bodyLoaded: false
+			property real openProgress: block.expanded && bodyLoaded ? 1 : 0
 			readonly property real contentHeight: bodyLoader.item ? (bodyLoader.item as Item).height + 6 : 0
 
 			y: header.height
@@ -128,6 +129,18 @@ Block {
 						font.pixelSize: Theme.secondaryFontSize
 					}
 				}
+				onLoaded: {
+					if (!block.ready) {
+						body.bodyLoaded = true
+						return
+					}
+					Qt.callLater(() => {
+						if (!bodyLoader || !bodyLoader.item || !block || !block.expanded)
+							return
+						body.bodyLoaded = true
+					})
+				}
+				onActiveChanged: if (!active) body.bodyLoaded = false
 			}
 		}
 	}
