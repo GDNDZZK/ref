@@ -1,6 +1,8 @@
 <script setup lang="ts">
 // Sun / moon toggle (ThemeToggle.qml). Rays retract and a "bite" slides over the disc to form
 // the moon. Switching themes is rare, so this morph may overshoot.
+import type { ComponentPublicInstance } from 'vue'
+import { useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toggleTheme, useTheme } from '../composables/useTheme.ts'
 import CircleButton from './CircleButton.vue'
@@ -10,14 +12,23 @@ const RAY_STEP_DEGREES = 360 / RAY_COUNT
 
 const { t } = useI18n()
 const { isDark } = useTheme()
+const buttonRef = useTemplateRef<ComponentPublicInstance>('buttonRef')
+
+function onToggleClick(): void {
+  const el = buttonRef.value?.$el as HTMLElement | undefined
+  const rect = el?.getBoundingClientRect()
+  const origin = rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : undefined
+  toggleTheme(origin)
+}
 </script>
 
 <template>
   <CircleButton
+    ref="buttonRef"
     class="theme-toggle"
     :class="{ dark: isDark }"
     :label="isDark ? t('theme.switchToLight') : t('theme.switchToDark')"
-    @click="toggleTheme"
+    @click="onToggleClick"
   >
     <span class="glyph">
       <span

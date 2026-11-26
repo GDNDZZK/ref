@@ -19,6 +19,8 @@ refgui_add_test(tst_main_window
 		${PROJECT_SOURCE_DIR}/src/app/chat_image_provider.h
 		${PROJECT_SOURCE_DIR}/src/app/chat_session.cpp
 		${PROJECT_SOURCE_DIR}/src/app/chat_session.h
+		${PROJECT_SOURCE_DIR}/src/app/circular_reveal_item.cpp
+		${PROJECT_SOURCE_DIR}/src/app/circular_reveal_item.h
 		${PROJECT_SOURCE_DIR}/src/app/clipboard.h
 		${PROJECT_SOURCE_DIR}/src/app/composer_model_type.h
 		${PROJECT_SOURCE_DIR}/src/app/floating_ball_helper.cpp

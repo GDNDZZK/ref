@@ -230,9 +230,39 @@ textarea:focus-visible {
   animation: none;
 }
 
+[data-fade='radial-expand']::view-transition-old(root),
+[data-fade='radial-expand']::view-transition-new(root),
+[data-fade='radial-shrink']::view-transition-old(root),
+[data-fade='radial-shrink']::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+[data-fade='radial-expand']::view-transition-old(root) {
+  z-index: 1;
+}
+
+[data-fade='radial-expand']::view-transition-new(root) {
+  z-index: 2;
+}
+
+[data-fade='radial-shrink']::view-transition-old(root) {
+  z-index: 2;
+}
+
+[data-fade='radial-shrink']::view-transition-new(root) {
+  z-index: 1;
+}
+
+/* Keep the toggle inside root's snapshot during light -> dark shrink so it stays light until
+   the collapsing dark boundary reaches and swallows the button. */
+html[data-fade='radial-shrink'] .theme-toggle {
+  view-transition-name: none;
+}
+
 ::view-transition-group(theme-toggle) {
   animation: none;
-  z-index: 2;
+  z-index: 3;
 }
 
 ::view-transition-old(theme-toggle) {

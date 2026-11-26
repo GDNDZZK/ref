@@ -2785,6 +2785,26 @@ $ARGUMENTS</translation>
         <source>Floating ball</source>
         <translation>悬浮球</translation>
     </message>
+    <message>
+        <location filename="../src/app/Main.qml" line="650"/>
+        <source>Notifications on (click to mute)</source>
+        <translation>通知已开启（点击静音）</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Main.qml" line="651"/>
+        <source>Notifications muted (click to enable)</source>
+        <translation>通知已静音（点击开启）</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Main.qml" line="653"/>
+        <source>Mute notifications</source>
+        <translation>静音通知</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Main.qml" line="654"/>
+        <source>Enable notifications</source>
+        <translation>开启通知</translation>
+    </message>
 </context>
 <context>
     <name>McpDialog</name>

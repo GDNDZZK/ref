@@ -16,13 +16,21 @@ export function installTheme(): void {
   )
 }
 
-export function setTheme(choice: ThemeChoice): void {
-  const settings = useSettingsStore()
-  void crossfade(() => settings.update((draft) => (draft.theme = choice)))
+export interface ThemeOrigin {
+  x: number
+  y: number
 }
 
-export function toggleTheme(): void {
-  setTheme(useSettingsStore().isDark ? 'light' : 'dark')
+export function setTheme(choice: ThemeChoice, origin?: ThemeOrigin): void {
+  const settings = useSettingsStore()
+  const nextDark =
+    choice === 'dark' || (choice === 'system' && window.matchMedia?.('(prefers-color-scheme: dark)').matches)
+  const radial = origin ? { x: origin.x, y: origin.y, expand: !nextDark } : undefined
+  void crossfade(() => settings.update((draft) => (draft.theme = choice)), 'slow', radial)
+}
+
+export function toggleTheme(origin?: ThemeOrigin): void {
+  setTheme(useSettingsStore().isDark ? 'light' : 'dark', origin)
 }
 
 export function useTheme() {

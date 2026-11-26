@@ -12,6 +12,7 @@ Window {
 	property var shown: null
 	property bool restored: false
 	property bool allowDirtyWindowClose: false
+	property bool radialThemePending: false
 	readonly property bool zoomed: Workspace.zoomedId !== ""
 	readonly property bool isMac: Qt.platform.os === "osx"
 	readonly property bool showWindowControls: !isMac
@@ -71,6 +72,7 @@ Window {
 			|| pointInItem(leaveZoomButton, scenePos)
 			|| pointInItem(splitButton, scenePos)
 			|| pointInItem(floatButton, scenePos)
+			|| pointInItem(notifyButton, scenePos)
 			|| pointInItem(themeToggle, scenePos)
 			|| pointInItem(windowControls, scenePos)
 	}
@@ -124,7 +126,16 @@ Window {
 			window.showSession(Workspace.current)
 		}
 		function onThemeChangeRequested(theme) {
-			themeFade.run(page, () => Workspace.settings.theme = theme)
+			const useRadial = window.radialThemePending && themeToggle.visible
+			window.radialThemePending = false
+			if (useRadial) {
+				const origin = themeToggle.mapToItem(themeFade, themeToggle.width / 2, themeToggle.height / 2)
+				const nextDark = theme === ThemeName.dark
+					|| (theme === ThemeName.system && Application.styleHints.colorScheme === Qt.Dark)
+				themeFade.runRadial(page, origin, !nextDark, () => Workspace.settings.theme = theme)
+			} else {
+				themeFade.run(page, () => Workspace.settings.theme = theme)
+			}
 		}
 		function onDialogChanged() {
 			if (Workspace.dialog === "")
@@ -438,7 +449,7 @@ Window {
 					readonly property int capsuleRowSpacing: 2
 					readonly property int capsuleZ: 5
 					readonly property int topLeftButtonCount: 2
-					readonly property int topRightGapCount: 3
+					readonly property int topRightGapCount: 4
 					readonly property int maxCreatorPillWidth: 150
 					readonly property int filterMenuButtonSize: 28
 					readonly property int filterIconSize: 16
@@ -447,7 +458,7 @@ Window {
 						? ((window.isMac ? window.macTrafficLightInset : Theme.windowButtonMargin) + topLeftButtonCount * Theme.buttonHeight + Theme.windowButtonGap + capsuleSideClear)
 						: sidebarOpenClear
 					readonly property real rightClear: (window.showWindowControls ? windowControls.width + Theme.windowButtonGap : 0)
-						+ themeToggle.width + floatButton.width + splitButton.width
+						+ themeToggle.width + notifyButton.width + floatButton.width + splitButton.width
 						+ topRightGapCount * Theme.windowButtonGap + Theme.windowButtonMargin + capsuleSideClear
 					readonly property real maxWidth: Math.max(0, area.width - leftClear - rightClear)
 					readonly property bool shown: Workspace.splitView && !window.zoomed && maxWidth >= capsuleMinWidth
@@ -617,7 +628,31 @@ Window {
 			rightMargin: windowControls.visible ? Theme.windowButtonGap : Theme.windowButtonMargin
 		}
 		enabled: !dialogs.open
-		onClicked: Workspace.requestTheme(Theme.dark ? ThemeName.light : ThemeName.dark)
+		holdLightSurface: themeFade.holdingLightToggle
+		onClicked: {
+			window.radialThemePending = true
+			Workspace.requestTheme(Theme.dark ? ThemeName.light : ThemeName.dark)
+		}
+	}
+
+	IconButton {
+		id: notifyButton
+		objectName: "notifyToggleButton"
+		anchors {
+			top: parent.top
+			right: themeToggle.left
+			topMargin: window.topButtonY
+			rightMargin: Theme.windowButtonGap
+		}
+		iconName: Workspace.settings.notifyEnabled ? "bell" : "bell-off"
+		enabled: !dialogs.open
+		tooltipText: Workspace.settings.notifyEnabled
+			? qsTr("Notifications on (click to mute)")
+			: qsTr("Notifications muted (click to enable)")
+		Accessible.name: Workspace.settings.notifyEnabled
+			? qsTr("Mute notifications")
+			: qsTr("Enable notifications")
+		onClicked: Workspace.settings.notifyEnabled = !Workspace.settings.notifyEnabled
 	}
 
 	IconButton {
@@ -625,7 +660,7 @@ Window {
 		objectName: "floatingBallButton"
 		anchors {
 			top: parent.top
-			right: themeToggle.left
+			right: notifyButton.left
 			topMargin: window.topButtonY
 			rightMargin: Theme.windowButtonGap
 		}

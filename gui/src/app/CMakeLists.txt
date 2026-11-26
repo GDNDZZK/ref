@@ -17,6 +17,8 @@ qt_add_qml_module(ref-gui
 		chat_image_provider.h
 		chat_session.cpp
 		chat_session.h
+		circular_reveal_item.cpp
+		circular_reveal_item.h
 		clipboard.h
 		composer_model_type.h
 		floating_ball_helper.cpp
