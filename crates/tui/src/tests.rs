@@ -8645,9 +8645,10 @@ fn sidebar_live_list_sorts_pinned_first_and_renders_pin_marker() {
     let mut p2 = bg_session("ses_p2", "pinned-newer", SessionStatus::Idle, 0);
     p2.created_at = 30;
     p2.pinned_at = Some(200);
+    app.sidebar = true;
     app.live = vec![u1, p1, u0, p2];
 
-    let (_, s) = render(&mut app, 120, 30);
+    let (_, s) = render(&mut app, 160, 30);
     let ids: Vec<&str> = app.sidebar_rows.iter().map(|(_, id)| id.as_str()).collect();
     assert_eq!(ids, vec!["ses_p2", "ses_p1", "ses_u0", "ses_u1"]);
     assert!(s.contains("✦ pinned-newer"), "{s}");
