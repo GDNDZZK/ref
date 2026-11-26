@@ -709,6 +709,7 @@ Item {
 									sessionId: sid,
 									checked: root.activeSession !== null && sid === root.activeSession.sessionId
 								})
+							}
 							if (entries.length === 0)
 								return
 							switcherMenu.entries = entries

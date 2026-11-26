@@ -238,26 +238,23 @@ describe('ImageLightbox', () => {
     const picture = document.body.querySelector('.picture') as HTMLElement
     const zoomReset = () => document.body.querySelector('.zoom-reset')?.textContent?.trim()
 
-    const pinchIn = new WheelEvent('wheel', {
-      deltaY: -4,
-      ctrlKey: true,
-      bubbles: true,
-      cancelable: true,
-    })
+    const makeCtrlWheel = (deltaY: number): WheelEvent => {
+      const event = new WheelEvent('wheel', { deltaY, bubbles: true, cancelable: true })
+      Object.defineProperty(event, 'ctrlKey', { value: true })
+      return event
+    }
+
+    const pinchIn = makeCtrlWheel(-4)
     picture.dispatchEvent(pinchIn)
     expect(pinchIn.defaultPrevented).toBe(true)
     await nextTick()
     expect(zoomReset()).toBe('104%')
 
-    picture.dispatchEvent(
-      new WheelEvent('wheel', { deltaY: -6, ctrlKey: true, bubbles: true, cancelable: true }),
-    )
+    picture.dispatchEvent(makeCtrlWheel(-6))
     await nextTick()
     expect(zoomReset()).toBe('110%')
 
-    picture.dispatchEvent(
-      new WheelEvent('wheel', { deltaY: 10, ctrlKey: true, bubbles: true, cancelable: true }),
-    )
+    picture.dispatchEvent(makeCtrlWheel(10))
     await nextTick()
     expect(zoomReset()).toBe('100%')
 
@@ -409,10 +406,10 @@ describe('ImageLightbox', () => {
     // Mouse Ctrl+wheel (deltaY = -120) is clamped instead of jumping ~3.32x.
     const ctrlMouseWheel = new WheelEvent('wheel', {
       deltaY: -120,
-      ctrlKey: true,
       bubbles: true,
       cancelable: true,
     })
+    Object.defineProperty(ctrlMouseWheel, 'ctrlKey', { value: true })
     picture.dispatchEvent(ctrlMouseWheel)
     expect(ctrlMouseWheel.defaultPrevented).toBe(true)
     await nextTick()
