@@ -706,6 +706,8 @@ ListView {
 	ScrollBar.vertical: ScrollBar {
 		id: scrollBar
 		objectName: "chatScrollBar"
+		// Keep the 6px thumb clear of the frameless window's 6px right resize edge.
+		rightPadding: 6
 
 		onPressedChanged: {
 			if (pressed)

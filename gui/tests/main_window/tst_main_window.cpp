@@ -4425,12 +4425,15 @@ void TestMainWindow::stashButtonDialogAndSplitFilterCapsuleWorkWithoutWarnings()
 		}
 		return out;
 	};
+	// Wait for ses_b's remove/displaced transitions (Motion.standard) to settle before grabbing coordinates.
+	QTRY_VERIFY(findMemberRow(u"ses_b"_s) == nullptr);
+	QTest::qWait(300);
 	QQuickItem* runningA = nullptr;
 	QQuickItem* memberChild = nullptr;
 	QTRY_VERIFY([&] {
 		runningA = findRunningRow(u"ses_a"_s);
 		memberChild = findMemberRow(u"ses_child"_s);
-		return runningA != nullptr && runningA->height() > 0.0 && memberChild != nullptr && memberChild->height() > 0.0;
+		return runningA != nullptr && runningA->height() > 0.0 && runningA->opacity() > 0.99 && memberChild != nullptr && memberChild->height() > 0.0;
 	}());
 	const QPoint startChild = memberChild->mapToScene(QPointF(24.0, memberChild->height() / 2.0)).toPoint();
 	const QPoint bottomHalfA = runningA->mapToScene(QPointF(runningA->width() / 2.0, runningA->height() - 6.0)).toPoint();
@@ -4783,7 +4786,7 @@ void TestMainWindow::switchingToLongSessionJumpsToEndAndScrollBarReleaseLoadsSke
 	QVERIFY(handle);
 	QTRY_VERIFY(handle->height() > 2.0 && scrollBar->height() > 50.0);
 	const QPoint handleCenter = handle->mapToScene(QPointF(handle->width() / 2.0, handle->height() / 2.0)).toPoint();
-	const QPoint barTop = scrollBar->mapToScene(QPointF(scrollBar->width() / 2.0, 4.0)).toPoint();
+	const QPoint barTop(handleCenter.x(), scrollBar->mapToScene(QPointF(0.0, 4.0)).toPoint().y());
 	QTest::mouseMove(window, handleCenter);
 	QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, handleCenter);
 	QTRY_VERIFY(scrollBar->property("pressed").toBool());
