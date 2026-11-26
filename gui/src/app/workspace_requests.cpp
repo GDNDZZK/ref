@@ -302,6 +302,8 @@ void Workspace::applyBackendSwitch(refgui::client::Backend::Source source)
 		setFocusedTile({});
 	}
 	m_stage.setRetainedIds({});
+	m_tileAttachQueue.clear();
+	m_lastSplitRetained.clear();
 	m_tiles.setTiles({});
 	if(wasZoomed)
 	{

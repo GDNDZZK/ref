@@ -3,8 +3,6 @@
 
 #include "workspace/toast_text.h"
 
-#include <QPointer>
-
 #include <algorithm>
 
 using refgui::client::Result;
@@ -39,6 +37,8 @@ void Workspace::toggleSplit()
 // WatchAll brings events for the live sessions.
 QCoro::Task<> Workspace::enterSplit()
 {
+	m_lastSplitRetained.clear();
+	m_tileAttachQueue.clear();
 	m_split = true;
 	emit splitViewChanged();
 	syncTiles();
@@ -73,6 +73,8 @@ QCoro::Task<> Workspace::leaveSplit(bool adoptZoomed, QString openId)
 	m_stage.setRetainedIds({});
 	m_tiles.setTiles({});
 	m_directory.live().setTileIds({});
+	m_tileAttachQueue.clear();
+	m_lastSplitRetained.clear();
 	updateHighlight();
 	if(wasZoomed)
 	{
@@ -106,22 +108,11 @@ QCoro::Task<> Workspace::leaveSplit(bool adoptZoomed, QString openId)
 	{
 		co_return;
 	}
-	// Sessions can be closed while a detach is out, which changes m_chats.
-	QList<QPointer<ChatSession>> others;
 	for(ChatSession* other : std::as_const(m_chats))
 	{
-		others.append(other);
-	}
-	for(const QPointer<ChatSession>& other : others)
-	{
-		if(m_split)
+		if(other != nullptr && other != m_current && other->isAttached() && !m_leaving.contains(other->sessionId()))
 		{
-			co_return;
-		}
-		if(other && other != m_current && other->isAttached() && !m_leaving.contains(other->sessionId()))
-		{
-			const QString otherId = other->sessionId();
-			logDropped(co_await other->detach(), "detach"_L1, otherId);
+			detachUnwaited(other);
 		}
 	}
 }
@@ -245,24 +236,52 @@ void Workspace::syncTiles()
 	}
 	const QStringList allBackground = backgroundTileIds();
 	const QSet<QString> retained(allBackground.begin(), allBackground.end());
-	m_stage.setRetainedIds(retained);
-
-	QList<ChatSession*> tiles;
-	tiles.reserve(wanted.size());
-	for(const QString& id : wanted)
+	if(retained != m_lastSplitRetained)
 	{
-		tiles.append(&chat(id));
+		m_lastSplitRetained = retained;
+		m_stage.setRetainedIds(retained);
 	}
-	m_tiles.setTiles(tiles);
-	m_directory.live().setTileIds(wanted);
 
-	for(ChatSession* tile : std::as_const(tiles))
+	const QList<ChatSession*> currentTiles = m_tiles.tiles();
+	bool tilesChanged = currentTiles.size() != wanted.size();
+	if(!tilesChanged)
 	{
-		if(!tile->isAttached() && !m_tileAttaching.contains(tile->sessionId()))
+		for(qsizetype i = 0; i < wanted.size(); ++i)
 		{
-			attachTile(tile);
+			if(currentTiles[i] == nullptr || currentTiles[i] != findSession(wanted[i]))
+			{
+				tilesChanged = true;
+				break;
+			}
 		}
 	}
+	if(tilesChanged)
+	{
+		QList<ChatSession*> tiles;
+		tiles.reserve(wanted.size());
+		for(const QString& id : wanted)
+		{
+			tiles.append(&chat(id));
+		}
+		m_tiles.setTiles(tiles);
+		m_directory.live().setTileIds(wanted);
+		if(!m_focusedTile.isEmpty() && m_tiles.indexOf(m_focusedTile) < 0)
+		{
+			setFocusedTile({});
+		}
+		emit visibleSessionIdsChanged();
+	}
+
+	for(ChatSession* tile : m_tiles.tiles())
+	{
+		const QString id = tile->sessionId();
+		if(!tile->isAttached() && !m_tileAttaching.contains(id) && !m_tileAttachQueue.contains(id))
+		{
+			m_tileAttachQueue.append(id);
+		}
+	}
+	drainTileAttachQueue();
+
 	for(ChatSession* other : std::as_const(m_chats))
 	{
 		const QString otherId = other->sessionId();
@@ -272,11 +291,24 @@ void Workspace::syncTiles()
 			detachUnwaited(other);
 		}
 	}
-	if(!m_focusedTile.isEmpty() && m_tiles.indexOf(m_focusedTile) < 0)
+}
+
+void Workspace::drainTileAttachQueue()
+{
+	while(m_split && m_tileAttaching.size() < MaxConcurrentTileAttaches && !m_tileAttachQueue.isEmpty())
 	{
-		setFocusedTile({});
+		const QString id = m_tileAttachQueue.takeFirst();
+		if(m_tiles.indexOf(id) < 0 || m_leaving.contains(id) || m_tileAttaching.contains(id))
+		{
+			continue;
+		}
+		ChatSession* tile = findSession(id);
+		if(tile == nullptr || tile->isAttached())
+		{
+			continue;
+		}
+		attachTile(tile);
 	}
-	emit visibleSessionIdsChanged();
 }
 
 QCoro::Task<> Workspace::attachTile(ChatSession* tile)
@@ -289,6 +321,7 @@ QCoro::Task<> Workspace::attachTile(ChatSession* tile)
 	{
 		toast(refgui::workspace::ToastLevel::Error, refgui::workspace::toastText(u"%1: %2"_s.arg(nameOf(id), refgui::workspace::oneLine(attached.error()))));
 	}
+	drainTileAttachQueue();
 }
 
 void Workspace::setFocusedTile(const QString& sessionId)

@@ -347,6 +347,7 @@ private:
 	QCoro::Task<> zoomTask(QString sessionId);
 	QCoro::Task<> unzoomTask();
 	void syncTiles();
+	void drainTileAttachQueue();
 	QStringList backgroundTileIds() const;
 	QStringList wantedTileIds() const;
 	QStringList collectTileIds(bool applyFilter) const;
@@ -386,6 +387,9 @@ private:
 	QString m_frontId; // the id behind frontSession
 	QString m_zoomed;
 	QSet<QString> m_tileAttaching;
+	static constexpr int MaxConcurrentTileAttaches = 2;
+	QStringList m_tileAttachQueue;
+	QSet<QString> m_lastSplitRetained;
 	QSet<QString> m_unzooming; // unzoomed sessions whose foreground the backend has not yet been told to give up
 	QJSEngine* m_engine = nullptr;
 	int m_showSerial = 0;

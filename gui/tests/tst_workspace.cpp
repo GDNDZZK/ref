@@ -113,6 +113,14 @@ public:
 		}
 	}
 
+	void holdAttach(bool hold) { m_holdAttach = hold; }
+	qsizetype heldAttachCount() const { return m_heldAttaches.size(); }
+	void releaseNextAttach()
+	{
+		Q_ASSERT(!m_heldAttaches.isEmpty());
+		respondAttach(m_heldAttaches.takeFirst());
+	}
+
 	QStringList ops() const
 	{
 		QStringList result;
@@ -195,15 +203,12 @@ public:
 				m_fake.fail(request, u"no such session"_s);
 				return;
 			}
-			QJsonObject info = m_sessions.value(id);
-			info[u"live"_s] = true;
-			info[u"attached"_s] = request.value(u"foreground"_s).toBool() ? 1 : 0;
-			m_sessions[id] = info;
-			m_fake.respond(request, {{u"snapshot"_s, QJsonObject{{u"info"_s, info},
-			                                                            {u"messages"_s, m_messages.value(id)},
-			                                                            {u"pending_questions"_s, m_questions.value(id)},
-			                                                            {u"more_before"_s, false}}}});
-			broadcast();
+			if(m_holdAttach)
+			{
+				m_heldAttaches.append(request);
+				return;
+			}
+			respondAttach(request);
 		}
 		else if(op == u"detach"_s)
 		{
@@ -614,6 +619,19 @@ public:
 			m_fake.respond(request, {});
 		}
 	}
+	void respondAttach(const QJsonObject& request)
+	{
+		const QString id = request.value(u"session_id"_s).toString();
+		QJsonObject info = m_sessions.value(id);
+		info[u"live"_s] = true;
+		info[u"attached"_s] = request.value(u"foreground"_s).toBool() ? 1 : 0;
+		m_sessions[id] = info;
+		m_fake.respond(request, {{u"snapshot"_s, QJsonObject{{u"info"_s, info},
+		                                                            {u"messages"_s, m_messages.value(id)},
+		                                                            {u"pending_questions"_s, m_questions.value(id)},
+		                                                            {u"more_before"_s, false}}}});
+		broadcast();
+	}
 
 	FakeBackend& m_fake;
 	QMap<QString, QJsonObject> m_sessions;
@@ -637,6 +655,8 @@ public:
 	bool m_holdDetach = false;
 	bool m_holdWatchAll = false;
 	std::optional<QJsonObject> m_heldDetach;
+	bool m_holdAttach = false;
+	QList<QJsonObject> m_heldAttaches;
 	QJsonArray m_models;
 	QJsonArray m_configWarnings;
 	QJsonArray m_groups;
@@ -788,6 +808,7 @@ private slots:
 	void splitFilterFiltersByDirectParentAndUserCreated();
 	void switchBackendResetsWorkspaceAndConnectsToNewEndpoint();
 	void pinningSortsSessionsRefreshesHistoryAndClampsLiveReorder();
+	void splitViewThrottlesTileAttachesAndSkipsNoOpVisibleBroadcasts();
 };
 
 void TestWorkspace::opensTheSessionFromTheCommandLine()
@@ -2338,6 +2359,64 @@ void TestWorkspace::pinningSortsSessionsRefreshesHistoryAndClampsLiveReorder()
 	f.stub.pushHistoryChanged();
 	QTRY_VERIFY(f.stub.requests(u"list_history"_s).size() > historyCallsBefore);
 	QTRY_COMPARE(historyIds(), (QStringList{u"hist_new"_s, u"hist_old"_s}));
+}
+
+void TestWorkspace::splitViewThrottlesTileAttachesAndSkipsNoOpVisibleBroadcasts()
+{
+	const QStringList backgroundIds{u"ses_b"_s, u"ses_c"_s, u"ses_d"_s, u"ses_e"_s, u"ses_f"_s};
+	Fixture f(refgui::proto::ProtocolVersion, false, {}, [&backgroundIds](StubServer& stub) {
+		for(qsizetype i = 0; i < backgroundIds.size(); ++i)
+		{
+			stub.add(backgroundIds.at(i), static_cast<qint64>(2 + i));
+		}
+	});
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 6);
+	QTRY_VERIFY(f.workspace->current()->isAttached());
+
+	f.stub.holdAttach(true);
+	const qsizetype attachesBefore = f.stub.requests(u"attach"_s).size();
+	f.workspace->toggleSplit();
+	QTRY_VERIFY(f.workspace->isSplitView());
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 5);
+	QTRY_COMPARE(f.stub.requests(u"watch_all"_s).size(), 1);
+	QTRY_COMPARE(f.stub.heldAttachCount(), 2);
+	QTest::qWait(QuietMs);
+	QCOMPARE(f.stub.heldAttachCount(), 2);
+	QCOMPARE(f.stub.requests(u"attach"_s).size(), attachesBefore + 2);
+
+	f.stub.releaseNextAttach();
+	QTRY_COMPARE(f.stub.heldAttachCount(), 2);
+	QCOMPARE(f.stub.requests(u"attach"_s).size(), attachesBefore + 3);
+	f.stub.releaseNextAttach();
+	QTRY_COMPARE(f.stub.heldAttachCount(), 2);
+	QCOMPARE(f.stub.requests(u"attach"_s).size(), attachesBefore + 4);
+	f.stub.releaseNextAttach();
+	QTRY_COMPARE(f.stub.heldAttachCount(), 2);
+	QCOMPARE(f.stub.requests(u"attach"_s).size(), attachesBefore + 5);
+	f.stub.releaseNextAttach();
+	QTRY_COMPARE(f.stub.heldAttachCount(), 1);
+	f.stub.releaseNextAttach();
+	QTRY_COMPARE(f.stub.heldAttachCount(), 0);
+	f.stub.holdAttach(false);
+	for(const QString& id : backgroundIds)
+	{
+		QTRY_VERIFY(f.workspace->session(id)->isAttached());
+	}
+	QCOMPARE(f.stub.requests(u"attach"_s).size(), attachesBefore + 5);
+
+	QSignalSpy visibleSpy(f.workspace.get(), &Workspace::visibleSessionIdsChanged);
+	f.stub.setState(u"ses_b"_s, u"running"_s);
+	QTRY_COMPARE(f.workspace->info(u"ses_b"_s).value(u"activity"_s).toString(), u"running"_s);
+	f.stub.broadcast();
+	QTest::qWait(QuietMs);
+	QCOMPARE(visibleSpy.count(), 0);
+
+	f.workspace->toggleSplit();
+	QTRY_VERIFY(!f.workspace->isSplitView());
+	for(const QString& id : backgroundIds)
+	{
+		QTRY_VERIFY(!f.workspace->session(id)->isAttached());
+	}
 }
 
 QTEST_MAIN(TestWorkspace)

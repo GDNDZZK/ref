@@ -68,7 +68,7 @@ ListView {
 	readonly property real naturalEnd: footerItem ? footerItem.y + Theme.pagePadding : 0
 	property bool compact: false // narrower cache in a split-view tile
 	readonly property int fullRetainedDistance: 2400 // px above and below the view whose rows stay instantiated
-	readonly property int compactRetainedDistance: 800 // smaller cache in split-view tiles so opening many tiles stays fast
+	readonly property int compactRetainedDistance: 400 // smaller cache in split-view tiles so opening many tiles stays fast
 	readonly property int retainedDistance: compact ? compactRetainedDistance : fullRetainedDistance
 	readonly property int olderTriggerDistance: 400 // px from the top at which the next page loads by itself
 	readonly property real minContentY: originY - topMargin
