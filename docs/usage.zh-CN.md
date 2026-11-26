@@ -121,6 +121,7 @@ ref 由两个程序组成。`ref-server`（后端）运行会话：调用 LLM、
 | `/stash [name]` | 将全部运行中会话暂存为一个新分组（TUI、`ref-gui` 与 `ref-web`） |
 | `/stashed`（`/groups`、`/stash-groups`） | 打开暂存分组管理器（`ref-web` 使用 `/stashed` 或 `/groups`） |
 | `/backend`（`/server`） | 交互式切换后端连接，或在 TUI 中直接传入 `auto` / `URL [TOKEN]` 临时切换 |
+| `/window [N\|reset]` | 设置 TUI 常驻消息窗口数量（默认 `1000`，`0` 表示不限制并全部加载），保存至 `tui.json` |
 | `/close` | 关闭当前会话 |
 | `/close-session [name or id …]`（`/kill`） | 关闭运行中的会话（打开选择器，或按名称/id 一次关闭一个或多个） |
 | `/export [PATH]` | 将对话记录导出为 markdown（默认为会话目录中的 `ref-session-<id>.md`） |

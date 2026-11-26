@@ -121,6 +121,7 @@ Other keys: `ctrl+p` opens the command palette, `tab` cycles agents, `ctrl+t` cy
 | `/stash [name]` | Stash all live sessions into a new group (TUI, `ref-gui`, and `ref-web`) |
 | `/stashed` (`/groups`, `/stash-groups`) | Open the Stash Groups manager (`ref-web` uses `/stashed` or `/groups`) |
 | `/backend` (`/server`) | Switch backend connection interactively, or pass `auto` / `URL [TOKEN]` temporarily in TUI |
+| `/window [N\|reset]` | Set resident message window size in TUI (`1000` default, `0` = unlimited / load all), saved in `tui.json` |
 | `/close` | Close this session |
 | `/close-session [name or id …]` (`/kill`) | Close live sessions (picker, or one or more by name or id) |
 | `/export [PATH]` | Export the transcript as markdown (default `ref-session-<id>.md` in the session directory) |
