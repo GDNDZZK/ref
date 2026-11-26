@@ -3,7 +3,7 @@ import QtQuick
 import RefGui
 
 // Two-column stash group manager: running sessions on the left, stashed groups on the right.
-// Supports button/menu actions and pointer drag-and-drop (including dragging members out to remove).
+// Supports button/menu actions and pointer drag-and-drop (dragging members to Running restores; dragging outside both columns removes).
 ModalDialog {
 	id: dialog
 
@@ -47,7 +47,7 @@ ModalDialog {
 	property string dragTitle: ""
 	property real dragSceneX: 0
 	property real dragSceneY: 0
-	property string dropTargetKind: "" // "", "newGroup", "group", "member", "outside"
+	property string dropTargetKind: "" // "", "newGroup", "group", "member", "restore", "outside"
 	property string dropGroupId: ""
 	property string dropMemberSessionId: ""
 	property int dropIndex: -1
@@ -196,8 +196,12 @@ ModalDialog {
 			return
 		}
 
-		if (dragKind === "member" && (pointInItem(runningColumn, sceneX, sceneY) || !pointInItem(groupsColumn, sceneX, sceneY)))
-			dropTargetKind = "outside"
+		if (dragKind === "member") {
+			if (pointInItem(runningColumn, sceneX, sceneY))
+				dropTargetKind = "restore"
+			else if (!pointInItem(groupsColumn, sceneX, sceneY))
+				dropTargetKind = "outside"
+		}
 	}
 
 	function groupMemberCount(groupId) {
@@ -236,6 +240,10 @@ ModalDialog {
 				Workspace.stash.addToGroup(targetGroupId, sessionId, targetIndex, true)
 			else if (kind === "member")
 				Workspace.stash.moveGroupMember(sourceGroupId, targetGroupId, sessionId, targetIndex, true)
+			return
+		}
+		if (targetKind === "restore" && kind === "member") {
+			Workspace.stash.restoreGroupMember(sourceGroupId, sessionId)
 			return
 		}
 		if (targetKind === "outside" && kind === "member")
@@ -315,16 +323,17 @@ ModalDialog {
 			id: columnsRow
 			width: parent.width
 			spacing: dialog.columnSpacing
+			readonly property real syncedColumnHeight: Math.max(dialog.minColumnHeight, runningCol.implicitHeight + 2 * dialog.columnPadding, groupsCol.implicitHeight + 2 * dialog.columnPadding)
 
 			// Left column: currently running sessions.
 			Rectangle {
 				id: runningColumn
+				objectName: "stashRunningColumn"
 				width: Math.floor((parent.width - parent.spacing) * dialog.runningColumnRatio)
-				height: Math.max(dialog.minColumnHeight, runningCol.implicitHeight + 2 * dialog.columnPadding)
+				height: columnsRow.syncedColumnHeight
 				radius: Theme.radius
 				color: Theme.background
-				border.color: dialog.dropTargetKind === "outside" ? Theme.danger : Theme.border
-
+				border.color: dialog.dropTargetKind === "restore" ? Theme.accentText : Theme.border
 				Behavior on border.color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 
 				Column {
@@ -506,7 +515,7 @@ ModalDialog {
 			Rectangle {
 				id: groupsColumn
 				width: parent.width - runningColumn.width - parent.spacing
-				height: Math.max(dialog.minColumnHeight, groupsCol.implicitHeight + 2 * dialog.columnPadding)
+				height: columnsRow.syncedColumnHeight
 				radius: Theme.radius
 				color: Theme.background
 				border.color: Theme.border
@@ -856,6 +865,7 @@ ModalDialog {
 
 									delegate: Rectangle {
 										id: memberRow
+										objectName: "stashMemberRow"
 										required property string itemId
 										required property int index
 
@@ -1041,9 +1051,11 @@ ModalDialog {
 				id: dragProxyText
 				textFormat: Text.PlainText
 				anchors { left: parent.left; right: parent.right; leftMargin: dialog.dragChipPadX; rightMargin: dialog.dragChipPadX; verticalCenter: parent.verticalCenter }
-				text: dialog.dropTargetKind === "outside"
-					? qsTr("Drop to remove: %1").arg(dialog.dragTitle)
-					: dialog.dragTitle
+				text: dialog.dropTargetKind === "restore"
+					? qsTr("Drop to restore: %1").arg(dialog.dragTitle)
+					: (dialog.dropTargetKind === "outside"
+						? qsTr("Drop to remove: %1").arg(dialog.dragTitle)
+						: dialog.dragTitle)
 				color: Theme.text
 				font.pixelSize: Theme.smallFontSize
 				elide: Text.ElideRight

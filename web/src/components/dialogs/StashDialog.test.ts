@@ -142,9 +142,37 @@ describe('StashDialog', () => {
     await wrapper.findAll('.group-card')[1]!.trigger('drop')
     expect(moveSpy).toHaveBeenCalledWith('g2', 's3', 1, { fromGroupId: 'g1', stashLive: false })
 
-    // Drag member g1/s3 -> outside (running column) to remove.
+    // Drag member g1/s3 -> running column to restore.
+    restoreMemberSpy.mockClear()
+    removeSpy.mockClear()
     await wrapper.findAll('.member-row')[0]!.trigger('dragstart')
+    await wrapper.get('.running-column').trigger('dragover')
+    expect(wrapper.get('.running-column').classes()).toContain('drop-restore')
     await wrapper.get('.running-column').trigger('drop')
+    expect(restoreMemberSpy).toHaveBeenCalledWith('g1', 's3')
+    expect(removeSpy).not.toHaveBeenCalled()
+
+    // Drag member g1/s3 -> groups column empty space does not remove.
+    await wrapper.findAll('.member-row')[0]!.trigger('dragstart')
+    await wrapper.get('.groups-column').trigger('dragover')
+    expect(wrapper.get('.stash-modal').classes()).not.toContain('drop-remove')
+    await wrapper.get('.groups-column').trigger('drop')
+    expect(removeSpy).not.toHaveBeenCalled()
+
+    // Drag member g1/s3 -> outside columns to remove.
+    await wrapper.findAll('.member-row')[0]!.trigger('dragstart')
+    await wrapper.get('.columns').trigger('dragover')
+    expect(wrapper.get('.stash-modal').classes()).toContain('drop-remove')
+    await wrapper.get('.columns').trigger('drop')
+    expect(removeSpy).toHaveBeenCalledWith('g1', 's3')
+
+    // Drag member g1/s3 -> window/scrim outside dialog also removes.
+    removeSpy.mockClear()
+    await wrapper.findAll('.member-row')[0]!.trigger('dragstart')
+    window.dispatchEvent(new Event('dragover', { bubbles: true, cancelable: true }))
+    await nextTick()
+    expect(wrapper.get('.stash-modal').classes()).toContain('drop-remove')
+    window.dispatchEvent(new Event('drop', { bubbles: true, cancelable: true }))
     expect(removeSpy).toHaveBeenCalledWith('g1', 's3')
 
     // Drag group header g1 -> group g2 to merge.

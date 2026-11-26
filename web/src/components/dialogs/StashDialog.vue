@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SessionInfo, StashGroup, StashMember } from '../../proto/generated'
 import { dirName, historyLabel, liveLabel } from '../../shell/sessionRow.ts'
@@ -26,6 +26,7 @@ const notices = useNoticesStore()
 const dragState = ref<DragPayload>()
 const dropGroupId = ref<string>()
 const dropNewGroup = ref(false)
+const dropRestore = ref(false)
 const dropOutside = ref(false)
 const dropMemberKey = ref<string>() // `${groupId}:${sessionId}`
 
@@ -59,6 +60,7 @@ function clearDragState(): void {
   dragState.value = undefined
   dropGroupId.value = undefined
   dropNewGroup.value = false
+  dropRestore.value = false
   dropOutside.value = false
   dropMemberKey.value = undefined
 }
@@ -92,14 +94,17 @@ function startGroupDrag(event: DragEvent, group: StashGroup): void {
 function onDragOverNewGroup(event: DragEvent): void {
   if (!dragState.value || dragState.value.kind === 'group') return
   event.preventDefault()
+  event.stopPropagation()
   dropNewGroup.value = true
   dropGroupId.value = undefined
   dropMemberKey.value = undefined
+  dropRestore.value = false
   dropOutside.value = false
 }
 
 function onDropNewGroup(event: DragEvent): void {
   event.preventDefault()
+  event.stopPropagation()
   const payload = dragState.value
   clearDragState()
   if (!payload || payload.kind === 'group') return
@@ -120,8 +125,10 @@ function onDragOverGroup(event: DragEvent, group: StashGroup): void {
   if (group.locked) return
   if (payload.kind === 'group' && payload.groupId === group.id) return
   event.preventDefault()
+  event.stopPropagation()
   dropGroupId.value = group.id
   dropNewGroup.value = false
+  dropRestore.value = false
   dropOutside.value = false
   dropMemberKey.value = undefined
 }
@@ -132,6 +139,7 @@ function onDragLeaveGroup(groupId: string): void {
 
 function onDropGroup(event: DragEvent, targetGroup: StashGroup): void {
   event.preventDefault()
+  event.stopPropagation()
   const payload = dragState.value
   clearDragState()
   if (!payload || targetGroup.locked) return
@@ -162,6 +170,7 @@ function onDragOverMember(event: DragEvent, group: StashGroup, member: StashMemb
   dropMemberKey.value = `${group.id}:${member.session_id}`
   dropGroupId.value = group.id
   dropNewGroup.value = false
+  dropRestore.value = false
   dropOutside.value = false
 }
 
@@ -196,13 +205,52 @@ function onDropMember(event: DragEvent, targetGroup: StashGroup, targetIndex: nu
   )
 }
 
+function onDragOverRunning(event: DragEvent): void {
+  if (dragState.value?.kind !== 'member') return
+  event.preventDefault()
+  event.stopPropagation()
+  dropRestore.value = true
+  dropOutside.value = false
+  dropGroupId.value = undefined
+  dropMemberKey.value = undefined
+  dropNewGroup.value = false
+}
+
+function onDragLeaveRunning(event: DragEvent): void {
+  const currentTarget = event.currentTarget as HTMLElement | null
+  const relatedTarget = event.relatedTarget as Node | null
+  if (currentTarget && relatedTarget && currentTarget.contains(relatedTarget)) return
+  dropRestore.value = false
+}
+
+function onDropRunning(event: DragEvent): void {
+  event.preventDefault()
+  event.stopPropagation()
+  const payload = dragState.value
+  clearDragState()
+  if (payload?.kind !== 'member') return
+  report(workspace.restoreGroupMember(payload.groupId, payload.sessionId))
+}
+function onDragOverGroupsColumn(): void {
+  dropOutside.value = false
+  dropRestore.value = false
+}
+
 function onDragOverOutside(event: DragEvent): void {
   if (dragState.value?.kind !== 'member') return
   event.preventDefault()
   dropOutside.value = true
+  dropRestore.value = false
   dropGroupId.value = undefined
   dropMemberKey.value = undefined
   dropNewGroup.value = false
+}
+
+function onDragLeaveOutside(event: DragEvent): void {
+  const currentTarget = event.currentTarget as HTMLElement | null
+  const relatedTarget = event.relatedTarget as Node | null
+  if (currentTarget && relatedTarget && currentTarget.contains(relatedTarget)) return
+  dropOutside.value = false
 }
 
 function onDropOutside(event: DragEvent): void {
@@ -212,6 +260,33 @@ function onDropOutside(event: DragEvent): void {
   if (payload?.kind !== 'member') return
   report(workspace.removeFromGroup(payload.groupId, payload.sessionId))
 }
+
+function isInsideColumns(target: EventTarget | null): boolean {
+  const element = target instanceof Element ? target : target instanceof Node ? target.parentElement : null
+  return element?.closest('.running-column, .groups-column') != null
+}
+
+function onWindowDragOver(event: DragEvent): void {
+  if (dragState.value?.kind !== 'member') return
+  if (event.defaultPrevented || isInsideColumns(event.target)) return
+  onDragOverOutside(event)
+}
+
+function onWindowDrop(event: DragEvent): void {
+  if (dragState.value?.kind !== 'member') return
+  if (event.defaultPrevented || isInsideColumns(event.target)) return
+  onDropOutside(event)
+}
+
+onMounted(() => {
+  window.addEventListener('dragover', onWindowDragOver)
+  window.addEventListener('drop', onWindowDrop)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('dragover', onWindowDragOver)
+  window.removeEventListener('drop', onWindowDrop)
+})
 
 function moveMemberBy(group: StashGroup, index: number, delta: -1 | 1): void {
   if (group.locked) return
@@ -297,14 +372,23 @@ function createEmptyGroup(): void {
 </script>
 
 <template>
-  <ModalDialog class="stash-modal" :title="t('dialog.stash.title')" width="wide" @close="dialogs.close()">
+  <ModalDialog
+    class="stash-modal"
+    :class="{ 'drop-remove': dropOutside }"
+    :title="t('dialog.stash.title')"
+    width="wide"
+    @close="dialogs.close()"
+    @dragover="onDragOverOutside"
+    @dragleave="onDragLeaveOutside"
+    @drop="onDropOutside"
+  >
     <div class="columns">
       <section
         class="column running-column"
-        :class="{ 'drop-remove': dropOutside }"
-        @dragover="onDragOverOutside"
-        @dragleave="dropOutside = false"
-        @drop="onDropOutside"
+        :class="{ 'drop-restore': dropRestore }"
+        @dragover="onDragOverRunning"
+        @dragleave="onDragLeaveRunning"
+        @drop="onDropRunning"
       >
         <header class="column-head">
           <h3 class="column-title">{{ t('dialog.stash.runningColumn') }}</h3>
@@ -346,7 +430,11 @@ function createEmptyGroup(): void {
         </TransitionGroup>
       </section>
 
-      <section class="column groups-column">
+      <section
+        class="column groups-column"
+        @dragover.stop="onDragOverGroupsColumn"
+        @drop.stop="clearDragState"
+      >
         <header class="column-head">
           <h3 class="column-title">{{ t('dialog.stash.groupsColumn') }}</h3>
           <button
@@ -551,8 +639,18 @@ function createEmptyGroup(): void {
   transition: box-shadow var(--motion-quick) var(--motion-ease);
 }
 
-.running-column.drop-remove {
-  box-shadow: inset 0 0 0 1px var(--danger);
+.running-column.drop-restore {
+  box-shadow: inset 0 0 0 1px var(--accent-text);
+}
+
+.stash-modal {
+  transition: box-shadow var(--motion-quick) var(--motion-ease);
+}
+
+.stash-modal.drop-remove {
+  box-shadow:
+    inset 0 0 0 1px var(--danger),
+    0 12px 40px #00000040;
 }
 
 .column-head {
