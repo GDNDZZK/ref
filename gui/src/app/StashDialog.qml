@@ -59,9 +59,85 @@ ModalDialog {
 
 	readonly property bool dragging: dragKind !== ""
 
+	readonly property var memberPalette: [Theme.agentBlue, Theme.agentPurple, Theme.agentGreen, Theme.agentOrange, Theme.agentCyan, Theme.agentYellow, Theme.agentRed]
+	property var memberColorMap: ({})
+	property int memberColorRevision: 0
+
+	function rebuildMemberColors() {
+		const seen = {}
+		const keys = []
+		const count = Workspace.sessions.count
+		for (let i = 0; i < count; ++i) {
+			const row = Workspace.sessions.rowAt(i)
+			const pid = String(row.parentId ?? "")
+			const sid = String(row.sessionId ?? "")
+			const key = pid !== "" ? pid : sid
+			if (key !== "" && !Object.prototype.hasOwnProperty.call(seen, key)) {
+				seen[key] = true
+				keys.push(key)
+			}
+		}
+		const groups = Workspace.stash.groups
+		for (let gi = 0; gi < groups.length; ++gi) {
+			const members = groups[gi].members ?? []
+			for (let mi = 0; mi < members.length; ++mi) {
+				const m = members[mi]
+				const pid = String(m.parentId ?? "")
+				const sid = String(m.sessionId ?? "")
+				const key = pid !== "" ? pid : sid
+				if (key !== "" && !Object.prototype.hasOwnProperty.call(seen, key)) {
+					seen[key] = true
+					keys.push(key)
+				}
+			}
+		}
+		keys.sort()
+
+		const palette = memberPalette
+		const size = palette.length
+		const used = []
+		for (let k = 0; k < size; ++k)
+			used.push(0)
+
+		const multiplier = 31
+		const modulus = 1000003
+		const map = {}
+
+		for (let i = 0; i < keys.length; ++i) {
+			const key = keys[i]
+			let hash = 0
+			for (let j = 0; j < key.length; ++j)
+				hash = (hash * multiplier + key.charCodeAt(j)) % modulus
+			const preferred = hash % size
+			let minUsed = used[0]
+			for (let k = 1; k < size; ++k) {
+				if (used[k] < minUsed)
+					minUsed = used[k]
+			}
+			let chosen = preferred
+			for (let offset = 0; offset < size; ++offset) {
+				const slot = (preferred + offset) % size
+				if (used[slot] === minUsed) {
+					chosen = slot
+					break
+				}
+			}
+			used[chosen] = used[chosen] + 1
+			map[key] = palette[chosen]
+		}
+
+		memberColorMap = map
+		++memberColorRevision
+	}
+
 	function memberTint(parentId, fallbackId) {
+		void memberColorRevision
 		const key = parentId !== "" ? parentId : fallbackId
-		return key !== "" ? Theme.hashColor(key) : Theme.accent
+		if (key === "")
+			return Theme.accent
+		if (Object.prototype.hasOwnProperty.call(memberColorMap, key))
+			return memberColorMap[key]
+		return Theme.hashColor(key)
 	}
 
 	function syncKeyModel(listModel, items, keyName) {
@@ -106,6 +182,7 @@ ModalDialog {
 		groupsById = map
 		++groupsRevision
 		syncKeyModel(groupsListModel, groups, "id")
+		rebuildMemberColors()
 		groupsSynced()
 	}
 
@@ -306,6 +383,14 @@ ModalDialog {
 	Connections {
 		target: Workspace.stash
 		function onGroupsChanged() { dialog.syncGroupsModel() }
+	}
+
+	Connections {
+		target: Workspace.sessions
+		function onDataChanged() { dialog.rebuildMemberColors() }
+		function onModelReset() { dialog.rebuildMemberColors() }
+		function onRowsInserted() { dialog.rebuildMemberColors() }
+		function onRowsRemoved() { dialog.rebuildMemberColors() }
 	}
 
 	Component.onCompleted: {

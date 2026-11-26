@@ -6,6 +6,7 @@ import { createAppI18n } from '../../i18n/index.ts'
 import { info } from '../../model/testMessages.ts'
 import type { StashGroup } from '../../proto/generated'
 import { useWorkspaceStore } from '../../stores/workspace.ts'
+import { ROOT_PALETTE } from '../../theme/agentColor.ts'
 import StashDialog from './StashDialog.vue'
 
 function group(id: string, overrides: Partial<StashGroup> = {}): StashGroup {
@@ -222,6 +223,56 @@ describe('StashDialog', () => {
     await wrapper.get('.group-title').trigger('click')
     await nextTick()
     expect(wrapper.get('.group-header').attributes('draggable')).toBe('false')
+    wrapper.unmount()
+  })
+
+  it('assigns conflict-free 7-palette tints across colliding live sessions and stashed members', async () => {
+    const { wrapper, workspace } = mountStashDialog()
+    workspace.onFrame({
+      kind: 'sessions',
+      sessions: [
+        info({ id: 'ses_0', name: 'root-a', parent: null }),
+        info({ id: 'ses_0_c', name: 'child-a', parent: 'ses_0' }),
+        info({ id: 'ses_7', name: 'root-b', parent: null }),
+      ],
+    })
+    workspace.onFrame({
+      kind: 'groups_changed',
+      groups: [
+        group('g1', {
+          name: 'Work',
+          members: [
+            {
+              session_id: 'ses_E',
+              position: 0,
+              info: info({ id: 'ses_E', name: 'root-c', parent: null, live: false }),
+            },
+            {
+              session_id: 'ses_7_m',
+              position: 1,
+              info: info({ id: 'ses_7_m', name: 'child-b', parent: 'ses_7', live: false }),
+            },
+          ],
+        }),
+      ],
+    })
+    await nextTick()
+
+    const runningCards = wrapper.findAll('.running-card')
+    const memberRows = wrapper.findAll('.member-row')
+    const tint0 = runningCards[0]!.get('.tint-bar').attributes('style')
+    const tint0Child = runningCards[1]!.get('.tint-bar').attributes('style')
+    const tint7 = runningCards[2]!.get('.tint-bar').attributes('style')
+    const tintE = memberRows[0]!.get('.tint-bar').attributes('style')
+    const tint7Member = memberRows[1]!.get('.tint-bar').attributes('style')
+
+    expect(tint0).toBeDefined()
+    expect(tint0Child).toBe(tint0)
+    expect(tint7Member).toBe(tint7)
+    expect(new Set([tint0, tint7, tintE]).size).toBe(3)
+    for (const style of [tint0, tint7, tintE]) {
+      expect(ROOT_PALETTE.some((color) => style?.includes(color))).toBe(true)
+    }
     wrapper.unmount()
   })
 })

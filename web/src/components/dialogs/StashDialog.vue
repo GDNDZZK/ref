@@ -6,7 +6,7 @@ import { dirName, historyLabel, liveLabel } from '../../shell/sessionRow.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
 import { useNoticesStore } from '../../stores/notices.ts'
 import { useWorkspaceStore } from '../../stores/workspace.ts'
-import { paletteColorFor } from '../../theme/agentColor.ts'
+import { assignRootColors, paletteColorFor } from '../../theme/agentColor.ts'
 import ContextMenu from '../ContextMenu.vue'
 import type { MenuItem } from '../ContextMenu.vue'
 import DialogButton from '../DialogButton.vue'
@@ -48,8 +48,22 @@ function report(promise: Promise<unknown>): void {
   promise.catch(notices.pushError)
 }
 
+const creatorColors = computed(() => {
+  const keys: string[] = []
+  for (const session of workspace.live) {
+    keys.push(session.parent ?? session.id)
+  }
+  for (const group of workspace.groups) {
+    for (const member of group.members) {
+      keys.push(member.info.parent ?? member.info.id)
+    }
+  }
+  return assignRootColors(keys)
+})
+
 function creatorTint(info: SessionInfo): string {
-  return paletteColorFor(info.parent ?? info.id)
+  const key = info.parent ?? info.id
+  return creatorColors.value.get(key) ?? paletteColorFor(key)
 }
 
 function memberTitle(member: StashMember): string {
