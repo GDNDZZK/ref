@@ -192,8 +192,9 @@ where
     hub.set_status(&mut st, SessionStatus::Busy);
     let (hub2, s2) = (hub.clone(), s.clone());
     tokio::spawn(async move {
-        f(hub2.clone(), s2.clone(), cancel).await;
-        finish_run(&hub2, &s2, id, false);
+        let guard = RunGuard::new(hub2.clone(), s2.clone(), id);
+        f(hub2, s2, cancel).await;
+        guard.finish(false);
     });
     Ok(())
 }
@@ -250,6 +251,44 @@ pub(crate) async fn wait_idle(s: &Arc<Session>, timeout: Duration) -> bool {
     true
 }
 
+struct RunGuard {
+    hub: Arc<Hub>,
+    s: Arc<Session>,
+    id: u64,
+    active: bool,
+}
+
+impl RunGuard {
+    fn new(hub: Arc<Hub>, s: Arc<Session>, id: u64) -> Self {
+        Self {
+            hub,
+            s,
+            id,
+            active: true,
+        }
+    }
+
+    fn finish(mut self, completed: bool) {
+        self.active = false;
+        finish_run(&self.hub, &self.s, self.id, completed);
+    }
+}
+
+impl Drop for RunGuard {
+    fn drop(&mut self) {
+        if self.active {
+            self.active = false;
+            if std::thread::panicking() {
+                tracing::error!(
+                    session = %self.s.id,
+                    "session run task panicked; forcing idle cleanup"
+                );
+            }
+            finish_run(&self.hub, &self.s, self.id, false);
+        }
+    }
+}
+
 async fn run_task(
     hub: Arc<Hub>,
     s: Arc<Session>,
@@ -257,6 +296,7 @@ async fn run_task(
     retry_now: Arc<Notify>,
     id: u64,
 ) {
+    let guard = RunGuard::new(hub.clone(), s.clone(), id);
     let outcome = run_loop(&hub, &s, &cancel, &retry_now).await;
     if let Outcome::Aborted = &outcome {
         let mut st = s.lock();
@@ -292,7 +332,7 @@ async fn run_task(
             hub.notify(&st, NotifyKind::TurnError, Some(text.clone()));
         }
     }
-    finish_run(&hub, &s, id, matches!(outcome, Outcome::Done));
+    guard.finish(matches!(outcome, Outcome::Done));
 }
 
 /// Ends the run `id`. `completed`: the turn ended normally (the user is told if the session
@@ -332,7 +372,10 @@ fn finish_run(hub: &Arc<Hub>, s: &Arc<Session>, id: u64, completed: bool) {
         if !st.queue.is_empty() {
             // After a user abort, a prompt the user typed while busy is the redirect they want
             // answered ("type a correction, then interrupt"); peer messages alone do not restart.
-            let has_human = st.queue.iter().any(|m| m.source == MessageSource::Human);
+            let has_human = st
+                .queue
+                .iter()
+                .any(|m| matches!(m.source, MessageSource::Human | MessageSource::Spawn { .. }));
             if st.closed || (st.user_aborted && !has_human) {
                 while let Some(m) = st.queue.pop_front() {
                     hub.emit_message(&s.id, &m);
@@ -1458,8 +1501,10 @@ impl CallCtx<'_> {
             ),
         };
         self.finish(state, out);
-        let mut st = s.lock();
-        hub.set_status(&mut st, SessionStatus::Busy);
+        if !self.cancel.is_cancelled() {
+            let mut st = s.lock();
+            hub.set_status(&mut st, SessionStatus::Busy);
+        }
     }
 }
 

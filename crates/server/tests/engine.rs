@@ -1911,6 +1911,39 @@ async fn queue_changes_reach_attached_connection() {
 }
 
 #[tokio::test]
+async fn user_abort_restarts_when_spawn_task_is_queued() {
+    let (_m, hub, _work, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 => Reply::Hang("working".into()),
+            _ => Reply::Text("spawn handled".into()),
+        }),
+        "abort-spawn-queue",
+    )
+    .await;
+    prompt(&hub, &s, "initial");
+    wait_session(&s, "streaming", |s| last_text(s) == "working").await;
+
+    let spawn_msg = ref_server::session::user_message(
+        MessageSource::Spawn {
+            from_id: "ses_parent".into(),
+            from_name: "parent".into(),
+        },
+        "spawned task".into(),
+        vec![],
+    );
+    assert!(ref_server::engine::submit(&hub, &s, spawn_msg));
+
+    ref_server::engine::abort(&hub, &s, true);
+    wait_idle(&s).await;
+
+    let msgs = messages(&s);
+    assert!(msgs.iter().any(
+        |m| matches!(&m.source, MessageSource::Spawn { .. }) && m.raw_text() == "spawned task"
+    ));
+    assert_eq!(last_text(&s), "spawn handled");
+}
+
+#[tokio::test]
 async fn frontends_get_image_stubs_and_undo_returns_the_bytes() {
     let m = mock(Arc::new(|n, _| match n {
         0 => Reply::Tools(vec![tool(
