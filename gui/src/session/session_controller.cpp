@@ -153,7 +153,7 @@ QCoro::Task<SessionController::Result<void>> SessionController::loadOlder()
 	setLoadingOlder(true);
 	const QPointer<SessionController> self(this); // the controller can be gone when the page arrives
 	const QString sessionId = m_sessionId;
-	const auto page = co_await m_backend.client().messages(sessionId, before, m_model.pageSize());
+	const auto page = co_await m_backend.client().messages(sessionId, before, static_cast<int>(m_model.pageSize()));
 	if(!self)
 	{
 		co_return std::unexpected(destroyedError());
@@ -289,7 +289,7 @@ QCoro::Task<> SessionController::fetchRange(quint64 startSeq, quint64 endSeq, qu
 {
 	const QPointer<SessionController> self(this);
 	const QString sessionId = m_sessionId;
-	const auto page = co_await m_backend.client().messagesRange(sessionId, startSeq, endSeq, m_model.pageSize());
+	const auto page = co_await m_backend.client().messagesRange(sessionId, startSeq, endSeq, static_cast<int>(m_model.pageSize()));
 	if(!self || !m_attached || sessionId != m_sessionId || generation != m_rangeFetchGen)
 	{
 		co_return;
@@ -336,7 +336,7 @@ QCoro::Task<> SessionController::loadAllPlaceholders(quint64 generation)
 			break;
 		}
 		const QString sessionId = m_sessionId;
-		const auto page = co_await m_backend.client().messagesRange(sessionId, range->first, range->second, ConversationModel::MaxServerPageSize);
+		const auto page = co_await m_backend.client().messagesRange(sessionId, range->first, range->second, static_cast<int>(ConversationModel::MaxServerPageSize));
 		if(!self || !m_attached || sessionId != m_sessionId || generation != m_rangeFetchGen || !m_model.isWindowUnlimited())
 		{
 			if(self && generation == m_rangeFetchGen)

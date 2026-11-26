@@ -262,7 +262,9 @@ function onDropOutside(event: DragEvent): void {
 }
 
 function isInsideColumns(target: EventTarget | null): boolean {
-  const element = target instanceof Element ? target : target instanceof Node ? target.parentElement : null
+  let element: Element | null = null
+  if (target instanceof Element) element = target
+  else if (target instanceof Node) element = target.parentElement
   return element?.closest('.running-column, .groups-column') != null
 }
 

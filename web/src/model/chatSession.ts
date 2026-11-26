@@ -549,6 +549,15 @@ export class ChatSession {
     return transcript
   }
 
+  private canContinueLoadingAll(generation: number, token: number): boolean {
+    return (
+      generation === this.state.generation &&
+      token === this.rangeSerial &&
+      this.state.attachment !== 'detached' &&
+      this.transcript.isUnlimited
+    )
+  }
+
   private async loadAllPlaceholders(): Promise<void> {
     if (this.loadingAll) return
     if (!this.state.loaded || this.state.attachment === 'detached' || !this.transcript.isUnlimited) return
@@ -556,26 +565,13 @@ export class ChatSession {
     const token = ++this.rangeSerial
     this.loadingAll = true
     try {
-      while (
-        generation === this.state.generation &&
-        token === this.rangeSerial &&
-        this.state.attachment !== 'detached' &&
-        this.transcript.isUnlimited &&
-        this.transcript.hasPlaceholders()
-      ) {
+      while (this.canContinueLoadingAll(generation, token) && this.transcript.hasPlaceholders()) {
         const missing = this.transcript.newestMissingRange(MAX_SERVER_PAGE_SIZE)
         if (!missing) break
         const page = await this.deps
           .api()
           .messagesRange(this.id, missing.startSeq, missing.endSeq, missing.endSeq - missing.startSeq)
-        if (
-          generation !== this.state.generation ||
-          token !== this.rangeSerial ||
-          this.state.attachment === 'detached' ||
-          !this.transcript.isUnlimited
-        ) {
-          return
-        }
+        if (!this.canContinueLoadingAll(generation, token)) return
         if (page.messages.length === 0) break
         this.recordMessageImages(page.messages)
         this.transcript.insertRange(page.start_seq, page.end_seq, page.messages)
@@ -585,12 +581,7 @@ export class ChatSession {
         if (next && next.startSeq === missing.startSeq && next.endSeq === missing.endSeq) break
       }
     } catch (error) {
-      if (
-        generation === this.state.generation &&
-        token === this.rangeSerial &&
-        this.state.attachment !== 'detached' &&
-        this.transcript.isUnlimited
-      ) {
+      if (this.canContinueLoadingAll(generation, token)) {
         this.deps.notify('error', describeError(error))
       }
     } finally {

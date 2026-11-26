@@ -158,8 +158,8 @@ public:
 	qsizetype residentCount() const;
 	std::optional<std::pair<quint64, quint64>> missingRangeAround(quint64 visibleStart,
 	                                                              quint64 visibleEnd,
-	                                                              qsizetype pageSize = PageSize) const;
-	std::optional<std::pair<quint64, quint64>> newestMissingRange(qsizetype pageSize = MaxServerPageSize) const;
+	                                                              qsizetype limit = PageSize) const;
+	std::optional<std::pair<quint64, quint64>> newestMissingRange(qsizetype limit = MaxServerPageSize) const;
 	Q_INVOKABLE int firstRowForSeq(quint64 seq) const;
 	Q_INVOKABLE int seqForRow(int row) const;
 	// Adds the message, or replaces the one with the same id.

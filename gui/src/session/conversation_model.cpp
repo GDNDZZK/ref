@@ -1086,9 +1086,9 @@ int ConversationModel::seqForRow(int row) const
 
 std::optional<std::pair<quint64, quint64>> ConversationModel::missingRangeAround(quint64 visibleStart,
                                                                                  quint64 visibleEnd,
-                                                                                 qsizetype pageSize) const
+                                                                                 qsizetype limit) const
 {
-	if(m_messages.isEmpty() || pageSize <= 0)
+	if(m_messages.isEmpty() || limit <= 0)
 	{
 		return std::nullopt;
 	}
@@ -1118,21 +1118,21 @@ std::optional<std::pair<quint64, quint64>> ConversationModel::missingRangeAround
 	}
 
 	const qsizetype center = (firstMissing + lastMissing) / 2;
-	qsizetype fetchStart = std::max<qsizetype>(0, center - pageSize / 2);
-	qsizetype fetchEnd = std::min<qsizetype>(total, fetchStart + pageSize);
-	if(fetchEnd - fetchStart < pageSize && fetchStart > 0)
+	qsizetype fetchStart = std::max<qsizetype>(0, center - limit / 2);
+	qsizetype fetchEnd = std::min<qsizetype>(total, fetchStart + limit);
+	if(fetchEnd - fetchStart < limit && fetchStart > 0)
 	{
-		fetchStart = std::max<qsizetype>(0, fetchEnd - pageSize);
+		fetchStart = std::max<qsizetype>(0, fetchEnd - limit);
 	}
 	if(firstMissing < fetchStart)
 	{
 		fetchStart = firstMissing;
-		fetchEnd = std::min<qsizetype>(total, fetchStart + pageSize);
+		fetchEnd = std::min<qsizetype>(total, fetchStart + limit);
 	}
 	else if(lastMissing >= fetchEnd)
 	{
 		fetchEnd = std::min<qsizetype>(total, lastMissing + 1);
-		fetchStart = std::max<qsizetype>(0, fetchEnd - pageSize);
+		fetchStart = std::max<qsizetype>(0, fetchEnd - limit);
 	}
 	while(fetchStart < fetchEnd && m_messages.at(fetchStart).materialized)
 	{
@@ -1163,9 +1163,9 @@ qsizetype ConversationModel::pageSize() const
 	return std::clamp<qsizetype>(m_windowSize / 2, std::min<qsizetype>(m_windowSize, 100), MaxServerPageSize);
 }
 
-std::optional<std::pair<quint64, quint64>> ConversationModel::newestMissingRange(qsizetype pageSize) const
+std::optional<std::pair<quint64, quint64>> ConversationModel::newestMissingRange(qsizetype limit) const
 {
-	if(m_messages.isEmpty() || pageSize <= 0)
+	if(m_messages.isEmpty() || limit <= 0)
 	{
 		return std::nullopt;
 	}
@@ -1183,7 +1183,7 @@ std::optional<std::pair<quint64, quint64>> ConversationModel::newestMissingRange
 	{
 		--gapStart;
 	}
-	const qsizetype fetchStart = std::max<qsizetype>(gapStart, gapEnd - pageSize);
+	const qsizetype fetchStart = std::max<qsizetype>(gapStart, gapEnd - limit);
 	return std::pair<quint64, quint64>{static_cast<quint64>(fetchStart), static_cast<quint64>(gapEnd)};
 }
 
