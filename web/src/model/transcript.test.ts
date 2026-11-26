@@ -4,6 +4,7 @@ import type { Block } from './blocks.ts'
 import {
   EVICT_BUFFER,
   MAX_RESIDENT_MESSAGES,
+  MAX_SERVER_PAGE_SIZE,
   PAGE_SIZE,
   TAIL_KEEP_MESSAGES,
   Transcript,
@@ -517,9 +518,13 @@ describe('Transcript: sliding window and eviction', () => {
   })
 
   it('exports expected sliding-window constants', () => {
-    expect([PAGE_SIZE, MAX_RESIDENT_MESSAGES, TAIL_KEEP_MESSAGES, EVICT_BUFFER]).toEqual([
-      500, 1000, 1000, 500,
-    ])
+    expect([
+      PAGE_SIZE,
+      MAX_SERVER_PAGE_SIZE,
+      MAX_RESIDENT_MESSAGES,
+      TAIL_KEEP_MESSAGES,
+      EVICT_BUFFER,
+    ]).toEqual([500, 1000, 1000, 1000, 500])
   })
 
   it('populates 0..total_messages slots from layout_metas and messages, inserts ranges, and evicts outside window', () => {
@@ -597,6 +602,85 @@ describe('Transcript: sliding window and eviction', () => {
       'materialized',
       'materialized',
     ])
+  })
+
+  it('supports unlimited window (0): skips eviction and chunks newestMissingRange up to 1000', () => {
+    const { transcript } = setup()
+    const metas = Array.from({ length: 2300 }, (_, i) => meta(i, `m${i}`))
+    const tail = Array.from({ length: 200 }, (_, i) => userMessage(`m${2300 + i}`, `msg ${2300 + i}`))
+    transcript.setWindowSize(0)
+    expect(transcript.isUnlimited).toBe(true)
+    expect(transcript.pageSize).toBe(MAX_SERVER_PAGE_SIZE)
+    expect(transcript.tailKeep).toBe(0)
+    transcript.load(
+      snapshot(tail, { more_before: true, total_messages: 2500, start_seq: 2300, layout_metas: metas }),
+    )
+    transcript.flush(0)
+
+    expect(transcript.hasPlaceholders()).toBe(true)
+    expect(transcript.newestMissingRange()).toEqual({ startSeq: 1300, endSeq: 2300 })
+    transcript.insertRange(
+      1300,
+      2300,
+      Array.from({ length: 1000 }, (_, i) => userMessage(`m${1300 + i}`, `msg ${1300 + i}`)),
+    )
+    expect(transcript.newestMissingRange()).toEqual({ startSeq: 300, endSeq: 1300 })
+    transcript.insertRange(
+      300,
+      1300,
+      Array.from({ length: 1000 }, (_, i) => userMessage(`m${300 + i}`, `msg ${300 + i}`)),
+    )
+    expect(transcript.newestMissingRange()).toEqual({ startSeq: 0, endSeq: 300 })
+    transcript.insertRange(
+      0,
+      300,
+      Array.from({ length: 300 }, (_, i) => userMessage(`m${i}`, `msg ${i}`)),
+    )
+    expect(transcript.hasPlaceholders()).toBe(false)
+    expect(transcript.newestMissingRange()).toBeUndefined()
+    expect(transcript.residentCount).toBe(2500)
+
+    expect(transcript.evictOutside(2400, 2499)).toEqual([])
+    expect(transcript.evictBeforeTail(100)).toEqual([])
+    expect(transcript.residentCount).toBe(2500)
+  })
+
+  it('respects custom positive window sizes for pageSize, evictBuffer, missingRangeAround, and eviction', () => {
+    const { transcript } = setup()
+    transcript.setWindowSize(50)
+    expect(transcript.isUnlimited).toBe(false)
+    expect(transcript.pageSize).toBe(50)
+    expect(transcript.evictBuffer).toBe(25)
+    expect(transcript.tailKeep).toBe(50)
+
+    transcript.setWindowSize(200)
+    expect(transcript.pageSize).toBe(100)
+    expect(transcript.evictBuffer).toBe(100)
+    expect(transcript.tailKeep).toBe(200)
+    const metas200 = Array.from({ length: 400 }, (_, i) => meta(i, `m${i}`))
+    transcript.load(
+      snapshot([userMessage('m400', 'tail')], {
+        more_before: true,
+        total_messages: 401,
+        start_seq: 400,
+        layout_metas: metas200,
+      }),
+    )
+    expect(transcript.missingRangeAround(150, 155)).toEqual({ startSeq: 102, endSeq: 202 })
+
+    transcript.setWindowSize(3000)
+    expect(transcript.pageSize).toBe(1000)
+    expect(transcript.evictBuffer).toBe(1500)
+    expect(transcript.tailKeep).toBe(3000)
+    const msgs1500 = Array.from({ length: 1500 }, (_, i) => userMessage(`x${i}`, `msg ${i}`))
+    transcript.load(snapshot(msgs1500))
+    expect(transcript.evictOutside(0, 1499)).toEqual([])
+    expect(transcript.residentCount).toBe(1500)
+
+    transcript.setWindowSize(200)
+    const evicted = transcript.evictOutside(0, 1499)
+    expect(evicted).toHaveLength(1300)
+    expect(transcript.residentCount).toBe(200)
   })
 
   it('reuses unchanged slot objects across streaming flushes', () => {

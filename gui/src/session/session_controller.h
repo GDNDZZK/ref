@@ -88,6 +88,7 @@ public:
 	void setVisibleSeqRange(quint64 startSeq, quint64 endSeq);
 	void retryRangeFetch();
 	void setFollowing(bool following);
+	void setMessageWindowSize(qsizetype size);
 	QCoro::Task<Result<proto::PromptResult>> send(QString text, QList<proto::ImageData> images = {});
 	QCoro::Task<Result<void>> abort();
 	QCoro::Task<Result<proto::RetryNowResult>> retryNow();
@@ -144,6 +145,8 @@ private:
 	void onFrame(const proto::ServerFrame& frame);
 	void onEvent(const proto::SessionEvent& event);
 	QCoro::Task<> fetchRange(quint64 startSeq, quint64 endSeq, quint64 generation);
+	void startLoadAllPlaceholders();
+	QCoro::Task<> loadAllPlaceholders(quint64 generation);
 	void onRangeFetchTimeout();
 	void cancelPendingRangeFetch();
 	// Adds a question unless it is already asked.
@@ -172,6 +175,7 @@ private:
 	quint64 m_pendingFetchStart = 0;
 	quint64 m_pendingFetchEnd = 0;
 	quint64 m_rangeFetchGen = 0;
+	bool m_loadingAllPlaceholders = false;
 };
 
 } // namespace refgui::session

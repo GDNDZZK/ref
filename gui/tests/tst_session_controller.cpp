@@ -174,6 +174,7 @@ private slots:
 	void debouncedRangeFetchDiscardsStaleAndEvictsOnDetach();
 	void rangeFetchSurfacesErrorAndRetries();
 	void retryNowRequestsBackend();
+	void unlimitedWindowAutoLoadsAndSwitchingBackTrims();
 };
 
 void TestSessionController::createShowsTheSnapshot()
@@ -748,6 +749,100 @@ void TestSessionController::retryNowRequestsBackend()
 	QVERIFY(res && res->has_value());
 	QVERIFY((*res)->retried);
 	QVERIFY(sawRetryNow);
+}
+
+void TestSessionController::unlimitedWindowAutoLoadsAndSwitchingBackTrims()
+{
+	Fixture f;
+	constexpr int Total = 2500;
+	constexpr int StartSeq = 1500;
+	QJsonArray metas;
+	for(int i = 0; i < StartSeq; ++i)
+	{
+		metas.append(QJsonObject{{u"seq"_s, i},
+		                         {u"id"_s, u"u_%1"_s.arg(i)},
+		                         {u"role"_s, u"user"_s},
+		                         {u"source_kind"_s, u"human"_s},
+		                         {u"has_error"_s, false},
+		                         {u"parts"_s, QJsonArray{QJsonObject{{u"kind"_s, u"text"_s}, {u"chars"_s, 20}, {u"lines"_s, 1}}}}});
+	}
+	QJsonArray msgs;
+	for(int i = StartSeq; i < Total; ++i)
+	{
+		msgs.append(messageJson(u"u_%1"_s.arg(i), u"user"_s, u"msg_%1"_s.arg(i), true));
+	}
+	f.snapshot = {{u"snapshot"_s,
+	               QJsonObject{{u"info"_s, infoJson(u"ses_1"_s, u"idle"_s)},
+	                           {u"messages"_s, msgs},
+	                           {u"more_before"_s, true},
+	                           {u"total_messages"_s, Total},
+	                           {u"start_seq"_s, StartSeq},
+	                           {u"layout_metas"_s, metas}}}};
+
+	QList<std::pair<quint64, quint64>> rangeRequests;
+	bool firstShortPageDone = false;
+	f.fake.onRequest = [&](const QJsonObject& request) {
+		if(request.value(u"op"_s).toString() == u"messages"_s)
+		{
+			const quint64 s = static_cast<quint64>(request.value(u"start_seq"_s).toInteger());
+			const quint64 e = static_cast<quint64>(request.value(u"end_seq"_s).toInteger());
+			rangeRequests.append({s, e});
+			// Simulate a short byte-capped server page on the first request [500, 1500) -> only [500, 800).
+			const quint64 actualEnd = (!firstShortPageDone && s == 500 && e == 1500) ? 800 : e;
+			if(s == 500 && e == 1500)
+			{
+				firstShortPageDone = true;
+			}
+			QJsonArray payload;
+			for(quint64 k = s; k < actualEnd; ++k)
+			{
+				payload.append(messageJson(u"u_%1"_s.arg(k), u"user"_s, u"loaded_%1"_s.arg(k), true));
+			}
+			f.fake.respond(request, {{u"messages"_s, payload}, {u"more_before"_s, s > 0}, {u"start_seq"_s, static_cast<qint64>(s)}, {u"end_seq"_s, static_cast<qint64>(actualEnd)}});
+			return;
+		}
+		f.answer(request);
+	};
+
+	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
+	QCOMPARE(f.controller.model().residentCount(), 1000);
+	QVERIFY(f.controller.model().hasPlaceholders());
+
+	QSignalSpy evictedSpy(&f.controller, &SessionController::messagesEvicted);
+	f.controller.setMessageWindowSize(0);
+	QTRY_COMPARE(f.controller.model().residentCount(), Total);
+	QVERIFY(!f.controller.model().hasPlaceholders());
+	QCOMPARE(rangeRequests.size(), 3);
+	QCOMPARE(rangeRequests.at(0), (std::pair<quint64, quint64>{500, 1500}));
+	QCOMPARE(rangeRequests.at(1), (std::pair<quint64, quint64>{800, 1500}));
+	QCOMPARE(rangeRequests.at(2), (std::pair<quint64, quint64>{0, 500}));
+	QCOMPARE(evictedSpy.count(), 0);
+
+	// Scrolling and detaching must not evict when unlimited.
+	f.controller.setFollowing(false);
+	f.controller.setVisibleSeqRange(0, 5);
+	QTest::qWait(SettleMs);
+	QCOMPARE(f.controller.model().residentCount(), Total);
+	QCOMPARE(evictedSpy.count(), 0);
+
+	QVERIFY(await(f.controller.detach()));
+	QCOMPARE(f.controller.model().residentCount(), Total);
+	QCOMPARE(evictedSpy.count(), 0);
+
+	// Re-attaching while unlimited auto-loads placeholders again.
+	rangeRequests.clear();
+	firstShortPageDone = false;
+	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
+	QTRY_COMPARE(f.controller.model().residentCount(), Total);
+	QCOMPARE(rangeRequests.size(), 3);
+
+	// Switching back to a positive size while following trims to the new window size.
+	f.controller.setFollowing(true);
+	f.controller.setMessageWindowSize(200);
+	QCOMPARE(f.controller.model().residentCount(), 200);
+	QVERIFY(f.controller.model().hasPlaceholders());
+	QCOMPARE(f.controller.model().index(0).data(ConversationModel::KindRole).toString(), u"skeleton"_s);
+	QCOMPARE(evictedSpy.count(), 1);
 }
 
 QTEST_GUILESS_MAIN(TestSessionController)

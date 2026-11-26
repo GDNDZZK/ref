@@ -46,6 +46,7 @@ pub mod cmd {
     pub const RETRY: &str = "retry";
     pub const STASH: &str = "stash";
     pub const STASHED: &str = "stashed";
+    pub const WINDOW: &str = "window";
 }
 
 /// Session info for a session the client has not heard about yet.

@@ -12,15 +12,9 @@ use ref_proto::{
 use crate::ui::chat::ChatState;
 use crate::util::apply_delta;
 
-/// Messages per page for `Attach` and `Messages` range queries (<= `ref_proto::PAGE_MAX`).
-pub const PAGE_SIZE: usize = 500;
-const _: () = assert!(PAGE_SIZE <= ref_proto::PAGE_MAX);
 /// Maximum materialized messages kept in a `SessionView` before evicting distant slots.
 pub const MAX_RESIDENT_MESSAGES: usize = 1000;
-/// Newest messages retained when returning to the bottom or detaching.
-pub const TAIL_KEEP_MESSAGES: usize = 1000;
-/// Resident margin kept around the visible sequence range before eviction.
-const EVICT_MARGIN: usize = 500;
+const _: () = assert!(SessionView::page_size_for(MAX_RESIDENT_MESSAGES) <= ref_proto::PAGE_MAX);
 /// Debounce before sending a viewport-driven `Request::Messages` range query.
 pub const RANGE_DEBOUNCE: Duration = Duration::from_millis(80);
 
@@ -334,6 +328,8 @@ pub struct SessionView {
     pub needs_anchor_restore: bool,
     /// Bumped whenever the message list is replaced; stale page responses are dropped.
     pub history_gen: u64,
+    /// Client-side resident message window size (`0` = unlimited / load all).
+    pub message_window_size: usize,
 }
 
 impl SessionView {
@@ -360,7 +356,65 @@ impl SessionView {
             range_halted: false,
             needs_anchor_restore: false,
             history_gen: 0,
+            message_window_size: MAX_RESIDENT_MESSAGES,
         }
+    }
+
+    pub fn with_message_window_size(mut self, size: usize) -> Self {
+        self.message_window_size = size;
+        self
+    }
+
+    pub fn set_message_window_size(&mut self, size: usize) {
+        self.message_window_size = size;
+    }
+
+    pub fn is_window_unlimited(&self) -> bool {
+        self.message_window_size == 0
+    }
+
+    pub const fn page_size_for(size: usize) -> usize {
+        if size == 0 {
+            ref_proto::PAGE_MAX
+        } else {
+            let half = size / 2;
+            let min_page = if size < 100 { size } else { 100 };
+            if half < min_page {
+                min_page
+            } else if half > ref_proto::PAGE_MAX {
+                ref_proto::PAGE_MAX
+            } else {
+                half
+            }
+        }
+    }
+
+    pub fn page_size(&self) -> usize {
+        Self::page_size_for(self.message_window_size)
+    }
+
+    pub fn evict_margin(&self) -> usize {
+        self.message_window_size / 2
+    }
+
+    pub fn tail_keep(&self) -> usize {
+        self.message_window_size
+    }
+
+    pub fn newest_missing_range(&self) -> Option<(usize, usize)> {
+        let mut gap_end = self.slots.len();
+        while gap_end > 0 && self.slots[gap_end - 1].is_materialized() {
+            gap_end -= 1;
+        }
+        if gap_end == 0 {
+            return None;
+        }
+        let mut gap_start = gap_end - 1;
+        while gap_start > 0 && !self.slots[gap_start - 1].is_materialized() {
+            gap_start -= 1;
+        }
+        let start = gap_end.saturating_sub(ref_proto::PAGE_MAX).max(gap_start);
+        Some((start, gap_end))
     }
 
     pub fn is_busy(&self) -> bool {
@@ -502,22 +556,23 @@ impl SessionView {
         while gap_end < len && !self.slots[gap_end].is_materialized() {
             gap_end += 1;
         }
-        if gap_end - gap_start <= PAGE_SIZE {
+        let page_size = self.page_size();
+        if gap_end - gap_start <= page_size {
             return Some((gap_start, gap_end));
         }
         // Scrolling up into a gap immediately above materialized messages: fetch the tail of the gap.
         if last_p + 1 == gap_end && gap_end < len {
-            let start = gap_end.saturating_sub(PAGE_SIZE).max(gap_start);
+            let start = gap_end.saturating_sub(page_size).max(gap_start);
             return Some((start, gap_end));
         }
         if first_p == gap_start {
-            return Some((gap_start, (gap_start + PAGE_SIZE).min(gap_end)));
+            return Some((gap_start, (gap_start + page_size).min(gap_end)));
         }
         let start = first_p
-            .saturating_sub(PAGE_SIZE / JUMP_LOOKBACK_DIVISOR)
+            .saturating_sub(page_size / JUMP_LOOKBACK_DIVISOR)
             .max(gap_start);
-        let end = (start + PAGE_SIZE).min(gap_end);
-        let start = end.saturating_sub(PAGE_SIZE).max(gap_start);
+        let end = (start + page_size).min(gap_end);
+        let start = end.saturating_sub(page_size).max(gap_start);
         Some((start, end))
     }
 
@@ -566,18 +621,23 @@ impl SessionView {
         changed
     }
 
-    /// Evicts materialized messages outside `[visible_start - EVICT_MARGIN, visible_end + EVICT_MARGIN]` back to
-    /// `Placeholder` when resident count exceeds `MAX_RESIDENT_MESSAGES`.
+    /// Evicts materialized messages outside `[visible_start - evict_margin, visible_end + evict_margin]` back to
+    /// `Placeholder` when resident count exceeds `message_window_size` (`0` = unlimited / no-op).
     pub fn evict_outside(&mut self, visible_start: usize, visible_end: usize) {
+        if self.message_window_size == 0 {
+            return;
+        }
+        let max_resident = self.message_window_size;
+        let margin = self.evict_margin();
         let mut resident = self.resident_count();
-        if resident <= MAX_RESIDENT_MESSAGES {
+        if resident <= max_resident {
             return;
         }
         let len = self.slots.len();
         let vs = visible_start.min(len);
         let ve = visible_end.min(len);
-        let keep_start = vs.saturating_sub(EVICT_MARGIN);
-        let keep_end = (ve + EVICT_MARGIN).min(len);
+        let keep_start = vs.saturating_sub(margin);
+        let keep_end = (ve + margin).min(len);
         let mut evicted_any = false;
         let center = (vs + ve) / 2;
         let mut outer_candidates: Vec<usize> = (0..len)
@@ -587,7 +647,7 @@ impl SessionView {
             .collect();
         outer_candidates.sort_by_key(|&seq| std::cmp::Reverse(seq.abs_diff(center)));
         for seq in outer_candidates {
-            if resident <= MAX_RESIDENT_MESSAGES {
+            if resident <= max_resident {
                 break;
             }
             if self.evict_slot(seq) {
@@ -595,14 +655,14 @@ impl SessionView {
                 evicted_any = true;
             }
         }
-        if resident > MAX_RESIDENT_MESSAGES {
+        if resident > max_resident {
             let center = (vs + ve) / 2;
             let mut candidates: Vec<usize> = (0..len)
                 .filter(|&seq| (seq < vs || seq >= ve) && self.slots[seq].is_materialized())
                 .collect();
             candidates.sort_by_key(|&seq| std::cmp::Reverse(seq.abs_diff(center)));
             for seq in candidates {
-                if resident <= MAX_RESIDENT_MESSAGES {
+                if resident <= max_resident {
                     break;
                 }
                 if self.evict_slot(seq) {
@@ -619,6 +679,9 @@ impl SessionView {
 
     /// Trims resident messages older than the newest `keep_tail` back to placeholders.
     pub fn trim_to_tail(&mut self, keep_tail: usize) {
+        if self.message_window_size == 0 {
+            return;
+        }
         let cutoff = self.slots.len().saturating_sub(keep_tail);
         if cutoff == 0 {
             return;
@@ -1159,9 +1222,9 @@ mod tests {
         assert!(v.slots[15].is_materialized());
         assert!(!v.slots[1440].is_materialized());
 
-        // Trim to tail keeps only newest TAIL_KEEP_MESSAGES.
+        // Trim to tail keeps only newest `tail_keep()` messages.
         v.slots[1440] = MessageSlot::Materialized(Box::new(msg("m1440", Role::User)));
-        v.trim_to_tail(TAIL_KEEP_MESSAGES);
+        v.trim_to_tail(v.tail_keep());
         assert!(!v.slots[15].is_materialized());
         assert!(v.slots[1440].is_materialized());
         assert!(v.more_before);
@@ -1202,5 +1265,100 @@ mod tests {
         assert_eq!(v.find("p2"), Some(1));
         assert_eq!(v.slots[0].as_meta().unwrap().seq, 0);
         assert_eq!(v.slots[1].as_meta().unwrap().seq, 1);
+    }
+
+    #[test]
+    fn unlimited_window_skips_eviction_and_chunks_newest_missing_range() {
+        let mut v = SessionView::new(info(), true).with_message_window_size(0);
+        assert!(v.is_window_unlimited());
+        assert_eq!(v.page_size(), ref_proto::PAGE_MAX);
+        assert_eq!(v.tail_keep(), 0);
+
+        let total = 2350usize;
+        let metas: Vec<MessageLayoutMeta> = (0..2200)
+            .map(|i| compute_layout_meta(i as u64, &msg(&format!("m{i}"), Role::User)))
+            .collect();
+        let tail: Vec<Message> = (2200..total)
+            .map(|i| msg(&format!("m{i}"), Role::User))
+            .collect();
+        v.load_snapshot(SessionSnapshot {
+            info: info(),
+            messages: tail,
+            more_before: true,
+            total_messages: total as u64,
+            start_seq: 2200,
+            layout_metas: metas,
+            pending_permissions: vec![],
+            pending_questions: vec![],
+            queued: vec![],
+        });
+        assert_eq!(v.newest_missing_range(), Some((1200, 2200)));
+        let chunk1: Vec<Message> = (1200..2200)
+            .map(|i| msg(&format!("m{i}"), Role::User))
+            .collect();
+        assert!(v.apply_messages_range(v.history_gen, 1200, chunk1, true));
+        assert_eq!(v.newest_missing_range(), Some((200, 1200)));
+        let chunk2: Vec<Message> = (200..1200)
+            .map(|i| msg(&format!("m{i}"), Role::User))
+            .collect();
+        assert!(v.apply_messages_range(v.history_gen, 200, chunk2, true));
+        assert_eq!(v.newest_missing_range(), Some((0, 200)));
+        let chunk3: Vec<Message> = (0..200)
+            .map(|i| msg(&format!("m{i}"), Role::User))
+            .collect();
+        assert!(v.apply_messages_range(v.history_gen, 0, chunk3, false));
+        assert_eq!(v.newest_missing_range(), None);
+        assert_eq!(v.resident_count(), total);
+
+        v.evict_outside(2300, 2350);
+        v.trim_to_tail(100);
+        assert_eq!(v.resident_count(), total);
+    }
+
+    #[test]
+    fn custom_positive_window_sizes_control_paging_and_eviction() {
+        let mut v = SessionView::new(info(), true).with_message_window_size(50);
+        assert!(!v.is_window_unlimited());
+        assert_eq!(v.page_size(), 50);
+        assert_eq!(v.evict_margin(), 25);
+        assert_eq!(v.tail_keep(), 50);
+
+        v.set_message_window_size(200);
+        assert_eq!(v.page_size(), 100);
+        assert_eq!(v.evict_margin(), 100);
+        assert_eq!(v.tail_keep(), 200);
+
+        v.set_message_window_size(3000);
+        assert_eq!(v.page_size(), 1000);
+        assert_eq!(v.evict_margin(), 1500);
+        assert_eq!(v.tail_keep(), 3000);
+
+        let msgs: Vec<Message> = (0..1500)
+            .map(|i| msg(&format!("m{i}"), Role::User))
+            .collect();
+        v.load_snapshot(SessionSnapshot {
+            info: info(),
+            messages: msgs,
+            more_before: false,
+            total_messages: 1500,
+            start_seq: 0,
+            layout_metas: vec![],
+            pending_permissions: vec![],
+            pending_questions: vec![],
+            queued: vec![],
+        });
+        v.evict_outside(0, 1499);
+        assert_eq!(v.resident_count(), 1500);
+
+        v.set_message_window_size(200);
+        v.evict_outside(1000, 1020);
+        assert_eq!(v.resident_count(), 200);
+        assert!(!v.slots[1499].is_materialized());
+        assert!(v.slots[1010].is_materialized());
+        v.slots[1499] = MessageSlot::Materialized(Box::new(msg("m1499", Role::User)));
+        v.trim_to_tail(v.tail_keep());
+        assert!(!v.slots[0].is_materialized());
+        assert!(!v.slots[1010].is_materialized());
+        assert!(v.slots[1499].is_materialized());
     }
 }

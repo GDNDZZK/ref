@@ -25,7 +25,7 @@ import type {
 } from '../proto/generated'
 import type { Block } from './blocks.ts'
 import { QuestionForm } from './questionForm.ts'
-import { EVICT_BUFFER, PAGE_SIZE, TAIL_KEEP_MESSAGES, Transcript } from './transcript.ts'
+import { MAX_RESIDENT_MESSAGES, MAX_SERVER_PAGE_SIZE, Transcript } from './transcript.ts'
 import type { TranscriptSlot } from './transcript.ts'
 // How this window is attached: `foreground` counts as a direct connection, `watching` only
 // receives events (split view tiles).
@@ -89,6 +89,8 @@ export class ChatSession {
   private rangeTimer: ReturnType<typeof setTimeout> | undefined
   private rangeSerial = 0
   private pendingRange: { startSeq: number; endSeq: number } | undefined
+  private windowSize = MAX_RESIDENT_MESSAGES
+  private loadingAll = false
 
   // `info` is what the session list already knows, so the session can be shown before it is attached.
   constructor(id: string, deps: ChatSessionDeps, info?: SessionInfo) {
@@ -222,6 +224,15 @@ export class ChatSession {
     return this.state.detailsExpanded
   }
 
+  setWindowSize(size: number): void {
+    this.transcript.setWindowSize(size)
+    this.windowSize = this.transcript.tailKeep
+    if (this.state.loaded && this.state.attachment !== 'detached' && this.transcript.isUnlimited) {
+      this.cancelPendingRange()
+      if (this.transcript.hasPlaceholders()) void this.loadAllPlaceholders()
+    }
+  }
+
   // Attaches (or changes how it is attached) and shows the history the backend sends.
   async attach(foreground: boolean): Promise<void> {
     const snapshot = await this.deps.api().attach(this.id, foreground)
@@ -232,6 +243,9 @@ export class ChatSession {
     this.state.attachment = foreground ? 'foreground' : 'watching'
     this.state.loaded = true
     this.showHistory()
+    if (this.transcript.isUnlimited && this.transcript.hasPlaceholders()) {
+      void this.loadAllPlaceholders()
+    }
   }
 
   // Moves between foreground and watching. While the window already receives the session's events
@@ -251,7 +265,7 @@ export class ChatSession {
     this.images.clear() // pictures are fetched again when the session is shown again
     this.messageImages.clear()
     if (this.state.loaded) {
-      const evicted = this.transcript.evictBeforeTail(TAIL_KEEP_MESSAGES)
+      const evicted = this.transcript.evictBeforeTail(this.transcript.tailKeep)
       if (evicted.length > 0) {
         this.transcript.flush(performance.now())
         this.state.blocks = this.transcript.blocks
@@ -283,6 +297,14 @@ export class ChatSession {
     }
     this.transcript.apply(event, performance.now())
     this.publish()
+    if (
+      (event.type === 'reset' || event.type === 'removed') &&
+      this.state.attachment !== 'detached' &&
+      this.transcript.isUnlimited &&
+      this.transcript.hasPlaceholders()
+    ) {
+      void this.loadAllPlaceholders()
+    }
   }
 
   // The connection came back: the history may have moved on without us.
@@ -293,6 +315,9 @@ export class ChatSession {
     this.recordMessageImages(snapshot.messages)
     this.transcript.load(snapshot)
     this.showHistory()
+    if (this.transcript.isUnlimited && this.transcript.hasPlaceholders()) {
+      void this.loadAllPlaceholders()
+    }
   }
 
   async send(text: string): Promise<void> {
@@ -310,7 +335,7 @@ export class ChatSession {
     this.state.loadingOlder = true
     this.state.olderError = ''
     try {
-      const page = await this.deps.api().messagesBefore(this.id, before, PAGE_SIZE)
+      const page = await this.deps.api().messagesBefore(this.id, before, this.transcript.pageSize)
       if (generation !== this.state.generation) return
       this.recordMessageImages(page.messages)
       this.transcript.prepend(page.messages, page.more_before, page.start_seq)
@@ -325,6 +350,7 @@ export class ChatSession {
 
   // Debounced range load for visible placeholder slots. Drops stale responses by generation and serial.
   requestRange(visibleStart: number, visibleEnd: number): void {
+    if (this.transcript.isUnlimited && this.loadingAll) return
     const missing = this.transcript.missingRangeAround(visibleStart, visibleEnd)
     if (!missing) {
       this.clearRangeTimer()
@@ -361,20 +387,18 @@ export class ChatSession {
     this.publish()
   }
 
-  // Trigger 1: scroll away -> evict outside [visibleStart - 500, visibleEnd + 500].
+  // Trigger 1: scroll away -> evict outside [visibleStart - evictBuffer, visibleEnd + evictBuffer].
   evictAround(visibleStart: number, visibleEnd: number): void {
-    const evicted = this.transcript.evictOutside(
-      Math.max(0, visibleStart - EVICT_BUFFER),
-      visibleEnd + EVICT_BUFFER,
-    )
+    const buffer = this.transcript.evictBuffer
+    const evicted = this.transcript.evictOutside(Math.max(0, visibleStart - buffer), visibleEnd + buffer)
     if (evicted.length === 0) return
     this.dropEvictedImages(evicted)
     this.publish()
   }
 
-  // Trigger 2: settle at bottom while following -> evict older than total - 1000.
+  // Trigger 2: settle at bottom while following -> evict older than total - tailKeep.
   evictAtBottom(): void {
-    const evicted = this.transcript.evictBeforeTail(TAIL_KEEP_MESSAGES)
+    const evicted = this.transcript.evictBeforeTail(this.transcript.tailKeep)
     if (evicted.length === 0) return
     this.dropEvictedImages(evicted)
     this.publish()
@@ -483,6 +507,7 @@ export class ChatSession {
     this.clearRangeTimer()
     this.pendingRange = undefined
     this.rangeSerial++
+    this.loadingAll = false
   }
 
   private recordMessageImages(messages: readonly Message[]): void {
@@ -519,7 +544,58 @@ export class ChatSession {
   }
 
   private newTranscript(): Transcript {
-    return new Transcript({ reportError: (message) => this.deps.notify('error', message) })
+    const transcript = new Transcript({ reportError: (message) => this.deps.notify('error', message) })
+    transcript.setWindowSize(this.windowSize)
+    return transcript
+  }
+
+  private async loadAllPlaceholders(): Promise<void> {
+    if (this.loadingAll) return
+    if (!this.state.loaded || this.state.attachment === 'detached' || !this.transcript.isUnlimited) return
+    const generation = this.state.generation
+    const token = ++this.rangeSerial
+    this.loadingAll = true
+    try {
+      while (
+        generation === this.state.generation &&
+        token === this.rangeSerial &&
+        this.state.attachment !== 'detached' &&
+        this.transcript.isUnlimited &&
+        this.transcript.hasPlaceholders()
+      ) {
+        const missing = this.transcript.newestMissingRange(MAX_SERVER_PAGE_SIZE)
+        if (!missing) break
+        const page = await this.deps
+          .api()
+          .messagesRange(this.id, missing.startSeq, missing.endSeq, missing.endSeq - missing.startSeq)
+        if (
+          generation !== this.state.generation ||
+          token !== this.rangeSerial ||
+          this.state.attachment === 'detached' ||
+          !this.transcript.isUnlimited
+        ) {
+          return
+        }
+        if (page.messages.length === 0) break
+        this.recordMessageImages(page.messages)
+        this.transcript.insertRange(page.start_seq, page.end_seq, page.messages)
+        if (page.start_seq === 0 && !page.more_before) this.transcript.moreBefore = false
+        this.publish()
+        const next = this.transcript.newestMissingRange(MAX_SERVER_PAGE_SIZE)
+        if (next && next.startSeq === missing.startSeq && next.endSeq === missing.endSeq) break
+      }
+    } catch (error) {
+      if (
+        generation === this.state.generation &&
+        token === this.rangeSerial &&
+        this.state.attachment !== 'detached' &&
+        this.transcript.isUnlimited
+      ) {
+        this.deps.notify('error', describeError(error))
+      }
+    } finally {
+      if (this.rangeSerial === token) this.loadingAll = false
+    }
   }
 
   private showHistory(): void {

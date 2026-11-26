@@ -131,7 +131,7 @@ QCoro::Task<SessionController::Result<void>> SessionController::detach()
 	m_attached = false; // also when the request fails: a lost connection detaches anyway
 	cancelPendingRangeFetch();
 	setRangeError({});
-	m_model.evictOldTail(ConversationModel::TailKeepMessages);
+	m_model.evictOldTail(m_model.tailKeepMessages());
 	co_return co_await m_backend.client().detach(m_sessionId);
 }
 
@@ -153,7 +153,7 @@ QCoro::Task<SessionController::Result<void>> SessionController::loadOlder()
 	setLoadingOlder(true);
 	const QPointer<SessionController> self(this); // the controller can be gone when the page arrives
 	const QString sessionId = m_sessionId;
-	const auto page = co_await m_backend.client().messages(sessionId, before, ConversationModel::PageSize);
+	const auto page = co_await m_backend.client().messages(sessionId, before, m_model.pageSize());
 	if(!self)
 	{
 		co_return std::unexpected(destroyedError());
@@ -177,7 +177,41 @@ void SessionController::cancelPendingRangeFetch()
 {
 	m_rangeFetchTimer.stop();
 	++m_rangeFetchGen;
+	m_loadingAllPlaceholders = false;
 	setRangeError({});
+}
+
+void SessionController::setMessageWindowSize(qsizetype size)
+{
+	const qsizetype clamped = std::max<qsizetype>(0, size);
+	if(m_model.messageWindowSize() == clamped)
+	{
+		return;
+	}
+	m_model.setMessageWindowSize(clamped);
+	if(!m_attached)
+	{
+		return;
+	}
+	if(m_model.isWindowUnlimited())
+	{
+		cancelPendingRangeFetch();
+		if(m_model.hasPlaceholders())
+		{
+			startLoadAllPlaceholders();
+		}
+	}
+	else
+	{
+		if(m_loadingAllPlaceholders)
+		{
+			cancelPendingRangeFetch();
+		}
+		if(m_following && !m_rangeFetchTimer.isActive())
+		{
+			m_model.evictOldTail(m_model.tailKeepMessages());
+		}
+	}
 }
 
 void SessionController::setVisibleSeqRange(quint64 startSeq, quint64 endSeq)
@@ -186,16 +220,20 @@ void SessionController::setVisibleSeqRange(quint64 startSeq, quint64 endSeq)
 	{
 		return;
 	}
-	if(!m_following)
+	if(!m_following && !m_model.isWindowUnlimited())
 	{
 		m_model.evictOutside(startSeq, endSeq);
 	}
-	const auto missing = m_model.missingRangeAround(startSeq, endSeq, ConversationModel::PageSize);
+	if(m_model.isWindowUnlimited() && m_loadingAllPlaceholders)
+	{
+		return;
+	}
+	const auto missing = m_model.missingRangeAround(startSeq, endSeq, m_model.pageSize());
 	if(!missing)
 	{
 		if(m_following && !m_rangeFetchTimer.isActive())
 		{
-			m_model.evictOldTail(ConversationModel::TailKeepMessages);
+			m_model.evictOldTail(m_model.tailKeepMessages());
 		}
 		return;
 	}
@@ -209,13 +247,25 @@ void SessionController::setFollowing(bool following)
 	m_following = following;
 	if(following && m_attached && !m_rangeFetchTimer.isActive())
 	{
-		m_model.evictOldTail(ConversationModel::TailKeepMessages);
+		m_model.evictOldTail(m_model.tailKeepMessages());
 	}
 }
 
 void SessionController::retryRangeFetch()
 {
-	if(!m_attached || !isConnected() || m_pendingFetchEnd <= m_pendingFetchStart)
+	if(!m_attached || !isConnected())
+	{
+		return;
+	}
+	if(m_model.isWindowUnlimited())
+	{
+		if(m_model.hasPlaceholders())
+		{
+			startLoadAllPlaceholders();
+		}
+		return;
+	}
+	if(m_pendingFetchEnd <= m_pendingFetchStart)
 	{
 		return;
 	}
@@ -239,7 +289,7 @@ QCoro::Task<> SessionController::fetchRange(quint64 startSeq, quint64 endSeq, qu
 {
 	const QPointer<SessionController> self(this);
 	const QString sessionId = m_sessionId;
-	const auto page = co_await m_backend.client().messagesRange(sessionId, startSeq, endSeq, ConversationModel::PageSize);
+	const auto page = co_await m_backend.client().messagesRange(sessionId, startSeq, endSeq, m_model.pageSize());
 	if(!self || !m_attached || sessionId != m_sessionId || generation != m_rangeFetchGen)
 	{
 		co_return;
@@ -259,7 +309,68 @@ QCoro::Task<> SessionController::fetchRange(quint64 startSeq, quint64 endSeq, qu
 	emit materialized();
 	if(m_following)
 	{
-		m_model.evictOldTail(ConversationModel::TailKeepMessages);
+		m_model.evictOldTail(m_model.tailKeepMessages());
+	}
+}
+
+void SessionController::startLoadAllPlaceholders()
+{
+	if(!m_attached || !isConnected() || !m_model.isWindowUnlimited() || !m_model.hasPlaceholders() || m_loadingAllPlaceholders)
+	{
+		return;
+	}
+	setRangeError({});
+	m_loadingAllPlaceholders = true;
+	const quint64 generation = ++m_rangeFetchGen;
+	loadAllPlaceholders(generation);
+}
+
+QCoro::Task<> SessionController::loadAllPlaceholders(quint64 generation)
+{
+	const QPointer<SessionController> self(this);
+	while(self && m_attached && isConnected() && generation == m_rangeFetchGen && m_model.isWindowUnlimited() && m_model.hasPlaceholders())
+	{
+		const auto range = m_model.newestMissingRange(ConversationModel::MaxServerPageSize);
+		if(!range)
+		{
+			break;
+		}
+		const QString sessionId = m_sessionId;
+		const auto page = co_await m_backend.client().messagesRange(sessionId, range->first, range->second, ConversationModel::MaxServerPageSize);
+		if(!self || !m_attached || sessionId != m_sessionId || generation != m_rangeFetchGen || !m_model.isWindowUnlimited())
+		{
+			if(self && generation == m_rangeFetchGen)
+			{
+				m_loadingAllPlaceholders = false;
+			}
+			co_return;
+		}
+		if(!page)
+		{
+			m_loadingAllPlaceholders = false;
+			setRangeError(page.error().message);
+			if(!client::isConnectionLost(page.error()))
+			{
+				emit errorReported(m_rangeError);
+			}
+			co_return;
+		}
+		setRangeError({});
+		if(page->messages.isEmpty())
+		{
+			break;
+		}
+		emit aboutToMaterialize();
+		m_model.materializeRange(page->startSeq, page->messages);
+		emit materialized();
+		if(m_model.newestMissingRange(ConversationModel::MaxServerPageSize) == range)
+		{
+			break;
+		}
+	}
+	if(self && generation == m_rangeFetchGen)
+	{
+		m_loadingAllPlaceholders = false;
 	}
 }
 
@@ -389,6 +500,10 @@ void SessionController::adopt(const proto::SessionSnapshot& snapshot)
 	setQuestions(snapshot.pendingQuestions);
 	setMoreBefore(m_model.hasPlaceholders() ? false : snapshot.moreBefore);
 	setInfo(snapshot.info);
+	if(m_model.isWindowUnlimited() && m_model.hasPlaceholders())
+	{
+		startLoadAllPlaceholders();
+	}
 }
 
 void SessionController::onFrame(const proto::ServerFrame& frame)
@@ -446,6 +561,10 @@ void SessionController::onEvent(const proto::SessionEvent& event)
 		cancelPendingRangeFetch();
 		m_feed.apply(event);
 		setMoreBefore(m_model.hasPlaceholders() ? false : reset->moreBefore);
+		if(m_model.isWindowUnlimited() && m_model.hasPlaceholders())
+		{
+			startLoadAllPlaceholders();
+		}
 		return;
 	}
 	m_feed.apply(event); // ignores permission events: tool parts carry their state

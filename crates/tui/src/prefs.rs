@@ -32,6 +32,12 @@ pub struct TuiPrefs {
         skip_serializing_if = "Option::is_none"
     )]
     pub backend_token: Option<String>,
+    #[serde(
+        rename = "messageWindowSize",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub message_window_size: Option<usize>,
 }
 
 pub fn prefs_path() -> Result<PathBuf, String> {
@@ -66,6 +72,7 @@ pub fn save_prefs_to(path: &Path, prefs: &TuiPrefs) -> Result<(), String> {
     write_private(path, json.as_bytes())
 }
 
+#[cfg_attr(test, allow(dead_code))]
 pub fn save_prefs(prefs: &TuiPrefs) -> Result<(), String> {
     let path = prefs_path()?;
     save_prefs_to(&path, prefs)
@@ -190,12 +197,27 @@ mod tests {
         let prefs = TuiPrefs {
             backend_url: Some("wss://remote.example/ws".into()),
             backend_token: Some("secret-token".into()),
+            message_window_size: Some(2500),
         };
         save_prefs_to(&path, &prefs).unwrap();
         let raw = std::fs::read_to_string(&path).unwrap();
         assert!(raw.contains("\"backendUrl\""), "{raw}");
         assert!(raw.contains("\"backendToken\""), "{raw}");
+        assert!(raw.contains("\"messageWindowSize\": 2500"), "{raw}");
         assert_eq!(load_prefs_from(&path).unwrap(), prefs);
+
+        let unlimited = TuiPrefs {
+            backend_url: None,
+            backend_token: None,
+            message_window_size: Some(0),
+        };
+        save_prefs_to(&path, &unlimited).unwrap();
+        let raw_unlimited = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            raw_unlimited.contains("\"messageWindowSize\": 0"),
+            "{raw_unlimited}"
+        );
+        assert_eq!(load_prefs_from(&path).unwrap(), unlimited);
 
         #[cfg(unix)]
         {
@@ -215,12 +237,14 @@ mod tests {
         let first = TuiPrefs {
             backend_url: Some("ws://first:1".into()),
             backend_token: Some("tok1".into()),
+            message_window_size: None,
         };
         save_prefs_to(&path, &first).unwrap();
 
         let second = TuiPrefs {
             backend_url: Some("wss://second:2".into()),
             backend_token: Some("tok2".into()),
+            message_window_size: Some(250),
         };
         save_prefs_to(&path, &second).unwrap();
         assert_eq!(load_prefs_from(&path).unwrap(), second);
@@ -246,6 +270,7 @@ mod tests {
         let saved = TuiPrefs {
             backend_url: Some("ws://saved:8080".into()),
             backend_token: Some("saved-tok".into()),
+            message_window_size: None,
         };
         assert_eq!(
             resolve_target(Some("ws://cli:9090"), Some("cli-tok"), &saved).unwrap(),

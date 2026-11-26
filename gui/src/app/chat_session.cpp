@@ -630,6 +630,11 @@ void ChatSession::setFollowing(bool following)
 	m_controller.setFollowing(following);
 }
 
+void ChatSession::setMessageWindowSize(int size)
+{
+	m_controller.setMessageWindowSize(size);
+}
+
 int ChatSession::firstRowForSeq(int seq) const
 {
 	if(seq < 0)

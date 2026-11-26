@@ -13,9 +13,7 @@ use ref_proto::{
 use super::message::{self, Ctx};
 use super::selection::{self, Selection};
 use super::{Hit, Row, theme};
-use crate::state::{
-    MAX_RESIDENT_MESSAGES, MessageSlot, SessionView, TAIL_KEEP_MESSAGES, estimate_lines,
-};
+use crate::state::{MessageSlot, SessionView, estimate_lines};
 use crate::text::{self, width};
 
 /// Shared rendering environment.
@@ -933,8 +931,9 @@ pub fn draw(buf: &mut Buffer, area: Rect, view: &mut SessionView, env: &Env<'_>)
     if area.width < 4 || area.height == 0 {
         return;
     }
-    if view.chat.follow && view.slots.len() > TAIL_KEEP_MESSAGES {
-        view.trim_to_tail(TAIL_KEEP_MESSAGES);
+    if view.chat.follow && !view.is_window_unlimited() && view.slots.len() > view.tail_keep() {
+        let keep = view.tail_keep();
+        view.trim_to_tail(keep);
     }
     // 1 col left pad, 1 col right pad + scrollbar column.
     let cw = area.width.saturating_sub(3).max(1) as usize;
@@ -962,7 +961,8 @@ pub fn draw(buf: &mut Buffer, area: Rect, view: &mut SessionView, env: &Env<'_>)
         (chat.follow, chat.visible_seq_range)
     };
     if !follow
-        && view.resident_count() > MAX_RESIDENT_MESSAGES
+        && !view.is_window_unlimited()
+        && view.resident_count() > view.message_window_size
         && let Some((vs, ve)) = visible_seq_range
     {
         view.evict_outside(vs, ve);
@@ -1145,8 +1145,9 @@ pub fn draw_tile(buf: &mut Buffer, area: Rect, bar_x: u16, view: &mut SessionVie
             .chain(queued_rows(view, cw))
             .collect()
     };
-    if view.chat.follow && view.slots.len() > TAIL_KEEP_MESSAGES {
-        view.trim_to_tail(TAIL_KEEP_MESSAGES);
+    if view.chat.follow && !view.is_window_unlimited() && view.slots.len() > view.tail_keep() {
+        let keep = view.tail_keep();
+        view.trim_to_tail(keep);
     }
     let reflow = view.chat.last_w != cw || !view.chat.compact;
     let restore = reflow || view.needs_anchor_restore;

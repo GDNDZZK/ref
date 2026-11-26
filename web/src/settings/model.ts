@@ -28,10 +28,12 @@ export interface Settings {
   sidebarRunningHeight: number
   sidebarHistoryCreatorFilter: HistoryCreatorFilter
   sidebarHistoryCurrentDir: boolean
+  messageWindowSize: number
 }
 
 export const STORAGE_KEY = 'ref.settings'
-
+export const DEFAULT_MESSAGE_WINDOW_SIZE = 1000
+export const MESSAGE_WINDOW_STEP = 50
 const THEME_CHOICES: readonly ThemeChoice[] = ['system', 'light', 'dark']
 const LANGUAGE_CHOICES: readonly LanguageChoice[] = ['system', 'en', 'zh-CN']
 const HISTORY_CREATOR_FILTERS: readonly HistoryCreatorFilter[] = ['all', 'user']
@@ -51,6 +53,7 @@ export function defaultSettings(): Settings {
     sidebarRunningHeight: 0,
     sidebarHistoryCreatorFilter: 'all',
     sidebarHistoryCurrentDir: false,
+    messageWindowSize: DEFAULT_MESSAGE_WINDOW_SIZE,
   }
 }
 function pick<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
@@ -65,8 +68,8 @@ function width(value: unknown, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
   return clamp(Math.round(value), metrics.sidebarMinWidth, metrics.sidebarMaxWidth)
 }
-function nonNegativeInt(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return 0
+function nonNegativeInt(value: unknown, fallback = 0): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return fallback
   return Math.round(value) || 0
 }
 function record(value: unknown): Record<string, unknown> {
@@ -123,6 +126,7 @@ export function parseSettings(raw: string | null): { settings: Settings; corrupt
       defaults.sidebarHistoryCreatorFilter,
     ),
     sidebarHistoryCurrentDir: flag(stored['sidebarHistoryCurrentDir'], defaults.sidebarHistoryCurrentDir),
+    messageWindowSize: nonNegativeInt(stored['messageWindowSize'], defaults.messageWindowSize),
   }
   return { settings, corrupt: false }
 }

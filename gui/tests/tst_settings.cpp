@@ -50,6 +50,7 @@ private slots:
 	void sidebarHistoryFiltersPersistAndValidate();
 	void backendSettingsPersistValidateAndUseOwnerOnlyPermissions();
 	void floatingBallPositionPersistsAndValidates();
+	void messageWindowSizePersistsAndValidates();
 };
 
 void TestSettings::defaultsWithoutAFile()
@@ -78,6 +79,11 @@ void TestSettings::defaultsWithoutAFile()
 	QCOMPARE(Settings::MinUiScale, 0.5);
 	QCOMPARE(Settings::MaxUiScale, 4.0);
 	QCOMPARE(Settings::UiScaleStep, 0.05);
+	QCOMPARE(settings.messageWindowSize(), Settings::DefaultMessageWindowSize);
+	QCOMPARE(settings.defaultMessageWindowSize(), Settings::DefaultMessageWindowSize);
+	QCOMPARE(settings.messageWindowStep(), Settings::MessageWindowStep);
+	QCOMPARE(Settings::DefaultMessageWindowSize, 1000);
+	QCOMPARE(Settings::MessageWindowStep, 50);
 	QVERIFY(settings.loadProblem().isEmpty());
 	QVERIFY(!QFile::exists(dir.filePath(u"gui.json"_s))); // nothing is written until something changes
 }
@@ -470,6 +476,66 @@ void TestSettings::floatingBallPositionPersistsAndValidates()
 	const Settings bad(badPath);
 	QVERIFY(!bad.hasFloatingBallPosition());
 	QVERIFY(bad.loadProblem().contains(u"floatingBall"_s));
+}
+
+void TestSettings::messageWindowSizePersistsAndValidates()
+{
+	QTemporaryDir dir;
+	const QString zeroPath = dir.filePath(u"zero.json"_s);
+	{
+		Settings settings(zeroPath);
+		QSignalSpy spy(&settings, &Settings::messageWindowSizeChanged);
+		settings.setMessageWindowSize(-50); // clamps to 0 (unlimited)
+		QCOMPARE(settings.messageWindowSize(), 0);
+		QCOMPARE(spy.count(), 1);
+		settings.setMessageWindowSize(0); // no change, no signal
+		QCOMPARE(spy.count(), 1);
+		settings.save();
+	}
+	{
+		const Settings reloaded(zeroPath);
+		QVERIFY(reloaded.loadProblem().isEmpty());
+		QCOMPARE(reloaded.messageWindowSize(), 0);
+		QCOMPARE(readJson(zeroPath).value(u"messageWindowSize"_s).toInt(-1), 0);
+	}
+
+	const QString largePath = dir.filePath(u"large.json"_s);
+	{
+		Settings settings(largePath);
+		settings.setMessageWindowSize(25000);
+		QCOMPARE(settings.messageWindowSize(), 25000);
+		settings.save();
+	}
+	{
+		const Settings reloaded(largePath);
+		QVERIFY(reloaded.loadProblem().isEmpty());
+		QCOMPARE(reloaded.messageWindowSize(), 25000);
+		QCOMPARE(readJson(largePath).value(u"messageWindowSize"_s).toInt(), 25000);
+	}
+
+	const QString negPath = dir.filePath(u"neg.json"_s);
+	writeFile(negPath, R"({"messageWindowSize":-1})");
+	{
+		const Settings bad(negPath);
+		QCOMPARE(bad.messageWindowSize(), Settings::DefaultMessageWindowSize);
+		QVERIFY(bad.loadProblem().contains(u"messageWindowSize"_s));
+	}
+
+	const QString strPath = dir.filePath(u"str.json"_s);
+	writeFile(strPath, R"({"messageWindowSize":"1000"})");
+	{
+		const Settings bad(strPath);
+		QCOMPARE(bad.messageWindowSize(), Settings::DefaultMessageWindowSize);
+		QVERIFY(bad.loadProblem().contains(u"messageWindowSize"_s));
+	}
+
+	const QString fracPath = dir.filePath(u"frac.json"_s);
+	writeFile(fracPath, R"({"messageWindowSize":12.5})");
+	{
+		const Settings bad(fracPath);
+		QCOMPARE(bad.messageWindowSize(), Settings::DefaultMessageWindowSize);
+		QVERIFY(bad.loadProblem().contains(u"messageWindowSize"_s));
+	}
 }
 
 QTEST_GUILESS_MAIN(TestSettings)

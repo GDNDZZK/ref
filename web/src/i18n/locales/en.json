@@ -410,7 +410,10 @@
       "editConfig": "Edit ref.json…",
       "reloadConfig": "Reload configuration",
       "backend": "Backend",
-      "switchBackend": "Switch Backend…"
+      "switchBackend": "Switch Backend…",
+      "messageWindow": "Message window",
+      "messageWindowHint": "0 = unlimited (load all)",
+      "reset": "Reset"
     },
     "backend": {
       "title": "Switch backend",

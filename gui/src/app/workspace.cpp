@@ -118,6 +118,17 @@ Workspace::Workspace(refgui::cli::LaunchOptions options, QString settingsPath, Q
 		emit historyFilterChanged();
 	});
 
+	connect(&m_settings, &refgui::workspace::Settings::messageWindowSizeChanged, this, [this] {
+		const int size = m_settings.messageWindowSize();
+		for(ChatSession* chatSession : std::as_const(m_chats))
+		{
+			if(chatSession != nullptr)
+			{
+				chatSession->setMessageWindowSize(size);
+			}
+		}
+	});
+
 	m_effectiveCwd = m_cwd;
 	m_config.setCwd(m_effectiveCwd);
 	applyHistoryFilter(false);
@@ -544,6 +555,7 @@ ChatSession& Workspace::chat(const QString& sessionId)
 	if(slot == nullptr)
 	{
 		slot = new ChatSession(m_connection.backend(), m_config, sessionId, this, &m_directory);
+		slot->setMessageWindowSize(m_settings.messageWindowSize());
 		connect(slot, &ChatSession::infoChanged, this, &Workspace::syncConfigCwd);
 		connect(slot->composer(), &refgui::composer::ComposerModel::toastRequested, this, &Workspace::toast);
 		connect(slot, &ChatSession::messagesEvicted, this, [this, sessionId](const QStringList& ids) {

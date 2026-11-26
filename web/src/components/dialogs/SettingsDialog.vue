@@ -1,9 +1,14 @@
 <script setup lang="ts">
 // Theme, language and notifications.
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { setTheme } from '../../composables/useTheme.ts'
-import type { LanguageChoice, ThemeChoice } from '../../settings/model.ts'
+import {
+  DEFAULT_MESSAGE_WINDOW_SIZE,
+  MESSAGE_WINDOW_STEP,
+  type LanguageChoice,
+  type ThemeChoice,
+} from '../../settings/model.ts'
 import { useConnectionStore } from '../../stores/connection.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
 import { useNoticesStore } from '../../stores/notices.ts'
@@ -28,6 +33,59 @@ const language = computed<LanguageChoice>({
   get: () => store.settings.language,
   set: (value) => store.update((draft) => (draft.language = value)),
 })
+const messageWindow = computed(() => store.settings.messageWindowSize)
+const windowDraft = ref(String(store.settings.messageWindowSize))
+watch(
+  () => store.settings.messageWindowSize,
+  (next) => {
+    windowDraft.value = String(next)
+  },
+)
+
+function parseWindowInput(raw: string): number | undefined {
+  const trimmed = String(raw).trim()
+  if (trimmed === '') return undefined
+  const parsed = Number(trimmed)
+  if (!Number.isFinite(parsed) || parsed < 0) return undefined
+  return Math.round(parsed)
+}
+
+function setMessageWindow(next: number): void {
+  const normalized = Math.max(0, Math.round(next))
+  windowDraft.value = String(normalized)
+  if (normalized !== store.settings.messageWindowSize) {
+    store.update((draft) => {
+      draft.messageWindowSize = normalized
+    })
+  }
+}
+
+function stepMessageWindow(delta: number): void {
+  const base = parseWindowInput(String(windowDraft.value)) ?? store.settings.messageWindowSize
+  setMessageWindow(Math.max(0, base + delta))
+}
+
+function commitWindowInput(): void {
+  const parsed = parseWindowInput(String(windowDraft.value))
+  if (parsed === undefined) {
+    windowDraft.value = String(store.settings.messageWindowSize)
+    return
+  }
+  setMessageWindow(parsed)
+}
+
+function onWindowEsc(event: KeyboardEvent): void {
+  const saved = String(store.settings.messageWindowSize)
+  if (String(windowDraft.value) !== saved) {
+    event.preventDefault()
+    event.stopPropagation()
+    windowDraft.value = saved
+  }
+}
+
+function resetMessageWindow(): void {
+  setMessageWindow(DEFAULT_MESSAGE_WINDOW_SIZE)
+}
 
 const themes = computed(() => [
   { value: 'system' as const, label: t('dialog.settings.system') },
@@ -65,6 +123,51 @@ function reloadConfig(): void {
     <div class="row">
       <span>{{ t('dialog.settings.language') }}</span>
       <Segmented v-model="language" :options="languages" :label="t('dialog.settings.language')" />
+    </div>
+    <div class="row window-row">
+      <div class="window-info">
+        <span>{{ t('dialog.settings.messageWindow') }}</span>
+        <span class="window-hint">{{ t('dialog.settings.messageWindowHint') }}</span>
+      </div>
+      <div class="window-controls">
+        <DialogButton
+          v-if="messageWindow !== DEFAULT_MESSAGE_WINDOW_SIZE"
+          small
+          :label="t('dialog.settings.reset')"
+          @click="resetMessageWindow"
+        />
+        <div class="stepper">
+          <button
+            type="button"
+            class="stepper-btn"
+            :disabled="messageWindow <= 0"
+            :aria-label="`-${MESSAGE_WINDOW_STEP}`"
+            @click="stepMessageWindow(-MESSAGE_WINDOW_STEP)"
+          >
+            −
+          </button>
+          <input
+            v-model="windowDraft"
+            type="text"
+            inputmode="numeric"
+            class="stepper-input"
+            :aria-label="t('dialog.settings.messageWindow')"
+            @keydown.enter.prevent="commitWindowInput"
+            @keydown.esc="onWindowEsc"
+            @keydown.arrow-up.prevent="stepMessageWindow(MESSAGE_WINDOW_STEP)"
+            @keydown.arrow-down.prevent="stepMessageWindow(-MESSAGE_WINDOW_STEP)"
+            @blur="commitWindowInput"
+          />
+          <button
+            type="button"
+            class="stepper-btn"
+            :aria-label="`+${MESSAGE_WINDOW_STEP}`"
+            @click="stepMessageWindow(MESSAGE_WINDOW_STEP)"
+          >
+            +
+          </button>
+        </div>
+      </div>
     </div>
     <NotificationSettings class="notifications" />
     <div class="row config-row">
@@ -135,6 +238,86 @@ function reloadConfig(): void {
   font: var(--small-font-size) var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.window-row {
+  flex-wrap: wrap;
+}
+
+.window-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.window-hint {
+  color: var(--text-muted);
+  font-size: var(--small-font-size);
+}
+
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  border-radius: 14px;
+  background: var(--background);
+  box-shadow: inset 0 0 0 1px var(--border);
+  overflow: hidden;
+}
+
+.stepper:focus-within {
+  box-shadow: inset 0 0 0 1px var(--accent-text);
+}
+
+.stepper-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: var(--font-size);
+  transition:
+    background-color var(--motion-quick) var(--motion-ease),
+    color var(--motion-quick) var(--motion-ease);
+}
+
+.stepper-btn:not(:disabled):hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.stepper-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.stepper-input {
+  width: 68px;
+  height: 100%;
+  padding: 0 4px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: calc(var(--font-size) - 1px);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.stepper-input::-webkit-inner-spin-button,
+.stepper-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 .about {
   margin: 16px 0 0;

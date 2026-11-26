@@ -410,7 +410,10 @@
       "editConfig": "编辑 ref.json…",
       "reloadConfig": "重新加载配置",
       "backend": "后端连接",
-      "switchBackend": "切换后端…"
+      "switchBackend": "切换后端…",
+      "messageWindow": "消息窗口",
+      "messageWindowHint": "0 表示不限制（全部加载）",
+      "reset": "重置"
     },
     "backend": {
       "title": "切换后端",

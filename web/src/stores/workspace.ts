@@ -136,6 +136,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     { flush: 'sync' },
   )
   watch(
+    () => settingsStore.settings.messageWindowSize,
+    (size) => {
+      for (const session of chats.values()) session.setWindowSize(size)
+    },
+  )
+  watch(
     [
       historyQuery,
       historyCreator,
@@ -167,6 +173,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       },
       info,
     )
+    created.setWindowSize(settingsStore.settings.messageWindowSize)
     chats.set(id, created)
     return created
   }

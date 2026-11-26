@@ -409,4 +409,69 @@ describe('ChatSession', () => {
     await loading
     expect(session.slots[0]?.kind).toBe('placeholder')
   })
+
+  it('setWindowSize(0) auto-loads multi-page placeholders newest-first and skips eviction', async () => {
+    const { api, session } = setup()
+    const metas = Array.from({ length: 1500 }, (_, seq) => ({
+      seq,
+      id: `m${seq}`,
+      role: 'user' as const,
+      source_kind: 'human',
+      has_error: false,
+      parts: [],
+    }))
+    api.attach.mockResolvedValue(
+      snapshot([userMessage('m1500', 'latest')], {
+        more_before: true,
+        total_messages: 1501,
+        start_seq: 1500,
+        layout_metas: metas,
+      }),
+    )
+    const messagesRange = vi.fn(async (_sid: string, startSeq: number, endSeq: number) => ({
+      messages: Array.from({ length: endSeq - startSeq }, (_, i) =>
+        userMessage(`m${startSeq + i}`, `msg ${startSeq + i}`),
+      ),
+      more_before: startSeq > 0,
+      start_seq: startSeq,
+      end_seq: endSeq,
+    }))
+    Object.assign(api, { messagesRange })
+    await session.attach(true)
+    expect(session.residentCount).toBe(1)
+
+    session.setWindowSize(0)
+    await vi.waitFor(() => {
+      expect(session.residentCount).toBe(1501)
+    })
+    expect(messagesRange).toHaveBeenNthCalledWith(1, 'ses_1', 500, 1500, 1000)
+    expect(messagesRange).toHaveBeenNthCalledWith(2, 'ses_1', 0, 500, 500)
+    expect(session.moreBefore).toBe(false)
+    expect(session.slots.every((s) => s.kind === 'materialized')).toBe(true)
+
+    session.evictAround(1490, 1500)
+    session.evictAtBottom()
+    await session.detach()
+    expect(session.residentCount).toBe(1501)
+  })
+
+  it('respects custom positive window size in ChatSession eviction and loadOlder', async () => {
+    const { api, session } = setup()
+    session.setWindowSize(200)
+    const messages = Array.from({ length: 300 }, (_, i) => userMessage(`m${i}`, `text ${i}`))
+    api.attach.mockResolvedValue(snapshot(messages, { more_before: true }))
+    const messagesBefore = vi.fn().mockResolvedValue({ messages: [], more_before: false })
+    Object.assign(api, { messagesBefore })
+    await session.attach(true)
+    expect(session.residentCount).toBe(300)
+
+    session.evictAtBottom()
+    expect(session.residentCount).toBe(200)
+
+    // Window size 200 -> pageSize 100, evictBuffer 100.
+    session.evictAround(250, 260)
+    expect(session.residentCount).toBe(150) // [150..299]
+    await session.loadOlder()
+    expect(messagesBefore).toHaveBeenCalledWith('ses_1', 'm150', 100)
+  })
 })

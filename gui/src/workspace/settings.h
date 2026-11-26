@@ -43,6 +43,9 @@ class Settings : public QObject
 	Q_PROPERTY(double minUiScale READ minUiScale CONSTANT)
 	Q_PROPERTY(double maxUiScale READ maxUiScale CONSTANT)
 	Q_PROPERTY(double uiScaleStep READ uiScaleStep CONSTANT)
+	Q_PROPERTY(int messageWindowSize READ messageWindowSize WRITE setMessageWindowSize NOTIFY messageWindowSizeChanged)
+	Q_PROPERTY(int defaultMessageWindowSize READ defaultMessageWindowSize CONSTANT)
+	Q_PROPERTY(int messageWindowStep READ messageWindowStep CONSTANT)
 	Q_PROPERTY(QString backendUrl READ backendUrl NOTIFY backendChanged)
 	Q_PROPERTY(bool hasBackendToken READ hasBackendToken NOTIFY backendChanged)
 	Q_PROPERTY(QString maskedBackendToken READ maskedBackendToken NOTIFY backendChanged)
@@ -69,6 +72,8 @@ public:
 	static constexpr double MinUiScale = 0.5;
 	static constexpr double MaxUiScale = 4.0;
 	static constexpr double UiScaleStep = 0.05;
+	static constexpr int DefaultMessageWindowSize = 1000;
+	static constexpr int MessageWindowStep = 50;
 	// Read-only startup helper: returns normalized `uiScale`, or `DefaultUiScale` if unreadable/invalid (Settings reports errors later).
 	static double readUiScaleOnly(const QString& path);
 	// Reads `path`. A file that cannot be read keeps the defaults; see loadProblem().
@@ -100,6 +105,9 @@ public:
 	double minUiScale() const { return MinUiScale; }
 	double maxUiScale() const { return MaxUiScale; }
 	double uiScaleStep() const { return UiScaleStep; }
+	int messageWindowSize() const { return m_messageWindowSize; }
+	int defaultMessageWindowSize() const { return DefaultMessageWindowSize; }
+	int messageWindowStep() const { return MessageWindowStep; }
 	QString backendUrl() const { return m_backendUrl; }
 	QString backendToken() const { return m_backendToken; }
 	bool hasBackendToken() const { return !m_backendToken.isEmpty(); }
@@ -129,6 +137,7 @@ public:
 	void setWindowWidth(int width);
 	void setWindowHeight(int height);
 	void setUiScale(double scale);
+	void setMessageWindowSize(int size);
 	Q_INVOKABLE void setBackend(const QString& url, const QString& token);
 	Q_INVOKABLE void setFloatingBallPosition(const QString& screenName, int x, int y);
 	// What went wrong reading the file, for the user. Empty when it was read or did not exist.
@@ -153,6 +162,7 @@ signals:
 	void sidebarHistoryCurrentDirChanged();
 	void windowSizeChanged();
 	void uiScaleChanged();
+	void messageWindowSizeChanged();
 	void backendChanged();
 	void floatingBallChanged();
 	void saveFailed(const QString& reason);
@@ -187,6 +197,7 @@ private:
 	int m_windowWidth = DefaultWindowWidth;
 	int m_windowHeight = DefaultWindowHeight;
 	double m_uiScale = DefaultUiScale;
+	int m_messageWindowSize = DefaultMessageWindowSize;
 	QString m_backendUrl;
 	QString m_backendToken;
 	QString m_floatingBallScreen;

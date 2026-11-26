@@ -88,10 +88,11 @@ public:
 	};
 
 	static constexpr qsizetype PageSize = 500;
-	static_assert(PageSize <= 1000); // matches ref_proto::PAGE_MAX
 	static constexpr qsizetype MaxResidentMessages = 1000;
 	static constexpr qsizetype TailKeepMessages = 1000;
 	static constexpr qsizetype EvictMargin = 500;
+	static constexpr qsizetype MaxServerPageSize = 1000;
+	static_assert(PageSize <= MaxServerPageSize); // matches ref_proto::PAGE_MAX
 	explicit ConversationModel(QObject* parent = nullptr);
 
 	// What the tool calls ask of the user, for the keys and the status line.
@@ -137,11 +138,18 @@ public:
 	void prependMessages(const QList<proto::Message>& older);
 	// Materializes placeholder slots in [startSeq, startSeq + messages.size()).
 	void materializeRange(quint64 startSeq, const QList<proto::Message>& messages);
-	// Evicts materialized slots outside [visibleStart - EvictMargin, visibleEnd + EvictMargin]
-	// and enforces MaxResidentMessages. Returns evicted message IDs.
+	void setMessageWindowSize(qsizetype size);
+	qsizetype messageWindowSize() const { return m_windowSize; }
+	bool isWindowUnlimited() const { return m_windowSize == 0; }
+	qsizetype pageSize() const;
+	qsizetype evictMargin() const { return m_windowSize / 2; }
+	qsizetype tailKeepMessages() const { return m_windowSize; }
+	// Evicts materialized slots outside [visibleStart - evictMargin(), visibleEnd + evictMargin()]
+	// and enforces messageWindowSize(). No-op when window is unlimited (0). Returns evicted message IDs.
 	QStringList evictOutside(quint64 visibleStart, quint64 visibleEnd);
-	// Evicts materialized slots older than total - keepCount. Returns evicted message IDs.
-	QStringList evictOldTail(qsizetype keepCount = TailKeepMessages);
+	// Evicts materialized slots older than total - keepCount. No-op when window is unlimited (0). Returns evicted message IDs.
+	QStringList evictOldTail();
+	QStringList evictOldTail(qsizetype keepCount);
 	// Updates column width used by LayoutEstimator and notifies placeholder rows synchronously.
 	void setColumnWidth(double width);
 	double columnWidth() const { return m_columnWidth; }
@@ -151,6 +159,7 @@ public:
 	std::optional<std::pair<quint64, quint64>> missingRangeAround(quint64 visibleStart,
 	                                                              quint64 visibleEnd,
 	                                                              qsizetype pageSize = PageSize) const;
+	std::optional<std::pair<quint64, quint64>> newestMissingRange(qsizetype pageSize = MaxServerPageSize) const;
 	Q_INVOKABLE int firstRowForSeq(quint64 seq) const;
 	Q_INVOKABLE int seqForRow(int row) const;
 	// Adds the message, or replaces the one with the same id.
@@ -272,5 +281,6 @@ private:
 	bool m_reasoningExpanded = false;
 	bool m_toolsExpanded = false;
 	double m_columnWidth = LayoutEstimator::DefaultColumnWidth;
+	qsizetype m_windowSize = MaxResidentMessages;
 };
 } // namespace refgui::session

@@ -8284,3 +8284,149 @@ fn stash_dialog_and_backend_switch_reset_state() {
     assert!(app.groups.is_empty());
     assert!(!app.connected);
 }
+
+#[test]
+fn window_zero_auto_loads_all_placeholder_chunks_and_skips_eviction() {
+    let (mut app, old, _) = history_app_with_count(650, 20); // 1300 old placeholders + 40 newest = 1340
+    app.connected = true;
+    assert_eq!(app.views[TEST_SESSION].resident_count(), 40);
+
+    app.run_command("window", "0");
+    assert_eq!(app.message_window_size, 0);
+    assert!(app.views[TEST_SESSION].is_window_unlimited());
+
+    // First chunk: [300, 1300) (1000 messages = PAGE_MAX).
+    let (id1, start1, end1) = range_request(&app).expect("first unlimited chunk requested");
+    assert_eq!((start1, end1), (300, 1300));
+    respond_to_range(
+        &mut app,
+        id1,
+        json!({
+            "messages": old[300..1300].to_vec(),
+            "more_before": true,
+            "start_seq": 300,
+            "end_seq": 1300,
+        }),
+    );
+    assert_eq!(app.views[TEST_SESSION].resident_count(), 1040);
+
+    // Second chunk: [0, 300).
+    let (id2, start2, end2) = range_request(&app).expect("second unlimited chunk requested");
+    assert_eq!((start2, end2), (0, 300));
+    respond_to_range(
+        &mut app,
+        id2,
+        json!({
+            "messages": old[0..300].to_vec(),
+            "more_before": false,
+            "start_seq": 0,
+            "end_seq": 300,
+        }),
+    );
+    assert_eq!(app.views[TEST_SESSION].resident_count(), 1340);
+    assert!(range_request(&app).is_none());
+
+    // Rendering while following must not evict when unlimited.
+    let _ = render(&mut app, 100, 30);
+    assert_eq!(app.views[TEST_SESSION].resident_count(), 1340);
+}
+
+#[test]
+fn window_command_sets_resets_and_preserves_backend_prefs() {
+    use crate::prefs::{TuiPrefs, load_prefs_from, save_prefs_to};
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("ref-tui-window-{}-{nanos}", std::process::id()));
+    let prefs_path = dir.join("tui.json");
+    save_prefs_to(
+        &prefs_path,
+        &TuiPrefs {
+            backend_url: Some("wss://remote.example/ws".into()),
+            backend_token: Some("tok-123".into()),
+            message_window_size: None,
+        },
+    )
+    .unwrap();
+
+    let (mut app, ..) = history_app_with_count(0, 160); // 320 resident messages
+    app.prefs_path = Some(prefs_path.clone());
+
+    app.run_command("window", "");
+    assert!(
+        app.toasts
+            .items
+            .iter()
+            .any(|t| t.text.contains("Message window: 1000"))
+    );
+
+    app.run_command("window", "250");
+    assert_eq!(app.message_window_size, 250);
+    assert_eq!(app.views[TEST_SESSION].message_window_size, 250);
+    assert_eq!(app.views[TEST_SESSION].resident_count(), 250);
+    let saved = load_prefs_from(&prefs_path).unwrap();
+    assert_eq!(
+        saved.backend_url.as_deref(),
+        Some("wss://remote.example/ws")
+    );
+    assert_eq!(saved.backend_token.as_deref(), Some("tok-123"));
+    assert_eq!(saved.message_window_size, Some(250));
+
+    app.run_command("window", "reset");
+    assert_eq!(app.message_window_size, crate::state::MAX_RESIDENT_MESSAGES);
+    let after_reset = load_prefs_from(&prefs_path).unwrap();
+    assert_eq!(
+        after_reset.backend_url.as_deref(),
+        Some("wss://remote.example/ws")
+    );
+    assert_eq!(after_reset.backend_token.as_deref(), Some("tok-123"));
+    assert_eq!(after_reset.message_window_size, None);
+
+    app.run_command("window", "not-a-number");
+    assert!(
+        app.toasts
+            .items
+            .iter()
+            .any(|t| t.text.contains("Usage: /window <count|0|reset>"))
+    );
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn handle_backend_action_preserves_message_window_size() {
+    use crate::prefs::load_prefs_from;
+    use crate::ui::dialog::BackendAction;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!(
+        "ref-tui-backend-prefs-{}-{nanos}",
+        std::process::id()
+    ));
+    let prefs_path = dir.join("tui.json");
+
+    let mut app = test_app(false).with_message_window_size(2500);
+    app.prefs_path = Some(prefs_path.clone());
+
+    app.handle_backend_action(BackendAction::SaveDefault {
+        url: "wss://saved.example/ws".into(),
+        token: Some("secret".into()),
+    });
+    let saved = load_prefs_from(&prefs_path).unwrap();
+    assert_eq!(saved.backend_url.as_deref(), Some("wss://saved.example/ws"));
+    assert_eq!(saved.backend_token.as_deref(), Some("secret"));
+    assert_eq!(saved.message_window_size, Some(2500));
+    assert_eq!(app.message_window_size, 2500);
+
+    app.handle_backend_action(BackendAction::RestoreLocal);
+    let restored = load_prefs_from(&prefs_path).unwrap();
+    assert_eq!(restored.backend_url, None);
+    assert_eq!(restored.backend_token, None);
+    assert_eq!(restored.message_window_size, Some(2500));
+    assert_eq!(app.message_window_size, 2500);
+
+    let _ = std::fs::remove_dir_all(dir);
+}

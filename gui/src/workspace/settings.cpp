@@ -48,6 +48,7 @@ const QString WindowKey = u"window"_s;
 const QString WidthKey = u"width"_s;
 const QString HeightKey = u"height"_s;
 const QString UiScaleKey = u"uiScale"_s;
+const QString MessageWindowSizeKey = u"messageWindowSize"_s;
 const QString BackendUrlKey = u"backendUrl"_s;
 const QString BackendTokenKey = u"backendToken"_s;
 const QString FloatingBallKey = u"floatingBall"_s;
@@ -257,6 +258,27 @@ void readUiScale(const QJsonObject& root, const QString& key, double& value, Pro
 		return;
 	}
 	value = normalizeUiScale(read);
+}
+
+void readMessageWindowSize(const QJsonObject& root, const QString& key, int& value, Problems& problems)
+{
+	if(!root.contains(key))
+	{
+		return;
+	}
+	const QJsonValue raw = root.value(key);
+	if(!raw.isDouble())
+	{
+		problems.add(u"%1: expected a non-negative integer"_s.arg(key));
+		return;
+	}
+	const double read = raw.toDouble();
+	if(!std::isfinite(read) || read < 0.0 || read > static_cast<double>(std::numeric_limits<int>::max()) || std::trunc(read) != read)
+	{
+		problems.add(u"%1: expected a non-negative integer"_s.arg(key));
+		return;
+	}
+	value = static_cast<int>(read);
 }
 
 bool isValidBackendUrl(const QString& rawUrl)
@@ -544,6 +566,11 @@ void Settings::setUiScale(double scale)
 	emit uiScaleChanged();
 }
 
+void Settings::setMessageWindowSize(int size)
+{
+	set(m_messageWindowSize, std::max(0, size), &Settings::messageWindowSizeChanged);
+}
+
 QString Settings::maskedBackendToken() const
 {
 	if(m_backendToken.isEmpty())
@@ -647,6 +674,7 @@ void Settings::readFields(const QJsonObject& root)
 	readEdge(root, WindowKey, WidthKey, m_windowWidth, problems);
 	readEdge(root, WindowKey, HeightKey, m_windowHeight, problems);
 	readUiScale(root, UiScaleKey, m_uiScale, problems);
+	readMessageWindowSize(root, MessageWindowSizeKey, m_messageWindowSize, problems);
 	readBackendSettings(root, m_backendUrl, m_backendToken, problems);
 	readFloatingBall(root, m_floatingBallScreen, m_floatingBallX, m_floatingBallY, m_hasFloatingBallPosition, problems);
 	if(problems.any())
@@ -686,6 +714,7 @@ QJsonObject Settings::toJson() const
 	window.insert(HeightKey, m_windowHeight);
 	root.insert(WindowKey, window);
 	root.insert(UiScaleKey, m_uiScale);
+	root.insert(MessageWindowSizeKey, m_messageWindowSize);
 	if(!m_backendUrl.isEmpty())
 	{
 		root.insert(BackendUrlKey, m_backendUrl);

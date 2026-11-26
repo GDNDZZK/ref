@@ -70,6 +70,7 @@ private slots:
 	void splitsMarkdownTablesAndStreamsRows();
 	void virtualizedPlaceholdersMaterializeAndEvict();
 	void evictOutsideCapsResidentInsideKeepWindow();
+	void configurableWindowAndNewestMissingRange();
 };
 
 void TestConversationModel::splitsAssistantTextIntoBlocks()
@@ -840,6 +841,102 @@ void TestConversationModel::evictOutsideCapsResidentInsideKeepWindow()
 	QCOMPARE(model.index(model.firstRowForSeq(200)).data(ConversationModel::KindRole).toString(), u"skeleton"_s);
 	QCOMPARE(model.index(model.firstRowForSeq(1210)).data(ConversationModel::KindRole).toString(), u"skeleton"_s);
 	QVERIFY(model.index(model.firstRowForSeq(705)).data(ConversationModel::KindRole).toString() != u"skeleton"_s);
+}
+
+void TestConversationModel::configurableWindowAndNewestMissingRange()
+{
+	ConversationModel model;
+	QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
+
+	// Default window settings.
+	QCOMPARE(model.messageWindowSize(), ConversationModel::MaxResidentMessages);
+	QVERIFY(!model.isWindowUnlimited());
+	QCOMPARE(model.pageSize(), 500);
+	QCOMPARE(model.evictMargin(), 500);
+	QCOMPARE(model.tailKeepMessages(), 1000);
+
+	// Custom positive sizes.
+	model.setMessageWindowSize(50);
+	QCOMPARE(model.messageWindowSize(), 50);
+	QCOMPARE(model.pageSize(), 50);
+	QCOMPARE(model.evictMargin(), 25);
+	QCOMPARE(model.tailKeepMessages(), 50);
+
+	model.setMessageWindowSize(200);
+	QCOMPARE(model.pageSize(), 100);
+	QCOMPARE(model.evictMargin(), 100);
+	QCOMPARE(model.tailKeepMessages(), 200);
+
+	model.setMessageWindowSize(2500);
+	QCOMPARE(model.pageSize(), ConversationModel::MaxServerPageSize);
+	QCOMPARE(model.evictMargin(), 1250);
+	QCOMPARE(model.tailKeepMessages(), 2500);
+
+	// Negative clamps to 0 (unlimited).
+	model.setMessageWindowSize(-10);
+	QCOMPARE(model.messageWindowSize(), 0);
+	QVERIFY(model.isWindowUnlimited());
+	QCOMPARE(model.pageSize(), ConversationModel::MaxServerPageSize);
+	QCOMPARE(model.tailKeepMessages(), 0);
+
+	// newestMissingRange chunks newest-first up to 1000 and handles disjoint gaps.
+	constexpr int Total = 2500;
+	QList<refgui::proto::MessageLayoutMeta> metas;
+	metas.reserve(Total);
+	for(int i = 0; i < Total; ++i)
+	{
+		metas.append(refgui::proto::MessageLayoutMeta{
+			.seq = static_cast<quint64>(i),
+			.id = u"m_%1"_s.arg(i),
+			.role = (i % 2 == 0) ? refgui::proto::Role::User : refgui::proto::Role::Assistant,
+			.sourceKind = u"human"_s,
+			.parts = {refgui::proto::PartLayoutMeta{.kind = u"text"_s, .chars = 40, .lines = 1}},
+		});
+	}
+	model.reset({}, Total, Total, metas);
+	QVERIFY(model.hasPlaceholders());
+	QCOMPARE(model.newestMissingRange(), (std::optional<std::pair<quint64, quint64>>{{1500, 2500}}));
+
+	auto makeBatch = [](int start, int end) {
+		QList<refgui::proto::Message> batch;
+		batch.reserve(end - start);
+		for(int i = start; i < end; ++i)
+		{
+			const QString id = u"m_%1"_s.arg(i);
+			batch.append(i % 2 == 0 ? user(id, u"hi"_s) : assistant(id, {text(u"ok"_s)}));
+		}
+		return batch;
+	};
+	model.materializeRange(1500, makeBatch(1500, 2500));
+	QCOMPARE(model.newestMissingRange(), (std::optional<std::pair<quint64, quint64>>{{500, 1500}}));
+	// Partial materialization in the middle creates two disjoint gaps: [500, 700) and [900, 1500).
+	model.materializeRange(700, makeBatch(700, 900));
+	QCOMPARE(model.newestMissingRange(), (std::optional<std::pair<quint64, quint64>>{{900, 1500}}));
+	model.materializeRange(900, makeBatch(900, 1500));
+	QCOMPARE(model.newestMissingRange(), (std::optional<std::pair<quint64, quint64>>{{0, 700}}));
+	model.materializeRange(0, makeBatch(0, 700));
+	QVERIFY(!model.hasPlaceholders());
+	QVERIFY(!model.newestMissingRange().has_value());
+	QCOMPARE(model.residentCount(), Total);
+
+	// Unlimited (0) makes evictOutside and evictOldTail no-ops even with >1000 materialized messages.
+	QVERIFY(model.evictOutside(0, 10).isEmpty());
+	QVERIFY(model.evictOldTail().isEmpty());
+	QVERIFY(model.evictOldTail(50).isEmpty());
+	QCOMPARE(model.residentCount(), Total);
+
+	// Switching to a positive custom size enforces window on evictOutside and evictOldTail.
+	model.setMessageWindowSize(200);
+	const QStringList evictedOutside = model.evictOutside(1000, 1010);
+	QVERIFY(!evictedOutside.isEmpty());
+	QVERIFY(model.residentCount() <= 200);
+	// Materialize all again and check evictOldTail keeps 200 newest.
+	model.materializeRange(0, makeBatch(0, 2500));
+	QCOMPARE(model.residentCount(), Total);
+	model.evictOldTail();
+	QCOMPARE(model.residentCount(), 200);
+	QCOMPARE(model.index(0).data(ConversationModel::KindRole).toString(), u"skeleton"_s);
+	QVERIFY(model.index(model.firstRowForSeq(Total - 200)).data(ConversationModel::KindRole).toString() != u"skeleton"_s);
 }
 
 QTEST_GUILESS_MAIN(TestConversationModel)

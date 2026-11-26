@@ -1149,6 +1149,44 @@ std::optional<std::pair<quint64, quint64>> ConversationModel::missingRangeAround
 	return std::pair<quint64, quint64>{static_cast<quint64>(fetchStart), static_cast<quint64>(fetchEnd)};
 }
 
+void ConversationModel::setMessageWindowSize(qsizetype size)
+{
+	m_windowSize = std::max<qsizetype>(0, size);
+}
+
+qsizetype ConversationModel::pageSize() const
+{
+	if(m_windowSize == 0)
+	{
+		return MaxServerPageSize;
+	}
+	return std::clamp<qsizetype>(m_windowSize / 2, std::min<qsizetype>(m_windowSize, 100), MaxServerPageSize);
+}
+
+std::optional<std::pair<quint64, quint64>> ConversationModel::newestMissingRange(qsizetype pageSize) const
+{
+	if(m_messages.isEmpty() || pageSize <= 0)
+	{
+		return std::nullopt;
+	}
+	qsizetype gapEnd = m_messages.size();
+	while(gapEnd > 0 && m_messages.at(gapEnd - 1).materialized)
+	{
+		--gapEnd;
+	}
+	if(gapEnd == 0)
+	{
+		return std::nullopt;
+	}
+	qsizetype gapStart = gapEnd;
+	while(gapStart > 0 && !m_messages.at(gapStart - 1).materialized)
+	{
+		--gapStart;
+	}
+	const qsizetype fetchStart = std::max<qsizetype>(gapStart, gapEnd - pageSize);
+	return std::pair<quint64, quint64>{static_cast<quint64>(fetchStart), static_cast<quint64>(gapEnd)};
+}
+
 void ConversationModel::materializeRange(quint64 startSeq, const QList<proto::Message>& messages)
 {
 	if(messages.isEmpty())
@@ -1237,15 +1275,16 @@ QStringList ConversationModel::evictSlots(const QList<qsizetype>& indices)
 
 QStringList ConversationModel::evictOutside(quint64 visibleStart, quint64 visibleEnd)
 {
-	if(m_messages.isEmpty())
+	if(m_windowSize == 0 || m_messages.isEmpty())
 	{
 		return {};
 	}
+	const qsizetype margin = evictMargin();
 	const qsizetype total = m_messages.size();
 	const qsizetype vStart = std::clamp<qsizetype>(static_cast<qsizetype>(visibleStart), 0, total - 1);
 	const qsizetype vEnd = std::clamp<qsizetype>(static_cast<qsizetype>(visibleEnd), vStart, total - 1);
-	const qsizetype keepStart = std::max<qsizetype>(0, vStart - EvictMargin);
-	const qsizetype keepEnd = std::min<qsizetype>(total - 1, vEnd + EvictMargin);
+	const qsizetype keepStart = std::max<qsizetype>(0, vStart - margin);
+	const qsizetype keepEnd = std::min<qsizetype>(total - 1, vEnd + margin);
 
 	QList<qsizetype> toEvict;
 	QList<qsizetype> remaining;
@@ -1267,11 +1306,11 @@ QStringList ConversationModel::evictOutside(quint64 visibleStart, quint64 visibl
 	}
 
 	const qsizetype residentAfterFirstPass = residentCount() - toEvict.size();
-	if(residentAfterFirstPass > MaxResidentMessages && !remaining.isEmpty())
+	if(residentAfterFirstPass > m_windowSize && !remaining.isEmpty())
 	{
 		const qsizetype midpoint = (vStart + vEnd) / 2;
 		std::ranges::sort(remaining, [midpoint](qsizetype a, qsizetype b) { return std::abs(a - midpoint) > std::abs(b - midpoint); });
-		const qsizetype excess = std::min(residentAfterFirstPass - MaxResidentMessages, remaining.size());
+		const qsizetype excess = std::min(residentAfterFirstPass - m_windowSize, remaining.size());
 		for(qsizetype i = 0; i < excess; ++i)
 		{
 			toEvict.append(remaining.at(i));
@@ -1280,9 +1319,14 @@ QStringList ConversationModel::evictOutside(quint64 visibleStart, quint64 visibl
 	return evictSlots(toEvict);
 }
 
+QStringList ConversationModel::evictOldTail()
+{
+	return evictOldTail(tailKeepMessages());
+}
+
 QStringList ConversationModel::evictOldTail(qsizetype keepCount)
 {
-	if(m_messages.size() <= keepCount)
+	if(m_windowSize == 0 || m_messages.size() <= keepCount)
 	{
 		return {};
 	}

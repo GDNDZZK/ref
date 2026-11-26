@@ -168,6 +168,7 @@ public:
 	Q_INVOKABLE void setVisibleSeqRange(int startSeq, int endSeq);
 	Q_INVOKABLE void retryRangeFetch();
 	Q_INVOKABLE void setFollowing(bool following);
+	void setMessageWindowSize(int size);
 	Q_INVOKABLE int firstRowForSeq(int seq) const;
 	Q_INVOKABLE int seqForRow(int row) const;
 	Q_INVOKABLE QVariantList allImages() const;

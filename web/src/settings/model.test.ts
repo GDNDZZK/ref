@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { metrics } from '../theme/generated/theme.ts'
-import { defaultSettings, notifyKinds, parseSettings } from './model.ts'
-
+import {
+  DEFAULT_MESSAGE_WINDOW_SIZE,
+  MESSAGE_WINDOW_STEP,
+  defaultSettings,
+  notifyKinds,
+  parseSettings,
+} from './model.ts'
 describe('parseSettings', () => {
   it('gives the defaults when nothing is stored', () => {
     expect(parseSettings(null)).toEqual({ settings: defaultSettings(), corrupt: false })
@@ -30,6 +35,7 @@ describe('parseSettings', () => {
       sidebarRunningHeight: 220,
       sidebarHistoryCreatorFilter: 'user',
       sidebarHistoryCurrentDir: true,
+      messageWindowSize: 2500,
     }
     expect(parseSettings(JSON.stringify(stored))).toEqual({ settings: stored, corrupt: false })
   })
@@ -120,6 +126,18 @@ describe('parseSettings', () => {
       sidebarHistoryCreatorFilter: 'all',
       sidebarHistoryCurrentDir: false,
     })
+  })
+
+  it('parses messageWindowSize as non-negative integer with 1000 default, 0 unlimited, and no upper cap', () => {
+    expect(DEFAULT_MESSAGE_WINDOW_SIZE).toBe(1000)
+    expect(MESSAGE_WINDOW_STEP).toBe(50)
+    expect(defaultSettings().messageWindowSize).toBe(1000)
+    expect(parseSettings(JSON.stringify({ messageWindowSize: 0 })).settings.messageWindowSize).toBe(0)
+    expect(parseSettings(JSON.stringify({ messageWindowSize: 25000 })).settings.messageWindowSize).toBe(25000)
+    expect(parseSettings(JSON.stringify({ messageWindowSize: 124.6 })).settings.messageWindowSize).toBe(125)
+    for (const bad of [-1, -50, -Infinity, Infinity, Number.NaN, '500', null, false]) {
+      expect(parseSettings(JSON.stringify({ messageWindowSize: bad })).settings.messageWindowSize).toBe(1000)
+    }
   })
 })
 

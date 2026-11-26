@@ -213,22 +213,35 @@ fn main() -> anyhow::Result<()> {
         model,
         prompt: cli.prompt.clone(),
     };
-    let (target, source, prefs_warn) = if cli.mock {
-        (BackendTarget::Mock, BackendSource::Auto, None)
+    let (target, source, message_window_size, prefs_warn) = if cli.mock {
+        (
+            BackendTarget::Mock,
+            BackendSource::Auto,
+            crate::state::MAX_RESIDENT_MESSAGES,
+            None,
+        )
     } else {
         let (prefs, warn) = match prefs::load_prefs() {
             Ok(p) => (p, None),
             Err(e) => (prefs::TuiPrefs::default(), Some(e)),
         };
+        let window_size = prefs
+            .message_window_size
+            .unwrap_or(crate::state::MAX_RESIDENT_MESSAGES);
         match prefs::resolve_target(cli.server.as_deref(), cli.token.as_deref(), &prefs) {
-            Ok((t, s)) => (t, s, warn),
+            Ok((t, s)) => (t, s, window_size, warn),
             Err(e) if cli.server.is_some() => anyhow::bail!("{e}"),
             Err(e) => {
                 let combined = match warn {
                     Some(w) => format!("{w}; {e}"),
                     None => e,
                 };
-                (BackendTarget::Auto, BackendSource::Auto, Some(combined))
+                (
+                    BackendTarget::Auto,
+                    BackendSource::Auto,
+                    window_size,
+                    Some(combined),
+                )
             }
         }
     };
@@ -245,7 +258,15 @@ fn main() -> anyhow::Result<()> {
         default_hook(info);
     }));
     setup_terminal()?;
-    let res = rt.block_on(run(cli.mock, target, source, prefs_warn, cwd, plan));
+    let res = rt.block_on(run(
+        cli.mock,
+        target,
+        source,
+        message_window_size,
+        prefs_warn,
+        cwd,
+        plan,
+    ));
     let restored = restore_terminal();
     rt.shutdown_timeout(RUNTIME_SHUTDOWN_TIMEOUT);
     let exit_text = res?;
@@ -286,6 +307,7 @@ async fn run(
     mock: bool,
     target: BackendTarget,
     source: BackendSource,
+    message_window_size: usize,
     prefs_warn: Option<String>,
     cwd: String,
     plan: InitPlan,
@@ -307,7 +329,9 @@ async fn run(
         Client::with_control(out_tx, ctrl_tx)
     };
 
-    let mut app = App::new(client, cwd, plan).with_backend(target, source);
+    let mut app = App::new(client, cwd, plan)
+        .with_backend(target, source)
+        .with_message_window_size(message_window_size);
     if let Some(w) = prefs_warn {
         app.toasts.warn(w);
     }

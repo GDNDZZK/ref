@@ -8,6 +8,7 @@ ModalDialog {
 	readonly property int rowHeight: 48
 	readonly property int zoomControlHeight: 28
 	readonly property int zoomInputWidth: 68
+	readonly property int messageWindowInputWidth: 76
 	readonly property int zoomInputLeftMargin: 6
 	readonly property int zoomInputSuffixGap: 2
 	readonly property int zoomInputRightMargin: 8
@@ -240,6 +241,158 @@ ModalDialog {
 				color: Theme.textMuted
 				font.pixelSize: Theme.smallFontSize
 				wrapMode: Text.Wrap
+			}
+		}
+		Rectangle { x: Theme.dialogPadding; width: parent.width - 2 * Theme.dialogPadding; height: 1; color: Theme.border }
+
+		Item {
+			objectName: "messageWindowRow"
+			width: parent.width
+			height: 54
+
+			Column {
+				anchors { left: parent.left; leftMargin: Theme.dialogPadding; right: messageWindowControls.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+				spacing: 2
+
+				Text {
+					textFormat: Text.PlainText
+					width: parent.width
+					text: qsTr("Message window")
+					color: Theme.text
+					font.pixelSize: Theme.fontSize
+					elide: Text.ElideRight
+				}
+
+				Text {
+					textFormat: Text.PlainText
+					width: parent.width
+					text: qsTr("0 = unlimited (load all)")
+					color: Theme.textMuted
+					font.pixelSize: Theme.smallFontSize
+					elide: Text.ElideRight
+				}
+			}
+
+			Row {
+				id: messageWindowControls
+				anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
+				spacing: 8
+
+				TextButton {
+					objectName: "messageWindowResetButton"
+					anchors.verticalCenter: parent.verticalCenter
+					visible: Workspace.settings.messageWindowSize !== Workspace.settings.defaultMessageWindowSize
+					text: qsTr("Reset")
+					onClicked: Workspace.settings.messageWindowSize = Workspace.settings.defaultMessageWindowSize
+				}
+				CircleButton {
+					objectName: "messageWindowOutButton"
+					anchors.verticalCenter: parent.verticalCenter
+					implicitWidth: dialog.zoomControlHeight
+					implicitHeight: dialog.zoomControlHeight
+					enabled: Workspace.settings.messageWindowSize > 0
+					opacity: enabled ? 1 : Theme.disabledOpacity
+					Accessible.name: qsTr("Message window") + " (−)"
+					onClicked: Workspace.settings.messageWindowSize = Math.max(0, Workspace.settings.messageWindowSize - Workspace.settings.messageWindowStep)
+
+					Text {
+						textFormat: Text.PlainText
+						anchors.centerIn: parent
+						text: "−"
+						color: Theme.text
+						font { pixelSize: Theme.fontSize; bold: true }
+					}
+				}
+				Rectangle {
+					id: messageWindowBox
+					anchors.verticalCenter: parent.verticalCenter
+					width: dialog.messageWindowInputWidth
+					height: dialog.zoomControlHeight
+					radius: Theme.radiusSmall
+					color: Theme.background
+					border.color: messageWindowInput.activeFocus ? Theme.accentText : Theme.border
+
+					Behavior on border.color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+
+					function formattedSize() {
+						return String(Workspace.settings.messageWindowSize)
+					}
+
+					function commit() {
+						const raw = messageWindowInput.text.trim()
+						if (raw === "" || !/^\d+$/.test(raw)) {
+							messageWindowInput.text = formattedSize()
+							return
+						}
+						const parsed = Number(raw)
+						if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > 2147483647) {
+							messageWindowInput.text = formattedSize()
+							return
+						}
+						Workspace.settings.messageWindowSize = parsed
+						messageWindowInput.text = formattedSize()
+					}
+
+					Connections {
+						target: Workspace.settings
+						function onMessageWindowSizeChanged() {
+							messageWindowInput.text = messageWindowBox.formattedSize()
+						}
+					}
+
+					TapHandler { onTapped: messageWindowInput.forceActiveFocus() }
+					TextInput {
+						id: messageWindowInput
+						objectName: "messageWindowInput"
+						anchors { left: parent.left; leftMargin: dialog.zoomInputRightMargin; right: parent.right; rightMargin: dialog.zoomInputRightMargin; top: parent.top; bottom: parent.bottom }
+						horizontalAlignment: TextInput.AlignRight
+						verticalAlignment: TextInput.AlignVCenter
+						color: Theme.text
+						selectionColor: Theme.selection
+						selectedTextColor: Theme.text
+						font { family: Theme.monoFamily; pixelSize: Theme.secondaryFontSize }
+						clip: true
+						selectByMouse: true
+						Accessible.name: qsTr("Message window")
+						Component.onCompleted: text = messageWindowBox.formattedSize()
+						onAccepted: {
+							messageWindowBox.commit()
+							dialog.forceActiveFocus()
+						}
+						onEditingFinished: if (text !== messageWindowBox.formattedSize()) messageWindowBox.commit()
+						Keys.onEscapePressed: event => {
+							text = messageWindowBox.formattedSize()
+							dialog.forceActiveFocus()
+							event.accepted = true
+						}
+						Keys.onUpPressed: event => {
+							Workspace.settings.messageWindowSize = Workspace.settings.messageWindowSize + Workspace.settings.messageWindowStep
+							text = messageWindowBox.formattedSize()
+							event.accepted = true
+						}
+						Keys.onDownPressed: event => {
+							Workspace.settings.messageWindowSize = Math.max(0, Workspace.settings.messageWindowSize - Workspace.settings.messageWindowStep)
+							text = messageWindowBox.formattedSize()
+							event.accepted = true
+						}
+					}
+				}
+				CircleButton {
+					objectName: "messageWindowInButton"
+					anchors.verticalCenter: parent.verticalCenter
+					implicitWidth: dialog.zoomControlHeight
+					implicitHeight: dialog.zoomControlHeight
+					Accessible.name: qsTr("Message window") + " (+)"
+					onClicked: Workspace.settings.messageWindowSize = Workspace.settings.messageWindowSize + Workspace.settings.messageWindowStep
+
+					Text {
+						textFormat: Text.PlainText
+						anchors.centerIn: parent
+						text: "+"
+						color: Theme.text
+						font { pixelSize: Theme.fontSize; bold: true }
+					}
+				}
 			}
 		}
 		Rectangle { x: Theme.dialogPadding; width: parent.width - 2 * Theme.dialogPadding; height: 1; color: Theme.border }

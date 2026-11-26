@@ -14,7 +14,7 @@ use serde_json::Value;
 
 use crate::net::{Client, NetEvent};
 use crate::prefs::{BackendSource, TuiPrefs};
-use crate::state::{PAGE_SIZE, Queued, RANGE_DEBOUNCE, SessionView};
+use crate::state::{MAX_RESIDENT_MESSAGES, Queued, RANGE_DEBOUNCE, SessionView};
 use crate::text;
 pub use crate::ui::autocomplete::{AcKind, Autocomplete};
 use crate::ui::autocomplete::{
@@ -426,6 +426,13 @@ pub const COMMANDS: &[Cmd] = &[
         requires_args: false,
     },
     Cmd {
+        name: cmd::WINDOW,
+        aliases: &[],
+        desc: "Set resident message window (/window [N|reset], 0 = unlimited)",
+        key: "",
+        requires_args: false,
+    },
+    Cmd {
         name: cmd::EDITOR,
         aliases: &[],
         desc: "Compose prompt in $EDITOR",
@@ -571,6 +578,10 @@ pub struct App {
     pub backend_source: BackendSource,
     /// Clickable `"Switch Backend..."` regions on banners / connect screen.
     pub switch_backend_rects: Vec<Rect>,
+    /// Client-side resident message window size (`0` = unlimited / load all).
+    pub message_window_size: usize,
+    /// Optional override path for `tui.json` (used in unit tests).
+    pub prefs_path: Option<std::path::PathBuf>,
 }
 /// Poll interval for MCP status while any server is connecting.
 const MCP_POLL: Duration = Duration::from_secs(5);
@@ -748,12 +759,21 @@ impl App {
             backend_target: BackendTarget::Auto,
             backend_source: BackendSource::Auto,
             switch_backend_rects: Vec::new(),
+            message_window_size: MAX_RESIDENT_MESSAGES,
+            prefs_path: None,
         }
     }
 
     pub fn with_backend(mut self, target: BackendTarget, source: BackendSource) -> Self {
         self.backend_target = target;
         self.backend_source = source;
+        self
+    }
+    pub fn with_message_window_size(mut self, size: usize) -> Self {
+        self.message_window_size = size;
+        for v in self.views.values_mut() {
+            v.set_message_window_size(size);
+        }
         self
     }
 
@@ -795,11 +815,15 @@ impl App {
     /// Asks the backend to attach `sid` and marks it as attaching until the answer arrives.
     fn send_attach(&mut self, sid: String, fg: bool) {
         self.attaching.insert(sid.clone());
+        let limit = self.views.get(&sid).map_or_else(
+            || SessionView::page_size_for(self.message_window_size),
+            SessionView::page_size,
+        );
         self.req(
             Request::Attach {
                 session_id: sid.clone(),
                 foreground: fg,
-                limit: Some(PAGE_SIZE as u32),
+                limit: Some(limit as u32),
             },
             Pending::Attach { sid, fg },
         );
@@ -1308,9 +1332,10 @@ impl App {
                     }
                 };
                 let sid = info.id.clone();
-                self.views
-                    .entry(sid.clone())
-                    .or_insert_with(|| SessionView::new(info, true));
+                let window_size = self.message_window_size;
+                self.views.entry(sid.clone()).or_insert_with(|| {
+                    SessionView::new(info, true).with_message_window_size(window_size)
+                });
                 self.attach_fg(&sid);
                 match post {
                     Some(PostCreate::Prompt(t, imgs)) => self.send_prompt(&sid, t, imgs),
@@ -1335,11 +1360,13 @@ impl App {
                 };
                 // Keep an existing view's flag: it may have changed while the request was in flight
                 // (e.g. a background tile was zoomed while its attach was in flight).
-                let v = self
-                    .views
-                    .entry(sid.clone())
-                    .or_insert_with(|| SessionView::new(snap.info.clone(), fg));
+                let window_size = self.message_window_size;
+                let v = self.views.entry(sid.clone()).or_insert_with(|| {
+                    SessionView::new(snap.info.clone(), fg).with_message_window_size(window_size)
+                });
+                v.set_message_window_size(window_size);
                 v.load_snapshot(snap);
+                self.maybe_load_all(&sid);
             }
             Pending::HistoryDialog { creator, query } => {
                 self.history_inflight = self.has_history_inflight();
@@ -1679,9 +1706,10 @@ impl App {
             return;
         };
         let sid = info.id.clone();
-        self.views
-            .entry(sid.clone())
-            .or_insert_with(|| SessionView::new(info.clone(), true));
+        let window_size = self.message_window_size;
+        self.views.entry(sid.clone()).or_insert_with(|| {
+            SessionView::new(info.clone(), true).with_message_window_size(window_size)
+        });
         self.attach_fg(&sid);
         if let Some(p) = self.init.take().and_then(|i| i.prompt) {
             self.send_prompt(&sid, p, Vec::new());
@@ -1792,11 +1820,16 @@ impl App {
                 return;
             }
         };
-        if let Some(v) = self.views.get_mut(sid)
-            && !v.apply_messages_range(generation, actual_start, msgs, more)
-            && v.history_gen == generation
-        {
-            v.range_pending = None;
+        let empty = msgs.is_empty();
+        let applied = self.views.get_mut(sid).is_some_and(|v| {
+            let changed = v.apply_messages_range(generation, actual_start, msgs, more);
+            if !changed && v.history_gen == generation {
+                v.range_pending = None;
+            }
+            changed
+        });
+        if applied && !empty {
+            self.maybe_load_all(sid);
         }
     }
 
@@ -1915,7 +1948,11 @@ impl App {
                 TOAST_ERROR_MAX_CHARS,
             ));
         }
+        let is_reset = matches!(ev, SessionEvent::Reset { .. });
         v.apply(ev);
+        if !closed && is_reset {
+            self.maybe_load_all(&sid);
+        }
         if closed {
             if self.current.as_deref() == Some(sid.as_str()) {
                 self.views.remove(&sid);
@@ -1985,8 +2022,11 @@ impl App {
         for sid in &tiles {
             if !self.views.contains_key(sid) && !self.attaching.contains(sid) {
                 if let Some(info) = self.live.iter().find(|s| &s.id == sid).cloned() {
-                    self.views
-                        .insert(sid.clone(), SessionView::new(info, false));
+                    let window_size = self.message_window_size;
+                    self.views.insert(
+                        sid.clone(),
+                        SessionView::new(info, false).with_message_window_size(window_size),
+                    );
                 }
                 self.send_attach(sid.clone(), false);
             }
@@ -2045,10 +2085,12 @@ impl App {
                     .cloned()
             })
             .unwrap_or_else(|| placeholder_info(sid, &self.cwd));
+        let window_size = self.message_window_size;
         let v = self
             .views
             .entry(sid.to_string())
-            .or_insert_with(|| SessionView::new(info, true));
+            .or_insert_with(|| SessionView::new(info, true).with_message_window_size(window_size));
+        v.set_message_window_size(window_size);
         v.foreground = true;
         v.chat.scroll_to_bottom(false);
         self.send_attach(sid.to_string(), true);
@@ -3903,6 +3945,7 @@ impl App {
                     self.refresh_mcp();
                 }
             }
+            cmd::WINDOW => self.set_message_window(args),
             cmd::RELOAD => {
                 let cwd = self.current_cwd();
                 self.req(Request::ReloadConfig { cwd }, Pending::ReloadConfig);
@@ -4140,8 +4183,10 @@ impl App {
                 let prefs = TuiPrefs {
                     backend_url: Some(url.clone()),
                     backend_token: token.clone(),
+                    message_window_size: (self.message_window_size != MAX_RESIDENT_MESSAGES)
+                        .then_some(self.message_window_size),
                 };
-                if let Err(e) = crate::prefs::save_prefs(&prefs) {
+                if let Err(e) = self.save_prefs_file(&prefs) {
                     self.toasts.error(format!("Cannot save preferences: {e}"));
                     return;
                 }
@@ -4150,7 +4195,13 @@ impl App {
                 self.switch_backend(BackendTarget::Explicit { url, token }, BackendSource::Saved);
             }
             BackendAction::RestoreLocal => {
-                if let Err(e) = crate::prefs::save_prefs(&TuiPrefs::default()) {
+                let prefs = TuiPrefs {
+                    backend_url: None,
+                    backend_token: None,
+                    message_window_size: (self.message_window_size != MAX_RESIDENT_MESSAGES)
+                        .then_some(self.message_window_size),
+                };
+                if let Err(e) = self.save_prefs_file(&prefs) {
                     self.toasts.error(format!("Cannot save preferences: {e}"));
                     return;
                 }
@@ -4159,6 +4210,135 @@ impl App {
                 self.switch_backend(BackendTarget::Auto, BackendSource::Auto);
             }
         }
+    }
+    fn load_existing_prefs(&self) -> Result<TuiPrefs, String> {
+        if let Some(path) = &self.prefs_path {
+            return crate::prefs::load_prefs_from(path);
+        }
+        #[cfg(test)]
+        {
+            Ok(TuiPrefs::default())
+        }
+        #[cfg(not(test))]
+        {
+            crate::prefs::load_prefs()
+        }
+    }
+
+    fn save_prefs_file(&self, prefs: &TuiPrefs) -> Result<(), String> {
+        if let Some(path) = &self.prefs_path {
+            return crate::prefs::save_prefs_to(path, prefs);
+        }
+        #[cfg(test)]
+        {
+            let _ = prefs;
+            Ok(())
+        }
+        #[cfg(not(test))]
+        {
+            crate::prefs::save_prefs(prefs)
+        }
+    }
+
+    fn set_message_window(&mut self, args: &str) {
+        let trimmed = args.trim();
+        if trimmed.is_empty() {
+            if self.message_window_size == 0 {
+                self.toasts.info("Message window: unlimited (0)");
+            } else {
+                self.toasts.info(format!(
+                    "Message window: {} (0 = unlimited)",
+                    self.message_window_size
+                ));
+            }
+            return;
+        }
+        let is_reset =
+            trimmed.eq_ignore_ascii_case("reset") || trimmed.eq_ignore_ascii_case("default");
+        let next = if is_reset {
+            MAX_RESIDENT_MESSAGES
+        } else if let Ok(n) = trimmed.parse::<usize>() {
+            n
+        } else {
+            self.toasts.error("Usage: /window <count|0|reset>");
+            return;
+        };
+        let mut prefs = self.load_existing_prefs().unwrap_or_else(|_| TuiPrefs {
+            backend_url: match (&self.backend_target, self.backend_source) {
+                (BackendTarget::Explicit { url, .. }, BackendSource::Saved) => Some(url.clone()),
+                _ => None,
+            },
+            backend_token: match (&self.backend_target, self.backend_source) {
+                (BackendTarget::Explicit { token, .. }, BackendSource::Saved) => token.clone(),
+                _ => None,
+            },
+            message_window_size: None,
+        });
+        prefs.message_window_size = (next != MAX_RESIDENT_MESSAGES).then_some(next);
+        if let Err(e) = self.save_prefs_file(&prefs) {
+            self.toasts.error(format!("Cannot save preferences: {e}"));
+            return;
+        }
+        self.message_window_size = next;
+        for v in self.views.values_mut() {
+            v.set_message_window_size(next);
+            if next > 0 && v.chat.follow && v.slots.len() > v.tail_keep() {
+                let keep = v.tail_keep();
+                v.trim_to_tail(keep);
+            }
+        }
+        if next == 0 {
+            let sids: Vec<String> = self.views.keys().cloned().collect();
+            for sid in sids {
+                self.maybe_load_all(&sid);
+            }
+            self.toasts.info("Message window: unlimited (0)");
+        } else if is_reset {
+            self.toasts
+                .info(format!("Message window reset to {MAX_RESIDENT_MESSAGES}"));
+        } else {
+            self.toasts.info(format!("Message window: {next}"));
+        }
+    }
+
+    fn maybe_load_all(&mut self, sid: &str) {
+        if !self.connected {
+            return;
+        }
+        let Some((generation, start, end)) = self.views.get_mut(sid).and_then(|v| {
+            if !v.loaded || v.range_halted || !v.is_window_unlimited() {
+                return None;
+            }
+            let cur_gen = v.history_gen;
+            if v.range_pending.is_some()
+                || self.pending.values().any(|p| {
+                    matches!(p, Pending::MessagesRange { sid: ps, generation, .. } if ps == sid && *generation == cur_gen)
+                })
+            {
+                return None;
+            }
+            let (start, end) = v.newest_missing_range()?;
+            v.range_due = None;
+            v.range_pending = Some((cur_gen, start, end));
+            Some((cur_gen, start, end))
+        }) else {
+            return;
+        };
+        self.req(
+            Request::Messages {
+                session_id: sid.to_string(),
+                before: None,
+                start_seq: Some(start as u64),
+                end_seq: Some(end as u64),
+                limit: Some(ref_proto::PAGE_MAX as u32),
+            },
+            Pending::MessagesRange {
+                sid: sid.to_string(),
+                generation,
+                start_seq: start,
+                end_seq: end,
+            },
+        );
     }
 
     pub fn switch_backend(&mut self, target: BackendTarget, source: BackendSource) {
@@ -5795,6 +5975,7 @@ impl App {
             let Some((start, end)) = v.desired_range() else {
                 continue;
             };
+            let limit = v.page_size() as u32;
             v.range_due = None;
             let generation = v.history_gen;
             v.range_pending = Some((generation, start, end));
@@ -5804,7 +5985,7 @@ impl App {
                     before: None,
                     start_seq: Some(start as u64),
                     end_seq: Some(end as u64),
-                    limit: Some(PAGE_SIZE as u32),
+                    limit: Some(limit),
                 },
                 Pending::MessagesRange {
                     sid,

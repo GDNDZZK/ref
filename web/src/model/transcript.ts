@@ -28,10 +28,10 @@ import { StreamPacer } from './streamPacer.ts'
 import { partialPurpose } from './toolArgs.ts'
 
 export const PAGE_SIZE = 500
+export const MAX_SERVER_PAGE_SIZE = 1000
 export const MAX_RESIDENT_MESSAGES = 1000
 export const TAIL_KEEP_MESSAGES = 1000
 export const EVICT_BUFFER = 500
-
 export type TranscriptSlot =
   | {
       kind: 'materialized'
@@ -117,9 +117,52 @@ export class Transcript {
   queued: Message[] = []
   // The last `Error` event; it stays until the user sends the next prompt.
   private errorText = ''
+  private windowSize = MAX_RESIDENT_MESSAGES
 
   constructor(options: TranscriptOptions) {
     this.options = options
+  }
+
+  setWindowSize(size: number): void {
+    this.windowSize = Number.isFinite(size) ? Math.max(0, Math.round(size)) : MAX_RESIDENT_MESSAGES
+  }
+
+  get isUnlimited(): boolean {
+    return this.windowSize === 0
+  }
+
+  get pageSize(): number {
+    if (this.windowSize === 0) return MAX_SERVER_PAGE_SIZE
+    return Math.min(
+      MAX_SERVER_PAGE_SIZE,
+      Math.max(Math.min(this.windowSize, 100), Math.floor(this.windowSize / 2)),
+    )
+  }
+
+  get evictBuffer(): number {
+    return Math.floor(this.windowSize / 2)
+  }
+
+  get tailKeep(): number {
+    return this.windowSize
+  }
+
+  hasPlaceholders(): boolean {
+    return this.slotModels.some((slot) => slot.kind === 'placeholder')
+  }
+
+  newestMissingRange(pageSize = MAX_SERVER_PAGE_SIZE): { startSeq: number; endSeq: number } | undefined {
+    const limit = Math.max(1, Math.min(MAX_SERVER_PAGE_SIZE, Math.floor(pageSize)))
+    let gapEnd = this.slotModels.length
+    while (gapEnd > 0 && this.slotModels[gapEnd - 1]?.kind !== 'placeholder') {
+      gapEnd--
+    }
+    if (gapEnd === 0) return undefined
+    let gapStart = gapEnd - 1
+    while (gapStart > 0 && this.slotModels[gapStart - 1]?.kind === 'placeholder') {
+      gapStart--
+    }
+    return { startSeq: Math.max(gapStart, gapEnd - limit), endSeq: gapEnd }
   }
 
   get blocks(): readonly Block[] {
@@ -187,15 +230,16 @@ export class Transcript {
     }
     if (firstMissing < 0) return undefined
 
+    const pageSize = this.pageSize
     let reqStart = firstMissing
     let reqEnd = lastMissing + 1
-    // Expand contiguous placeholder block up to PAGE_SIZE so adjacent scrolling does not thrash.
-    while (reqEnd - reqStart < PAGE_SIZE) {
+    // Expand contiguous placeholder block up to pageSize so adjacent scrolling does not thrash.
+    while (reqEnd - reqStart < pageSize) {
       const canExpandLeft = reqStart > 0 && this.slotModels[reqStart - 1]?.kind === 'placeholder'
       const canExpandRight = reqEnd < total && this.slotModels[reqEnd]?.kind === 'placeholder'
       if (!canExpandLeft && !canExpandRight) break
       if (canExpandLeft) reqStart--
-      if (reqEnd - reqStart < PAGE_SIZE && canExpandRight) reqEnd++
+      if (reqEnd - reqStart < pageSize && canExpandRight) reqEnd++
     }
     return { startSeq: reqStart, endSeq: reqEnd }
   }
@@ -261,8 +305,9 @@ export class Transcript {
   }
 
   // Evicts materialized messages outside [keepStart, keepEnd] inclusive and enforces
-  // MAX_RESIDENT_MESSAGES by evicting the farthest slots from the window midpoint.
+  // windowSize by evicting the farthest slots from the window midpoint.
   evictOutside(keepStart: number, keepEnd: number): string[] {
+    if (this.windowSize === 0) return []
     const evicted: string[] = []
     const remaining: number[] = []
     for (let i = 0; i < this.slotModels.length; i++) {
@@ -274,12 +319,12 @@ export class Transcript {
       }
       evicted.push(this.evictSlotAt(i))
     }
-    if (remaining.length > MAX_RESIDENT_MESSAGES) {
+    if (remaining.length > this.windowSize) {
       const midpoint = (keepStart + keepEnd) / 2
       remaining.sort(
         (a, b) => Math.abs(this.slotModels[b]!.seq - midpoint) - Math.abs(this.slotModels[a]!.seq - midpoint),
       )
-      const excess = remaining.length - MAX_RESIDENT_MESSAGES
+      const excess = remaining.length - this.windowSize
       for (let i = 0; i < excess; i++) {
         evicted.push(this.evictSlotAt(remaining[i]!))
       }
@@ -310,6 +355,7 @@ export class Transcript {
 
   // Evicts materialized messages older than the newest `keepCount`.
   evictBeforeTail(keepCount: number): string[] {
+    if (this.windowSize === 0) return []
     const total = this.slotModels.length
     const keepStart = Math.max(0, total - Math.max(0, keepCount))
     return this.evictOutside(keepStart, total - 1)
