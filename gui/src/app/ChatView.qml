@@ -51,8 +51,12 @@ ListView {
 	readonly property string rangeError: session ? (session.rangeError ?? "") : ""
 	readonly property int columnWidthDebounceMs: 16
 	readonly property int visibleRangeDebounceMs: 80
+	readonly property int maxLayoutRetries: 4
 	property int lastReportedStart: -1
 	property int lastReportedEnd: -1
+	property int layoutRetryCount: 0
+	property int jumpToEndGen: 0
+	property bool pendingJumpToEnd: false
 	readonly property bool prepending: loadingOlder // rows added now are earlier history
 	property int permissionCount: 0 // tool calls waiting for the user's answer
 
@@ -108,6 +112,35 @@ ListView {
 	// The follow chase below does the gliding.
 	function glideToEnd() {
 		following = true
+	}
+
+	function jumpToEnd() {
+		following = true
+		stopScrollMotion()
+		if (count > 0 && height > 0) {
+			forceLayout()
+			positionViewAtEnd()
+			contentY = followTarget
+		}
+	}
+
+	function scheduleJumpToEnd() {
+		const gen = ++jumpToEndGen
+		const targetSession = session
+		pendingJumpToEnd = true
+		visibleRangeTimer.stop()
+		Qt.callLater(() => {
+			if (gen !== jumpToEndGen || session !== targetSession)
+				return
+			pendingJumpToEnd = false
+			jumpToEnd()
+			if (session && count > 0) {
+				lastReportedStart = -1
+				lastReportedEnd = -1
+				layoutRetryCount = 0
+				scheduleVisibleRangeReport()
+			}
+		})
 	}
 
 	// One frame of a scroll chase toward `target`, in whole pixels and at least one per
@@ -430,6 +463,9 @@ ListView {
 			if (gen === materializingGen) {
 				materializing = false
 				if (!mutatingWindow) {
+					lastReportedStart = -1
+					lastReportedEnd = -1
+					layoutRetryCount = 0
 					loadOlderIfNear()
 					if (!wheeling && !coasting)
 						scheduleVisibleRangeReport()
@@ -452,6 +488,9 @@ ListView {
 			if (gen === evictingGen) {
 				evicting = false
 				if (!mutatingWindow) {
+					lastReportedStart = -1
+					lastReportedEnd = -1
+					layoutRetryCount = 0
 					loadOlderIfNear()
 					if (!wheeling && !coasting)
 						scheduleVisibleRangeReport()
@@ -466,14 +505,19 @@ ListView {
 	}
 
 	function reportVisibleRange() {
-		if (!session || count === 0 || height <= 0 || mutatingWindow)
-			return
+		if (!session || count === 0 || height <= 0) {
+			layoutRetryCount = 0
+			return true
+		}
+		if (mutatingWindow)
+			return false
 		const contentTop = originY + (headerItem ? headerItem.height : 0)
 		const contentBot = originY + contentHeight - (footerItem ? footerItem.height : 0) - 1
 		const topIdx = rowNearY(Math.max(contentTop, contentY), 1)
 		const botIdx = rowNearY(Math.min(contentBot, contentY + height), -1)
 		if (topIdx < 0 || botIdx < 0 || botIdx < topIdx)
-			return
+			return false
+		layoutRetryCount = 0
 		const s = session.seqForRow(topIdx)
 		const e = session.seqForRow(botIdx)
 		if (s >= 0 && e >= s && (s !== lastReportedStart || e !== lastReportedEnd)) {
@@ -481,18 +525,39 @@ ListView {
 			lastReportedEnd = e
 			session.setVisibleSeqRange(s, e)
 		}
+		return true
 	}
 
 	function scheduleVisibleRangeReport() {
-		if (!session || count === 0 || mutatingWindow || scrollBar.pressed || dragging)
+		if (!session || count === 0 || mutatingWindow || scrollBar.pressed || dragging || pendingJumpToEnd)
 			return
 		visibleRangeTimer.restart()
 	}
 
+	function retryVisibleRangeReport() {
+		if (!session || count === 0 || height <= 0 || scrollBar.pressed || dragging || pendingJumpToEnd)
+			return
+		if (mutatingWindow) {
+			visibleRangeTimer.restart()
+			return
+		}
+		if (layoutRetryCount < maxLayoutRetries) {
+			++layoutRetryCount
+			visibleRangeTimer.restart()
+		}
+	}
+
 	function flushVisibleRangeReport() {
 		visibleRangeTimer.stop()
-		if (!mutatingWindow && !scrollBar.pressed && !dragging)
-			reportVisibleRange()
+		layoutRetryCount = 0
+		if (!session || count === 0 || height <= 0 || scrollBar.pressed || dragging || pendingJumpToEnd)
+			return
+		if (mutatingWindow) {
+			visibleRangeTimer.restart()
+			return
+		}
+		if (!reportVisibleRange())
+			retryVisibleRangeReport()
 	}
 	clip: true
 	spacing: Theme.blockSpacing
@@ -527,7 +592,16 @@ ListView {
 		id: visibleRangeTimer
 		interval: view.visibleRangeDebounceMs
 		repeat: false
-		onTriggered: if (!view.mutatingWindow && !scrollBar.pressed && !view.dragging) view.reportVisibleRange()
+		onTriggered: {
+			if (!view.session || view.count === 0 || view.height <= 0 || scrollBar.pressed || view.dragging || view.pendingJumpToEnd)
+				return
+			if (view.mutatingWindow) {
+				visibleRangeTimer.restart()
+				return
+			}
+			if (!view.reportVisibleRange())
+				view.retryVisibleRangeReport()
+		}
 	}
 
 	onColumnWidthChanged: if (session) columnWidthTimer.restart()
@@ -536,11 +610,16 @@ ListView {
 		visibleRangeTimer.stop()
 		lastReportedStart = -1
 		lastReportedEnd = -1
+		layoutRetryCount = 0
+		following = true
+		stopScrollMotion()
 		if (session) {
 			session.setColumnWidth(columnWidth)
-			session.setFollowing(following)
-			if (count > 0)
-				scheduleVisibleRangeReport()
+			session.setFollowing(true)
+			scheduleJumpToEnd()
+		} else {
+			++jumpToEndGen
+			pendingJumpToEnd = false
 		}
 	}
 	Connections {
@@ -549,9 +628,11 @@ ListView {
 			visibleRangeTimer.stop()
 			view.lastReportedStart = -1
 			view.lastReportedEnd = -1
+			view.layoutRetryCount = 0
 			view.stopScrollMotion()
+			view.following = true
 			if (view.count > 0)
-				view.scheduleVisibleRangeReport()
+				view.scheduleJumpToEnd()
 		}
 	}
 	onHeightChanged: {
@@ -561,22 +642,33 @@ ListView {
 				contentY = Math.max(minContentY, Math.min(boundedMax, contentY - (height - previousHeight)))
 			else if (height > previousHeight && contentY > boundedMax)
 				contentY = boundedMax
+		} else if (height > 0 && following && count > 0 && !pendingJumpToEnd) {
+			jumpToEnd()
+			lastReportedStart = -1
+			lastReportedEnd = -1
+			layoutRetryCount = 0
+			scheduleVisibleRangeReport()
 		}
 		previousHeight = height
 	}
 	onContentYChanged: {
-		if (mutatingWindow)
+		if (mutatingWindow || pendingJumpToEnd)
 			return
 		loadOlderIfNear()
 		scheduleVisibleRangeReport()
 	}
 	onCountChanged: {
-		if (!mutatingWindow)
+		if (!mutatingWindow && !pendingJumpToEnd)
 			scheduleVisibleRangeReport()
 	}
 	onMoreBeforeChanged: loadOlderIfNear()
 	onLoadingOlderChanged: loadOlderIfNear()
-	onDraggingChanged: if (dragging) visibleRangeTimer.stop()
+	onDraggingChanged: {
+		if (dragging)
+			visibleRangeTimer.stop()
+		else
+			flushVisibleRangeReport()
+	}
 
 	header: Item {
 		width: view.width
@@ -608,8 +700,11 @@ ListView {
 			view.stopWheel()
 			view.stopCoast()
 			view.following = !pressed && !view.mutatingWindow && view.atYEnd
-			if (!pressed)
+			if (!pressed) {
+				view.lastReportedStart = -1
+				view.lastReportedEnd = -1
 				view.flushVisibleRangeReport()
+			}
 		}
 
 		// Basic's handle takes the system palette; this one follows Theme.

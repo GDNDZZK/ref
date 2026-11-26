@@ -83,6 +83,20 @@ public:
 	void setModels(const QJsonArray& models) { m_models = models; }
 	QList<QJsonObject> setVariantRequests() const { return m_setVariantRequests; }
 	void setFiles(const QStringList& files) { m_files = files; }
+	void setPagedMessages(const QString& id, const QJsonArray& allMessages, int startSeq, const QJsonArray& layoutMetas)
+	{
+		m_fullMessages.insert(id, allMessages);
+		m_pagedStartSeq.insert(id, startSeq);
+		m_layoutMetas.insert(id, layoutMetas);
+		QJsonArray tail;
+		for(int i = startSeq; i < allMessages.size(); ++i)
+		{
+			tail.append(allMessages.at(i));
+		}
+		m_messages.insert(id, tail);
+	}
+	QList<std::pair<quint64, quint64>> rangeRequests() const { return m_rangeRequests; }
+	void clearRangeRequests() { m_rangeRequests.clear(); }
 private:
 	QJsonArray list() const
 	{
@@ -106,10 +120,19 @@ private:
 			QJsonObject info = m_sessions.value(id);
 			info[u"attached"_s] = request.value(u"foreground"_s).toBool() ? 1 : 0;
 			m_sessions[id] = info;
-			m_fake.respond(request, {{u"snapshot"_s, QJsonObject{{u"info"_s, info},
-			                                                            {u"messages"_s, m_messages.value(id)},
-			                                                            {u"pending_questions"_s, QJsonArray()},
-			                                                            {u"more_before"_s, false}}}});
+			QJsonObject snap{{u"info"_s, info},
+			                 {u"messages"_s, m_messages.value(id)},
+			                 {u"pending_questions"_s, QJsonArray()},
+			                 {u"more_before"_s, false}};
+			if(m_fullMessages.contains(id))
+			{
+				const QJsonArray& all = m_fullMessages[id];
+				snap.insert(u"total_messages"_s, all.size());
+				snap.insert(u"start_seq"_s, m_pagedStartSeq.value(id));
+				snap.insert(u"layout_metas"_s, m_layoutMetas.value(id));
+				snap.insert(u"more_before"_s, m_pagedStartSeq.value(id) > 0);
+			}
+			m_fake.respond(request, {{u"snapshot"_s, snap}});
 			m_fake.send({{u"kind"_s, u"sessions"_s}, {u"sessions"_s, list()}});
 		}
 		else if(op == u"detach"_s || op == u"background"_s)
@@ -460,6 +483,25 @@ private:
 			}
 			m_fake.respond(request, {{u"groups"_s, m_groups}});
 		}
+		else if(op == u"messages"_s && request.contains(u"start_seq"_s))
+		{
+			const quint64 startSeq = static_cast<quint64>(request.value(u"start_seq"_s).toInteger());
+			const quint64 endSeq = static_cast<quint64>(request.value(u"end_seq"_s).toInteger());
+			const int limit = request.value(u"limit"_s).toInt(500);
+			m_rangeRequests.append({startSeq, endSeq});
+			const QJsonArray& all = m_fullMessages[id];
+			const quint64 clampedStart = std::min<quint64>(startSeq, static_cast<quint64>(all.size()));
+			const quint64 clampedEnd = std::min<quint64>({endSeq, static_cast<quint64>(all.size()), clampedStart + static_cast<quint64>(std::max(1, limit))});
+			QJsonArray page;
+			for(quint64 k = clampedStart; k < clampedEnd; ++k)
+			{
+				page.append(all.at(static_cast<qsizetype>(k)));
+			}
+			m_fake.respond(request, {{u"messages"_s, page},
+			                         {u"more_before"_s, clampedStart > 0},
+			                         {u"start_seq"_s, static_cast<qint64>(clampedStart)},
+			                         {u"end_seq"_s, static_cast<qint64>(clampedEnd)}});
+		}
 		else
 		{
 			m_fake.respond(request, {});
@@ -470,6 +512,10 @@ private:
 	QMap<QString, QJsonObject> m_sessions;
 	QMap<QString, QJsonObject> m_history;
 	QMap<QString, QJsonArray> m_messages;
+	QMap<QString, QJsonArray> m_fullMessages;
+	QMap<QString, int> m_pagedStartSeq;
+	QMap<QString, QJsonArray> m_layoutMetas;
+	QList<std::pair<quint64, quint64>> m_rangeRequests;
 	int m_created = 0;
 	QString m_configRawText = u"// Keep user header comment\n{\n  \"model\": \"anthropic/claude-sonnet-4-5\",\n  \"extraFutureSetting\": {\"preserve\": true}\n}\n"_s;
 	int m_saveConfigCalls = 0;
@@ -662,6 +708,7 @@ private slots:
 	void backendDialogSwitchAndStatusPillActionWorkWithoutWarnings();
 	void stashButtonDialogAndSplitFilterCapsuleWorkWithoutWarnings();
 	void floatingBallModeExpandsAndCollapsesInSingleWindowWithoutWarnings();
+	void switchingToLongSessionJumpsToEndAndScrollBarReleaseLoadsSkeletons();
 	void cleanupTestCase();
 };
 
@@ -4604,6 +4651,101 @@ void TestMainWindow::floatingBallModeExpandsAndCollapsesInSingleWindowWithoutWar
 	QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 
 	QVERIFY2(warningSpy.isEmpty(), "FloatingBallWindow emitted QML warnings");
+}
+
+void TestMainWindow::switchingToLongSessionJumpsToEndAndScrollBarReleaseLoadsSkeletons()
+{
+	MainFixture f;
+	f.workspace->settings()->setMessageWindowSize(60);
+
+	constexpr int Total = 120;
+	constexpr int StartSeq = 60;
+	QJsonArray allMessages;
+	QJsonArray metas;
+	for(int i = 0; i < Total; ++i)
+	{
+		allMessages.append(QJsonObject{{u"id"_s, u"m_%1"_s.arg(i)},
+		                               {u"role"_s, u"user"_s},
+		                               {u"time"_s, 10 + i},
+		                               {u"parts"_s, QJsonArray{QJsonObject{{u"type"_s, u"text"_s}, {u"text"_s, u"Long message %1\nSecond line"_s.arg(i)}, {u"time"_s, 10 + i}}}}});
+		if(i < StartSeq)
+		{
+			metas.append(QJsonObject{{u"seq"_s, i},
+			                         {u"id"_s, u"m_%1"_s.arg(i)},
+			                         {u"role"_s, u"user"_s},
+			                         {u"source_kind"_s, u"human"_s},
+			                         {u"has_error"_s, false},
+			                         {u"parts"_s, QJsonArray{QJsonObject{{u"kind"_s, u"text"_s}, {u"chars"_s, 40}, {u"lines"_s, 2}}}}});
+		}
+	}
+	f.stub.setPagedMessages(u"ses_b"_s, allMessages, StartSeq, metas);
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+	window->requestActivate();
+	QTRY_VERIFY(window->isActive());
+
+	QQuickItem* chatView = nullptr;
+	QTRY_VERIFY([&] {
+		chatView = findByTypePrefix(window->contentItem(), "ChatView");
+		return chatView != nullptr && chatView->property("maxContentY").toReal() > chatView->property("minContentY").toReal() + 200.0;
+	}());
+
+	// Scroll ses_a away from the end so switching to ses_b tests resetting following and snapping to the bottom.
+	const qreal minYA = chatView->property("minContentY").toReal();
+	QMetaObject::invokeMethod(chatView, "scrollTo", Q_ARG(QVariant, minYA), Q_ARG(QVariant, false));
+	QTRY_VERIFY(!chatView->property("following").toBool());
+	QVERIFY(qAbs(chatView->property("contentY").toReal() - minYA) <= 1.0);
+
+	f.stub.clearRangeRequests();
+	f.workspace->openSession(u"ses_b"_s);
+	QTRY_COMPARE(f.workspace->currentId(), u"ses_b"_s);
+	QTRY_VERIFY([&] {
+		return chatView->property("sessionId").toString() == u"ses_b"_s
+		       && chatView->property("count").toInt() > StartSeq
+		       && chatView->property("following").toBool()
+		       && chatView->property("atYEnd").toBool()
+		       && chatView->property("contentY").toReal() > chatView->property("minContentY").toReal() + 1000.0;
+	}());
+	QTest::qWait(150);
+	QVERIFY(f.stub.rangeRequests().isEmpty());
+
+	QAbstractItemModel* model = f.workspace->current()->blocks();
+	QVERIFY(model);
+	QCOMPARE(model->index(0, 0).data(refgui::session::ConversationModel::KindRole).toString(), u"skeleton"_s);
+
+	// Drag the vertical scrollbar handle to the top skeleton zone and release to trigger range loading.
+	QQuickItem* scrollBar = findByTypePrefix(chatView, "QQuickScrollBar");
+	QVERIFY(scrollBar);
+	QQuickItem* handle = findByTypePrefix(scrollBar, "ScrollHandle");
+	QVERIFY(handle);
+	QTRY_VERIFY(handle->height() > 2.0 && scrollBar->height() > 50.0);
+	const QPoint handleCenter = handle->mapToScene(QPointF(handle->width() / 2.0, handle->height() / 2.0)).toPoint();
+	const QPoint barTop = scrollBar->mapToScene(QPointF(scrollBar->width() / 2.0, 4.0)).toPoint();
+	QTest::mouseMove(window, handleCenter);
+	QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, handleCenter);
+	QTRY_VERIFY(scrollBar->property("pressed").toBool());
+	QTest::mouseMove(window, barTop);
+	QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, barTop);
+	QTRY_VERIFY(!scrollBar->property("pressed").toBool());
+
+	QTRY_VERIFY(!chatView->property("following").toBool());
+	QTRY_VERIFY(chatView->property("contentY").toReal() < chatView->property("minContentY").toReal() + 200.0);
+	QTRY_VERIFY(!f.stub.rangeRequests().isEmpty());
+	QTRY_COMPARE(model->index(0, 0).data(refgui::session::ConversationModel::KindRole).toString(), u"user"_s);
+	QVERIFY2(warningSpy.isEmpty(), "Long session switch and scrollbar release emitted QML warnings");
 }
 
 QTEST_MAIN(TestMainWindow)

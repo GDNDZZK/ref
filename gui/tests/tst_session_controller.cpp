@@ -175,6 +175,7 @@ private slots:
 	void rangeFetchSurfacesErrorAndRetries();
 	void retryNowRequestsBackend();
 	void unlimitedWindowAutoLoadsAndSwitchingBackTrims();
+	void followingDoesNotEvictMaterializedNonTailRange();
 };
 
 void TestSessionController::createShowsTheSnapshot()
@@ -843,6 +844,79 @@ void TestSessionController::unlimitedWindowAutoLoadsAndSwitchingBackTrims()
 	QVERIFY(f.controller.model().hasPlaceholders());
 	QCOMPARE(f.controller.model().index(0).data(ConversationModel::KindRole).toString(), u"skeleton"_s);
 	QCOMPARE(evictedSpy.count(), 1);
+}
+
+void TestSessionController::followingDoesNotEvictMaterializedNonTailRange()
+{
+	Fixture f;
+	constexpr int Total = 1500;
+	constexpr int StartSeq = 500;
+	QJsonArray metas;
+	for(int i = 0; i < StartSeq; ++i)
+	{
+		metas.append(QJsonObject{{u"seq"_s, i},
+		                         {u"id"_s, u"u_%1"_s.arg(i)},
+		                         {u"role"_s, u"user"_s},
+		                         {u"source_kind"_s, u"human"_s},
+		                         {u"has_error"_s, false},
+		                         {u"parts"_s, QJsonArray{QJsonObject{{u"kind"_s, u"text"_s}, {u"chars"_s, 20}, {u"lines"_s, 1}}}}});
+	}
+	QJsonArray msgs;
+	for(int i = StartSeq; i < Total; ++i)
+	{
+		msgs.append(messageJson(u"u_%1"_s.arg(i), u"user"_s, u"msg_%1"_s.arg(i), true));
+	}
+	f.snapshot = {{u"snapshot"_s,
+	               QJsonObject{{u"info"_s, infoJson(u"ses_1"_s, u"idle"_s)},
+	                           {u"messages"_s, msgs},
+	                           {u"more_before"_s, true},
+	                           {u"total_messages"_s, Total},
+	                           {u"start_seq"_s, StartSeq},
+	                           {u"layout_metas"_s, metas}}}};
+
+	f.fake.onRequest = [&](const QJsonObject& request) {
+		if(request.value(u"op"_s).toString() == u"messages"_s)
+		{
+			const quint64 s = static_cast<quint64>(request.value(u"start_seq"_s).toInteger());
+			const quint64 e = static_cast<quint64>(request.value(u"end_seq"_s).toInteger());
+			QJsonArray payload;
+			for(quint64 k = s; k < e; ++k)
+			{
+				payload.append(messageJson(u"u_%1"_s.arg(k), u"user"_s, u"loaded_%1"_s.arg(k), true));
+			}
+			f.fake.respond(request, {{u"messages"_s, payload}, {u"more_before"_s, s > 0}, {u"start_seq"_s, static_cast<qint64>(s)}, {u"end_seq"_s, static_cast<qint64>(e)}});
+			return;
+		}
+		f.answer(request);
+	};
+
+	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
+	QCOMPARE(f.controller.model().residentCount(), 1000);
+	QVERIFY(f.controller.model().hasPlaceholders());
+
+	QSignalSpy evictedSpy(&f.controller, &SessionController::messagesEvicted);
+	QSignalSpy materializedSpy(&f.controller, &SessionController::materialized);
+	f.controller.setFollowing(true);
+
+	// Fetching [0, 500) while following stays true must not immediately evict the newly materialized slots.
+	f.controller.setVisibleSeqRange(100, 120);
+	QTRY_COMPARE(materializedSpy.count(), 1);
+	QCOMPARE(f.controller.model().residentCount(), Total);
+	const int row100 = f.controller.model().firstRowForSeq(100);
+	QVERIFY(row100 >= 0);
+	QCOMPARE(f.controller.model().index(row100).data(ConversationModel::KindRole).toString(), u"user"_s);
+	QCOMPARE(evictedSpy.count(), 0);
+
+	// Re-reporting an already-materialized non-tail range while following must not evict it either.
+	f.controller.setVisibleSeqRange(100, 120);
+	QCOMPARE(f.controller.model().residentCount(), Total);
+	QCOMPARE(evictedSpy.count(), 0);
+
+	// Only reporting the tail while following triggers evictOldTail.
+	f.controller.setVisibleSeqRange(1490, 1499);
+	QCOMPARE(f.controller.model().residentCount(), 1000);
+	QCOMPARE(evictedSpy.count(), 1);
+	QCOMPARE(f.controller.model().index(0).data(ConversationModel::KindRole).toString(), u"skeleton"_s);
 }
 
 QTEST_GUILESS_MAIN(TestSessionController)

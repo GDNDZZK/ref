@@ -149,7 +149,7 @@ void TestAppSmoke::mockBackendStartsReadyWithoutAutoSession()
 	const Run run = runGui({u"--mock"_s, u"--smoke"_s, m_work});
 
 	QVERIFY2(run.finished, "timed out");
-	QCOMPARE(run.exitCode, 0);
+	QVERIFY2(run.exitCode == 0, qPrintable(u"exitCode=%1\nstderr:\n%2"_s.arg(run.exitCode).arg(run.err)));
 	QCOMPARE(run.out, u"ready\n"_s);
 	QVERIFY2(run.err.isEmpty(), qPrintable(run.err)); // no QML warnings either
 }
@@ -169,14 +169,14 @@ void TestAppSmoke::explicitServerSupportsReadyContinueAndAttach()
 	const QString url = u"ws://127.0.0.1:%1"_s.arg(instance->port);
 	const Run ready = runGui({u"--server"_s, url, u"--token"_s, u"smoke-token"_s, u"--smoke"_s, m_work});
 	QVERIFY2(ready.finished, "timed out");
-	QCOMPARE(ready.exitCode, 0);
+	QVERIFY2(ready.exitCode == 0, qPrintable(u"exitCode=%1\nstderr:\n%2"_s.arg(ready.exitCode).arg(ready.err)));
 	QCOMPARE(ready.out, u"ready\n"_s);
 	QVERIFY2(ready.err.isEmpty(), qPrintable(ready.err));
 
 	// -c starts a session when the directory has none yet.
 	const Run continued = runGui({u"--server"_s, url, u"--token"_s, u"smoke-token"_s, u"-c"_s, u"--smoke"_s, m_work});
 	QVERIFY2(continued.finished, "timed out");
-	QCOMPARE(continued.exitCode, 0);
+	QVERIFY2(continued.exitCode == 0, qPrintable(u"exitCode=%1\nstderr:\n%2"_s.arg(continued.exitCode).arg(continued.err)));
 	QVERIFY2(continued.out.startsWith(u"attached ses_"_s), qPrintable(continued.out));
 	QVERIFY2(continued.err.isEmpty(), qPrintable(continued.err));
 	const QString sessionId = continued.out.mid(u"attached "_s.size()).trimmed();
@@ -185,7 +185,7 @@ void TestAppSmoke::explicitServerSupportsReadyContinueAndAttach()
 	// -s attaches to that exact session.
 	const Run attached = runGui({u"--server"_s, url, u"--token"_s, u"smoke-token"_s, u"-s"_s, sessionId, u"--smoke"_s, m_work});
 	QVERIFY2(attached.finished, "timed out");
-	QCOMPARE(attached.exitCode, 0);
+	QVERIFY2(attached.exitCode == 0, qPrintable(u"exitCode=%1\nstderr:\n%2"_s.arg(attached.exitCode).arg(attached.err)));
 	QCOMPARE(attached.out, u"attached %1\n"_s.arg(sessionId));
 	QVERIFY2(attached.err.isEmpty(), qPrintable(attached.err));
 
@@ -233,7 +233,7 @@ void TestAppSmoke::startsTheBackendItself()
 	const Run run = runGui({u"--smoke"_s, m_work});
 
 	QVERIFY2(run.finished, "timed out");
-	QCOMPARE(run.exitCode, 0);
+	QVERIFY2(run.exitCode == 0, qPrintable(u"exitCode=%1\nstderr:\n%2"_s.arg(run.exitCode).arg(run.err)));
 	QCOMPARE(run.out, u"ready\n"_s);
 	QTRY_VERIFY_WITH_TIMEOUT(client::liveInstances(client::instancesDirectory()).isEmpty(), ServerExitTimeoutMs);
 }
@@ -241,11 +241,11 @@ void TestAppSmoke::startsTheBackendItself()
 void TestAppSmoke::helpAndVersion()
 {
 	const Run help = runGui({u"--help"_s});
-	QCOMPARE(help.exitCode, 0);
+	QVERIFY2(help.exitCode == 0, qPrintable(u"exitCode=%1\nstderr:\n%2"_s.arg(help.exitCode).arg(help.err)));
 	QVERIFY(help.out.contains(u"--server"_s));
 
 	const Run version = runGui({u"-V"_s});
-	QCOMPARE(version.exitCode, 0);
+	QVERIFY2(version.exitCode == 0, qPrintable(u"exitCode=%1\nstderr:\n%2"_s.arg(version.exitCode).arg(version.err)));
 	QVERIFY(version.out.startsWith(u"ref-gui "_s));
 }
 

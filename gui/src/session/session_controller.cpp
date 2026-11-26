@@ -233,9 +233,15 @@ void SessionController::setVisibleSeqRange(quint64 startSeq, quint64 endSeq)
 	const auto missing = m_model.missingRangeAround(startSeq, endSeq, m_model.pageSize());
 	if(!missing)
 	{
-		if(m_following && !m_rangeFetchTimer.isActive())
+		if(m_following && !m_model.isWindowUnlimited() && !m_rangeFetchTimer.isActive())
 		{
-			m_model.evictOldTail(m_model.tailKeepMessages());
+			const quint64 total = static_cast<quint64>(m_model.slotCount());
+			const quint64 keep = static_cast<quint64>(std::max<qsizetype>(0, m_model.tailKeepMessages()));
+			const quint64 tailStart = total > keep ? total - keep : 0;
+			if(endSeq >= tailStart)
+			{
+				m_model.evictOldTail(m_model.tailKeepMessages());
+			}
 		}
 		return;
 	}
@@ -309,9 +315,15 @@ QCoro::Task<> SessionController::fetchRange(quint64 startSeq, quint64 endSeq, qu
 	emit aboutToMaterialize();
 	m_model.materializeRange(page->startSeq, page->messages);
 	emit materialized();
-	if(m_following)
+	if(m_following && !m_model.isWindowUnlimited() && !page->messages.isEmpty())
 	{
-		m_model.evictOldTail(m_model.tailKeepMessages());
+		const quint64 total = static_cast<quint64>(m_model.slotCount());
+		const quint64 keep = static_cast<quint64>(std::max<qsizetype>(0, m_model.tailKeepMessages()));
+		const quint64 tailStart = total > keep ? total - keep : 0;
+		if(page->startSeq >= tailStart)
+		{
+			m_model.evictOldTail(m_model.tailKeepMessages());
+		}
 	}
 }
 
