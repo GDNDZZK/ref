@@ -8430,3 +8430,20 @@ fn handle_backend_action_preserves_message_window_size() {
 
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn welcome_logo_rows_align_vertically() {
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let mut app = App::new(Client::new(tx), TEST_CWD.into(), InitPlan::default());
+    app.on_net(crate::net::NetEvent::Connected);
+    assert!(app.current.is_none());
+
+    for w in [100, 101] {
+        let (term, s) = render(&mut app, w, 30);
+        let y0 = row_of(&s, crate::app::LOGO[0].trim_end()) as u16;
+        let cols: Vec<u16> = (0..3)
+            .map(|i| find_col(&term, y0 + i, "█").expect("logo row"))
+            .collect();
+        assert_eq!(cols, vec![cols[0]; 3], "width {w} logo misaligned:\n{s}");
+    }
+}

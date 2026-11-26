@@ -6,6 +6,7 @@
 #include <QSet>
 
 #include <algorithm>
+#include <array>
 
 using namespace Qt::StringLiterals;
 
@@ -68,6 +69,55 @@ QString displayTitle(bool live, const QString& name, const QString& title, const
 		return oneLineTitle;
 	}
 	return name.isEmpty() ? lastComponent(cwd) : name;
+}
+
+constexpr std::size_t RootPaletteSize = 7;
+
+std::size_t hashRootId(const QString& rootId)
+{
+	constexpr quint32 HashMultiplier = 31;
+	quint32 hash = 0;
+	for(const QChar ch : rootId)
+	{
+		hash = hash * HashMultiplier + static_cast<quint32>(ch.unicode());
+	}
+	return static_cast<std::size_t>(hash % static_cast<quint32>(RootPaletteSize));
+}
+
+QHash<QString, int> assignRootColorIndices(const QSet<QString>& rootIds)
+{
+	QHash<QString, int> assigned;
+	if(rootIds.isEmpty())
+	{
+		return assigned;
+	}
+	QStringList sorted(rootIds.cbegin(), rootIds.cend());
+	std::ranges::sort(sorted);
+
+	std::array<int, RootPaletteSize> used{};
+	assigned.reserve(sorted.size());
+	for(const QString& rootId : std::as_const(sorted))
+	{
+		if(rootId.isEmpty())
+		{
+			continue;
+		}
+		const std::size_t preferred = hashRootId(rootId);
+		const int minUsed = *std::ranges::min_element(used);
+		std::size_t chosen = preferred;
+		for(std::size_t offset = 0; offset < RootPaletteSize; ++offset)
+		{
+			const std::size_t slot = (preferred + offset) % RootPaletteSize;
+			if(used[slot] == minUsed)
+			{
+				chosen = slot;
+				break;
+			}
+		}
+		++used[chosen];
+		assigned.insert(rootId, static_cast<int>(chosen));
+	}
+	return assigned;
 }
 
 } // namespace
@@ -389,21 +439,6 @@ const proto::SessionInfo* SessionListModel::findKnown(const QString& sessionId) 
 	const auto it = m_known.constFind(sessionId);
 	return it == m_known.constEnd() ? nullptr : &*it;
 }
-// The rows that pass the filter, in display order.
-QList<SessionListModel::Row> SessionListModel::selectWanted() const
-{
-	QList<Row> wanted;
-	for(const proto::SessionInfo& info : std::as_const(m_all))
-	{
-		const Row row = toRow(info);
-		if(matchesFilter(row))
-		{
-			wanted.append(row);
-		}
-	}
-	std::ranges::sort(wanted, [this](const Row& a, const Row& b) { return before(a, b); });
-	return wanted;
-}
 
 void SessionListModel::removeGone(const QList<Row>& wanted)
 {
@@ -472,7 +507,41 @@ void SessionListModel::placeRow(qsizetype i, const Row& wanted)
 // then goes through the wanted rows in order and moves, inserts or updates each one.
 void SessionListModel::rebuild()
 {
-	const QList<Row> wanted = selectWanted();
+	QList<Row> allRows;
+	allRows.reserve(m_all.size());
+	QSet<QString> liveRootIds;
+	QSet<QString> allRootIds;
+	for(const proto::SessionInfo& info : std::as_const(m_all))
+	{
+		Row row = toRow(info);
+		if(!row.rootId.isEmpty())
+		{
+			allRootIds.insert(row.rootId);
+			if(row.live)
+			{
+				liveRootIds.insert(row.rootId);
+			}
+		}
+		allRows.append(std::move(row));
+	}
+	m_liveRootColorIndices = assignRootColorIndices(liveRootIds);
+	m_allRootColorIndices = allRootIds.size() == liveRootIds.size() ? m_liveRootColorIndices : assignRootColorIndices(allRootIds);
+
+	QList<Row> wanted;
+	wanted.reserve(allRows.size());
+	for(Row& row : allRows)
+	{
+		if(!row.rootId.isEmpty())
+		{
+			row.rootColorIndex = (row.live ? m_liveRootColorIndices : m_allRootColorIndices).value(row.rootId, -1);
+		}
+		if(matchesFilter(row))
+		{
+			wanted.append(std::move(row));
+		}
+	}
+	std::ranges::sort(wanted, [this](const Row& a, const Row& b) { return before(a, b); });
+
 	const int oldCount = count();
 	removeGone(wanted);
 	for(qsizetype i = 0; i < wanted.size(); ++i)
@@ -506,7 +575,11 @@ QVariantMap SessionListModel::get(const QString& sessionId) const
 	{
 		return {};
 	}
-	const Row row = toRow(*info);
+	Row row = toRow(*info);
+	if(!row.rootId.isEmpty())
+	{
+		row.rootColorIndex = (row.live ? m_liveRootColorIndices : m_allRootColorIndices).value(row.rootId, -1);
+	}
 	QVariantMap map;
 	const QHash<int, QByteArray> names = roleNames();
 	for(auto it = names.cbegin(); it != names.cend(); ++it)
@@ -593,6 +666,8 @@ QVariant SessionListModel::roleData(const Row& row, int role) const
 		return row.rootId;
 	case RootNameRole:
 		return row.rootName;
+	case RootColorIndexRole:
+		return row.rootColorIndex;
 	default:
 		return {};
 	}
@@ -630,6 +705,7 @@ QHash<int, QByteArray> SessionListModel::roleNames() const
 		{CreatorNameRole, "creatorName"},
 		{RootIdRole, "rootId"},
 		{RootNameRole, "rootName"},
+		{RootColorIndexRole, "rootColorIndex"},
 	};
 }
 

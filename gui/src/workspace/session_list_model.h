@@ -63,6 +63,7 @@ public:
 		CreatorNameRole,
 		RootIdRole,
 		RootNameRole,
+		RootColorIndexRole,
 	};
 	explicit SessionListModel(QObject* parent = nullptr);
 
@@ -133,7 +134,7 @@ private:
 		QString creatorTitle;
 		QString rootId;
 		QString rootName;
-
+		int rootColorIndex = -1;
 		bool operator==(const Row&) const = default;
 	};
 
@@ -143,7 +144,6 @@ private:
 	bool matchesFilter(const Row& row) const;
 	bool before(const Row& a, const Row& b) const;
 	void rebuild();
-	QList<Row> selectWanted() const;
 	void removeGone(const QList<Row>& wanted);
 	qsizetype findRowFrom(qsizetype start, const QString& sessionId) const;
 	void placeRow(qsizetype i, const Row& wanted);
@@ -159,6 +159,8 @@ private:
 	QHash<QString, proto::SessionInfo> m_all;
 	QHash<QString, proto::SessionInfo> m_known;
 	QList<Row> m_rows; // the listed ones, in order
+	QHash<QString, int> m_liveRootColorIndices;
+	QHash<QString, int> m_allRootColorIndices;
 };
 
 } // namespace refgui::workspace

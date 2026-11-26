@@ -71,6 +71,7 @@ private slots:
 	void filtersIgnoringCase();
 	void filtersByCreatorModeAndKeywords();
 	void resolvesRootTaskAcrossParentChain();
+	void assignsConflictFreeRootColorIndices();
 	void derivesRoles();
 	void todoBadgeLeavesCancelledItemsOut();
 	void waitingForAnAnswerNeedsTheUserLikeWaitingForPermission();
@@ -258,6 +259,72 @@ void TstSessionList::resolvesRootTaskAcrossParentChain()
 	model.setSessions({root, child, grand, orphan, cycA, cycB});
 	QVERIFY(changed.count() >= 3);
 	QCOMPARE(model.get(u"ses_grand"_s).value(u"rootName"_s).toString(), u"Boss"_s);
+}
+
+void TstSessionList::assignsConflictFreeRootColorIndices()
+{
+	SessionListModel model;
+	// All 7 root ids end with ASCII codes spaced by 7 (48, 55, 69, 76, 83, 90, 97), so hash % 7 collides.
+	const QStringList rootIds{u"ses_0"_s, u"ses_7"_s, u"ses_E"_s, u"ses_L"_s, u"ses_S"_s, u"ses_Z"_s, u"ses_a"_s};
+	QList<proto::SessionInfo> sessions;
+	qint64 ts = 1;
+	for(const QString& rootId : rootIds)
+	{
+		proto::SessionInfo root = session(rootId, ts++);
+		proto::SessionInfo child = session(rootId + u"_c1"_s, ts++);
+		child.parent = rootId;
+		sessions.append(root);
+		sessions.append(child);
+	}
+	proto::SessionInfo sibling = session(u"ses_0_c2"_s, ts++);
+	sibling.parent = u"ses_0"_s;
+	proto::SessionInfo grandchild = session(u"ses_0_gc"_s, ts++);
+	grandchild.parent = u"ses_0_c1"_s;
+	sessions.append(sibling);
+	sessions.append(grandchild);
+	model.setSessions(sessions);
+
+	// Root sessions have no rootId and get -1.
+	QCOMPARE(model.get(u"ses_0"_s).value(u"rootColorIndex"_s).toInt(), -1);
+
+	// Children of the same root share the exact same rootColorIndex.
+	const int firstColor = model.get(u"ses_0_c1"_s).value(u"rootColorIndex"_s).toInt();
+	QVERIFY(firstColor >= 0 && firstColor < 7);
+	QCOMPARE(model.get(u"ses_0_c2"_s).value(u"rootColorIndex"_s).toInt(), firstColor);
+	QCOMPARE(model.get(u"ses_0_gc"_s).value(u"rootColorIndex"_s).toInt(), firstColor);
+	QCOMPARE(model.data(model.index(model.indexOf(u"ses_0_c1"_s)), SessionListModel::RootColorIndexRole).toInt(), firstColor);
+
+	// All 7 concurrent colliding roots receive distinct color indices 0..6.
+	QSet<int> distinct;
+	QList<int> beforeAddingNewer;
+	for(const QString& rootId : rootIds)
+	{
+		const int idx = model.get(rootId + u"_c1"_s).value(u"rootColorIndex"_s).toInt();
+		QVERIFY(idx >= 0 && idx < 7);
+		distinct.insert(idx);
+		beforeAddingNewer.append(idx);
+	}
+	QCOMPARE(distinct.size(), qsizetype(7));
+
+	// Filtering keeps the same rootColorIndex computed across all live sessions.
+	model.setFilter(u"ses_7_c1"_s);
+	QCOMPARE(model.count(), 1);
+	QCOMPARE(model.data(model.index(0), SessionListModel::RootColorIndexRole).toInt(), beforeAddingNewer[1]);
+	model.setFilter({});
+
+	// Adding a lexicographically newer root preserves all earlier roots' color indices.
+	proto::SessionInfo newerRoot = session(u"ses_h"_s, ts++);
+	proto::SessionInfo newerChild = session(u"ses_h_c1"_s, ts++);
+	newerChild.parent = u"ses_h"_s;
+	sessions.append(newerRoot);
+	sessions.append(newerChild);
+	model.setSessions(sessions);
+	for(qsizetype i = 0; i < rootIds.size(); ++i)
+	{
+		QCOMPARE(model.get(rootIds[i] + u"_c1"_s).value(u"rootColorIndex"_s).toInt(), beforeAddingNewer[i]);
+	}
+	const int eighthIdx = model.get(u"ses_h_c1"_s).value(u"rootColorIndex"_s).toInt();
+	QVERIFY(eighthIdx >= 0 && eighthIdx < 7);
 }
 
 void TstSessionList::waitingForAnAnswerNeedsTheUserLikeWaitingForPermission()

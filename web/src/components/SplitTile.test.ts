@@ -6,6 +6,7 @@ import type { ChatSession } from '../model/chatSession.ts'
 import { info } from '../model/testMessages.ts'
 import type { SessionInfo } from '../proto/generated'
 import { useWorkspaceStore } from '../stores/workspace.ts'
+import { ROOT_PALETTE } from '../theme/agentColor.ts'
 import SessionDot from './SessionDot.vue'
 import SplitTile from './SplitTile.vue'
 
@@ -86,13 +87,41 @@ describe('SplitTile', () => {
     expect(unfocusedChild.get('.root-chip').text()).toBe('⟲ lead')
     expect(unfocusedChild.classes()).toContain('tinted')
     const dotTint = unfocusedChild.getComponent(SessionDot).props('tint')
-    expect(dotTint).toMatch(/^var\(--agent-palette-\d+\)$/)
+    expect(ROOT_PALETTE).toContain(dotTint)
     expect(unfocusedChild.attributes('style')).toContain(`--root-tint: ${dotTint}`)
 
     const focusedChild = mountTile({ focused: true, sessionInfo: leaf, live })
     expect(focusedChild.get('.root-chip').text()).toBe('⟲ lead')
     expect(focusedChild.classes()).toContain('focused')
     expect(focusedChild.getComponent(SessionDot).props('tint')).toBeUndefined()
+  })
+
+  it('assigns distinct tints to concurrent colliding parent sessions and keeps earlier tints stable', () => {
+    const rootA = info({ id: 'ses_0', name: 'root-a', parent: null })
+    const childA = info({ id: 'ses_0_c', name: 'child-a', parent: 'ses_0' })
+    const rootB = info({ id: 'ses_7', name: 'root-b', parent: null })
+    const childB = info({ id: 'ses_7_c', name: 'child-b', parent: 'ses_7' })
+    const initialLive = [rootA, childA, rootB, childB]
+
+    const tileA = mountTile({ focused: false, sessionInfo: childA, live: initialLive })
+    const tileB = mountTile({ focused: false, sessionInfo: childB, live: initialLive })
+    const tintA = tileA.getComponent(SessionDot).props('tint')
+    const tintB = tileB.getComponent(SessionDot).props('tint')
+    expect(ROOT_PALETTE).toContain(tintA)
+    expect(ROOT_PALETTE).toContain(tintB)
+    expect(tintA).not.toBe(tintB)
+
+    const rootC = info({ id: 'ses_E', name: 'root-c', parent: null })
+    const childC = info({ id: 'ses_E_c', name: 'child-c', parent: 'ses_E' })
+    const nextLive = [...initialLive, rootC, childC]
+    const tileA2 = mountTile({ focused: false, sessionInfo: childA, live: nextLive })
+    const tileB2 = mountTile({ focused: false, sessionInfo: childB, live: nextLive })
+    const tileC2 = mountTile({ focused: false, sessionInfo: childC, live: nextLive })
+    const tintC = tileC2.getComponent(SessionDot).props('tint')
+    expect(tileA2.getComponent(SessionDot).props('tint')).toBe(tintA)
+    expect(tileB2.getComponent(SessionDot).props('tint')).toBe(tintB)
+    expect(ROOT_PALETTE).toContain(tintC)
+    expect(new Set([tintA, tintB, tintC]).size).toBe(3)
   })
 
   it('filters split view via header context menu', async () => {

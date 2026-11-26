@@ -46,6 +46,44 @@ export function paletteColorFor(key: string): string {
   return `var(--agent-palette-${hashString(key) % agentPalette.length})`
 }
 
+export const ROOT_PALETTE = [
+  'var(--agent-blue)',
+  'var(--agent-purple)',
+  'var(--agent-green)',
+  'var(--agent-orange)',
+  'var(--agent-cyan)',
+  'var(--agent-yellow)',
+  'var(--agent-red)',
+] as const
+
+// Conflict-free deterministic tint color assignment for concurrent root/parent sessions.
+export function assignRootColors(rootIds: Iterable<string>): Map<string, string> {
+  const unique = [...new Set(rootIds)].filter((id) => id !== '')
+  unique.sort()
+
+  const size = ROOT_PALETTE.length
+  const used = new Array<number>(size).fill(0)
+  const assigned = new Map<string, string>()
+
+  for (const rootId of unique) {
+    const preferred = hashString(rootId) % size
+    const minUsed = Math.min(...used)
+    let chosen = preferred
+    for (let offset = 0; offset < size; offset++) {
+      const slot = (preferred + offset) % size
+      if (used[slot] === minUsed) {
+        chosen = slot
+        break
+      }
+    }
+    used[chosen] = (used[chosen] ?? 0) + 1
+    const color = ROOT_PALETTE[chosen]
+    if (color !== undefined) assigned.set(rootId, color)
+  }
+
+  return assigned
+}
+
 // Position in the agent list, or a hash of the name for an agent the list does not have.
 function paletteIndex(agents: readonly { name: string }[], name: string): number {
   const position = agents.findIndex((agent) => agent.name === name)

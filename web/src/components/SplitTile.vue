@@ -16,7 +16,7 @@ import {
   todoProgress,
 } from '../shell/sessionRow.ts'
 import { useWorkspaceStore } from '../stores/workspace.ts'
-import { paletteColorFor } from '../theme/agentColor.ts'
+import { assignRootColors } from '../theme/agentColor.ts'
 import AlertBadge from './AlertBadge.vue'
 import ContextMenu from './ContextMenu.vue'
 import type { MenuItem } from './ContextMenu.vue'
@@ -72,7 +72,15 @@ const title = computed(() => (info.value ? liveLabel(info.value) : props.session
 const progress = computed(() => todoProgress(info.value?.todos))
 const elapsed = computed(() => (info.value ? runningTime(info.value, now.value) : undefined))
 const rootTask = computed(() => (info.value ? rootTaskOf(workspace.live, info.value) : undefined))
-const rootTint = computed(() => (rootTask.value ? paletteColorFor(rootTask.value.id) : undefined))
+const rootColors = computed(() => {
+  const rootIds: string[] = []
+  for (const session of workspace.live) {
+    const root = rootTaskOf(workspace.live, session)
+    if (root) rootIds.push(root.id)
+  }
+  return assignRootColors(rootIds)
+})
+const rootTint = computed(() => (rootTask.value ? rootColors.value.get(rootTask.value.id) : undefined))
 const liveById = computed(() => new Map<string, SessionInfo>(workspace.live.map((s) => [s.id, s])))
 const headerMenuOpen = ref(false)
 const headerMenuMounted = ref(false)

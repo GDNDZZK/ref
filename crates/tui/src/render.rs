@@ -388,7 +388,7 @@ fn draw_empty_chat(buf: &mut Buffer, area: Rect, app: &mut App) {
             let (a, b) = row.split_at(split);
             l.push(Line::from(vec![
                 Span::styled(a.to_string(), theme::bold(theme::PRIMARY)),
-                Span::styled(b.trim_end().to_string(), theme::muted()),
+                Span::styled(b.to_string(), theme::muted()),
             ]));
         }
         l.push(Line::default());

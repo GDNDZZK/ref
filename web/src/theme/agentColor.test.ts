@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { agentColor, agentColorByName, paletteColorFor } from './agentColor.ts'
+import {
+  agentColor,
+  agentColorByName,
+  assignRootColors,
+  paletteColorFor,
+  ROOT_PALETTE,
+} from './agentColor.ts'
 import { agentPalette, colors } from './generated/theme.ts'
 
 describe('agentColor', () => {
@@ -55,5 +61,20 @@ describe('paletteColorFor', () => {
     const color = paletteColorFor('ses_root_1')
     expect(color).toMatch(/^var\(--agent-palette-\d+\)$/)
     expect(paletteColorFor('ses_root_1')).toBe(color)
+  })
+})
+
+describe('assignRootColors', () => {
+  it('assigns distinct colors to up to 7 colliding root ids and preserves older ids when newer ones arrive', () => {
+    const collidingRoots = ['ses_0', 'ses_7', 'ses_E', 'ses_L', 'ses_S', 'ses_Z', 'ses_a']
+    const initial = assignRootColors(['', ...collidingRoots, 'ses_0'])
+    expect(initial.size).toBe(7)
+    expect(new Set(initial.values()).size).toBe(7)
+    for (const color of initial.values()) expect(ROOT_PALETTE).toContain(color)
+
+    const expanded = assignRootColors([...collidingRoots, 'ses_h'])
+    expect(expanded.size).toBe(8)
+    for (const id of collidingRoots) expect(expanded.get(id)).toBe(initial.get(id))
+    expect(ROOT_PALETTE).toContain(expanded.get('ses_h'))
   })
 })

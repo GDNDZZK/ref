@@ -32,10 +32,12 @@ Item {
 	readonly property var facts: live.data
 	readonly property bool hasPermission: facts.hasPermission === true
 	readonly property bool failed: Activity.isFailed(facts.activity, facts.hasError === true)
+	readonly property var rootPalette: [Theme.agentBlue, Theme.agentPurple, Theme.agentGreen, Theme.agentOrange, Theme.agentCyan, Theme.agentYellow, Theme.agentRed]
 	readonly property string rootId: facts.rootId ?? ""
 	readonly property string rootName: facts.rootName ?? ""
 	readonly property bool hasRoot: rootId !== ""
-	readonly property color rootColor: hasRoot ? Theme.hashColor(rootId) : "transparent"
+	readonly property int rootColorIndex: facts.rootColorIndex ?? -1
+	readonly property color rootColor: !hasRoot ? "transparent" : (rootColorIndex >= 0 ? rootPalette[rootColorIndex % rootPalette.length] : Theme.hashColor(rootId))
 	readonly property bool rootTinted: hasRoot && !focused && !expanded
 	function focusPane() {
 		pane.focusInput()
