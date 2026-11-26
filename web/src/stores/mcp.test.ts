@@ -21,6 +21,7 @@ vi.mock('./connection.ts', () => ({
     get config() {
       return config.value
     },
+    loadConfig: vi.fn().mockResolvedValue(undefined),
     getApi: () => ({ mcpStatus, listSessions: vi.fn(), listHistory: vi.fn() }),
   }),
 }))

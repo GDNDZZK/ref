@@ -4282,9 +4282,14 @@ impl App {
         self.message_window_size = next;
         for v in self.views.values_mut() {
             v.set_message_window_size(next);
-            if next > 0 && v.chat.follow && v.slots.len() > v.tail_keep() {
-                let keep = v.tail_keep();
-                v.trim_to_tail(keep);
+            if next > 0 && v.resident_count() > v.tail_keep() {
+                if v.chat.follow || v.chat.visible_seq_range.is_none() {
+                    let keep = v.tail_keep();
+                    v.trim_to_tail(keep);
+                } else if let Some((start, end)) = v.chat.visible_seq_range {
+                    let margin = v.evict_margin();
+                    v.evict_outside(start.saturating_sub(margin), end.saturating_add(margin));
+                }
             }
         }
         if next == 0 {
