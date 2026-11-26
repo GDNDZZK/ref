@@ -183,13 +183,15 @@ function slotHeight(seq: number): number {
 
 function measureRenderedMessages(): void {
   const container = rows.value
-  if (!container || !virtualized.value) return
+  if (!container || !virtualized.value || container.clientHeight === 0) return
   const current = new Map(measuredHeights.value)
   let changed = false
   const byMessage = new Map<string, { top: number; bottom: number }>()
-  for (const el of container.querySelectorAll<HTMLElement>('[data-message]:not(.skeleton-frame)')) {
+  for (const el of container.querySelectorAll<HTMLElement>(
+    '[data-message]:not(.skeleton-frame):not([data-leaving])',
+  )) {
     const id = el.dataset.message
-    if (!id) continue
+    if (!id || el.offsetHeight === 0) continue
     const top = el.offsetTop
     const bottom = top + el.offsetHeight
     const existing = byMessage.get(id)
@@ -271,8 +273,11 @@ watch(
     const appeared = isLoad
       ? []
       : current.filter((block, i) => !previousKeys.has(block.key) && i >= Math.max(0, prepended))
+    const slotMessageIds = new Set(slotListNow.map((slot) => slot.id))
     const staying = leaving.value.filter((row) => !currentKeys.has(row.block.key))
-    const addedLeaving = isLoad ? [] : findLeaving(knownBlocks, currentKeys)
+    const addedLeaving = isLoad
+      ? []
+      : findLeaving(knownBlocks, currentKeys).filter((row) => !slotMessageIds.has(row.block.messageId))
     leaving.value = isLoad ? [] : [...staying, ...addedLeaving]
     freshKeys.value = new Set(appeared.map((block) => block.key))
     if (isLoad) {
@@ -633,7 +638,7 @@ onBeforeUnmount(() => {
           class="virtual-spacer top"
           :style="{ height: `${topSpacerHeight}px` }"
         />
-        <template v-for="slot in renderedSlots" :key="slot.id">
+        <template v-for="slot in renderedSlots" :key="`${slot.id}:${slot.seq}`">
           <SkeletonBlock
             v-if="slot.kind === 'placeholder'"
             :meta="slot.meta"
@@ -666,6 +671,7 @@ onBeforeUnmount(() => {
           :fresh="false"
           :leaving="true"
           :data-message="row.block.messageId"
+          data-leaving="true"
           @gone="onGone(row.block.key)"
         />
         <div

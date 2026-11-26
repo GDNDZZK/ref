@@ -74,6 +74,10 @@ function isTextLike(part: Part | undefined): part is TextLikePart {
   return part?.type === 'text' || part?.type === 'reasoning'
 }
 
+function isEndedMessage(message: Message): boolean {
+  return message.role === 'user' || message.time_end !== null || message.error !== null
+}
+
 // A pacer stream is one part of one message: "<part index>@<message id>".
 function streamKey(messageId: string, index: number): string {
   return `${index}${STREAM_SEPARATOR}${messageId}`
@@ -295,6 +299,15 @@ export class Transcript {
       if (existingSlot?.kind === 'materialized' && existingSlot.entry.entry.message.id === message.id) {
         continue
       }
+      if (existingSlot?.kind === 'materialized') {
+        const oldId = existingSlot.entry.entry.message.id
+        existingSlot.entry.entry.views.forEach((_view, partIndex) =>
+          this.pacer.discard(streamKey(oldId, partIndex)),
+        )
+        this.byId.delete(oldId)
+        this.dirty.delete(oldId)
+        this.pacedMessages.delete(oldId)
+      }
       const added = this.newEntry(message, seq, false, 0)
       this.slotModels[seq] = { kind: 'materialized', seq, entry: added }
       changed = true
@@ -313,6 +326,7 @@ export class Transcript {
     for (let i = 0; i < this.slotModels.length; i++) {
       const slot = this.slotModels[i]!
       if (slot.kind !== 'materialized') continue
+      if (!isEndedMessage(slot.entry.entry.message)) continue
       if (slot.seq >= keepStart && slot.seq <= keepEnd) {
         remaining.push(i)
         continue
@@ -474,6 +488,16 @@ export class Transcript {
   private upsertMessage(message: Message, now: number): void {
     const existing = this.byId.get(message.id)
     if (!existing) {
+      const placeholderIndex = this.slotModels.findIndex(
+        (slot) => slot.kind === 'placeholder' && slot.id === message.id,
+      )
+      if (placeholderIndex >= 0) {
+        const added = this.newEntry(message, placeholderIndex, true, now)
+        this.slotModels[placeholderIndex] = { kind: 'materialized', seq: placeholderIndex, entry: added }
+        this.rebuildEntriesOrder()
+        this.structureChanged = true
+        return
+      }
       this.addMessage(message, true, now)
       return
     }
@@ -533,7 +557,17 @@ export class Transcript {
 
   private removeMessage(messageId: string): void {
     const existing = this.byId.get(messageId)
-    if (!existing) return
+    if (!existing) {
+      const placeholderIndex = this.slotModels.findIndex(
+        (slot) => slot.kind === 'placeholder' && slot.id === messageId,
+      )
+      if (placeholderIndex < 0) return
+      this.slotModels.splice(placeholderIndex, 1)
+      this.reindexSlots()
+      this.rebuildEntriesOrder()
+      this.structureChanged = true
+      return
+    }
     existing.entry.views.forEach((_view, index) => this.pacer.discard(streamKey(messageId, index)))
     this.slotModels = this.slotModels.filter(
       (slot) => !(slot.kind === 'materialized' && slot.entry === existing),

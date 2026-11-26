@@ -63,6 +63,7 @@ export const useConnectionStore = defineStore('connection', () => {
   let reloadingCount = 0
   let mutatingCount = 0
   let sawConfigChangedDuringMutation = false
+  let configSerial = 0
   const address = shallowRef<{ url: string; cwd: string | undefined; direct?: boolean; token?: string }>()
   let keyOutcome: ((accepted: boolean) => void) | undefined
 
@@ -156,6 +157,7 @@ export const useConnectionStore = defineStore('connection', () => {
     reloadingCount = 0
     mutatingCount = 0
     sawConfigChangedDuringMutation = false
+    configSerial++
     config.value = undefined
     hello.value = undefined
     serverInfo.value = undefined
@@ -216,18 +218,24 @@ export const useConnectionStore = defineStore('connection', () => {
   }
 
   async function loadConfig(cwd?: string, options?: { silentWarnings?: boolean }): Promise<ServerConfigInfo> {
+    const serial = ++configSerial
     const loaded = await getApi().getConfig(cwd)
-    config.value = loaded
-    if (!options?.silentWarnings) pushWarnings(loaded.warnings)
+    if (serial === configSerial) {
+      config.value = loaded
+      if (!options?.silentWarnings) pushWarnings(loaded.warnings)
+    }
     return loaded
   }
 
   async function reloadConfig(cwd?: string): Promise<{ config: ServerConfigInfo; warnings: string[] }> {
+    const serial = ++configSerial
     reloadingCount++
     try {
       const result = await getApi().reloadConfig(cwd)
-      config.value = result.config
-      pushWarnings(result.warnings)
+      if (serial === configSerial) {
+        config.value = result.config
+        pushWarnings(result.warnings)
+      }
       return result
     } finally {
       reloadingCount--

@@ -1,7 +1,9 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { nextTick } from 'vue'
 import { info, snapshot, userMessage } from '../model/testMessages.ts'
 import type { SessionInfo } from '../proto/generated'
+import type { ConnectionState } from '../net/connection.ts'
 import { STORAGE_KEY } from '../settings/model.ts'
 import { useNoticesStore } from './notices.ts'
 import { useSettingsStore } from './settings.ts'
@@ -20,9 +22,10 @@ const api = {
 }
 const connection = {
   getApi: () => api,
+  state: 'open' as ConnectionState,
   hello: { cwd: '/server' } as { cwd?: string } | undefined,
   config: undefined as unknown,
-  loadConfig: vi.fn(),
+  loadConfig: vi.fn().mockResolvedValue(undefined),
 }
 
 vi.mock('./connection.ts', () => ({ useConnectionStore: () => connection }))
@@ -48,7 +51,9 @@ beforeEach(() => {
   api.listSessions.mockResolvedValue([])
   api.listHistory.mockResolvedValue([])
   api.listGroups.mockResolvedValue([])
+  connection.state = 'open'
   connection.config = { agents: [{ name: 'build' }, { name: 'plan' }, { name: 'review' }] }
+  connection.loadConfig.mockReset().mockResolvedValue(undefined)
 })
 
 describe('sortLive', () => {
@@ -642,5 +647,48 @@ describe('stash groups and splitFilter', () => {
     expect(workspace.groups).toEqual([group1])
     await workspace.restoreGroup('g1')
     expect(workspace.groups).toEqual([])
+  })
+})
+
+describe('cross-directory config sync', () => {
+  it('reloads config silently when switching focus to a session in a different directory', async () => {
+    const workspace = setup([
+      session('ses_1', { cwd: '/proj-a', attached: 0 }),
+      session('ses_2', { cwd: '/proj-b', attached: 0 }),
+      session('ses_3', { cwd: '/proj-b', attached: 0 }),
+    ])
+    await workspace.openSession('ses_1')
+    expect(connection.loadConfig).toHaveBeenLastCalledWith('/proj-a', { silentWarnings: true })
+
+    connection.loadConfig.mockClear()
+    await workspace.openSession('ses_2')
+    expect(connection.loadConfig).toHaveBeenCalledTimes(1)
+    expect(connection.loadConfig).toHaveBeenCalledWith('/proj-b', { silentWarnings: true })
+
+    connection.loadConfig.mockClear()
+    await workspace.openSession('ses_3')
+    expect(connection.loadConfig).not.toHaveBeenCalled()
+
+    await workspace.enterSplit()
+    connection.loadConfig.mockClear()
+    workspace.focusTile('ses_1')
+    await vi.waitFor(() => {
+      expect(connection.loadConfig).toHaveBeenCalledTimes(1)
+      expect(connection.loadConfig).toHaveBeenCalledWith('/proj-a', { silentWarnings: true })
+    })
+  })
+
+  it('loads config once on initial startup onConnected without duplicate watcher calls', async () => {
+    const workspace = useWorkspaceStore()
+    api.listSessions.mockResolvedValue([])
+    await workspace.onConnected(false, {
+      url: 'ws://x/ws',
+      cwd: '/home/user',
+      sessionId: undefined,
+      split: false,
+    })
+    await nextTick()
+    expect(connection.loadConfig).toHaveBeenCalledTimes(1)
+    expect(connection.loadConfig).toHaveBeenCalledWith('/home/user')
   })
 })

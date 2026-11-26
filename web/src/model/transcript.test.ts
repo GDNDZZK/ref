@@ -699,4 +699,159 @@ describe('Transcript: sliding window and eviction', () => {
     expect(after[0]).toBe(before[0])
     expect(after[1]).not.toBe(before[1])
   })
+
+  it('upsertMessage materializes an evicted placeholder in place and preserves compaction marks', () => {
+    const { transcript } = setup()
+    transcript.load(
+      snapshot([
+        userMessage('m0', 'old'),
+        userMessage('c1', 'summary', { kind: 'compaction' }),
+        assistantMessage('m2', [textPart('reply')], { time_end: 1 }),
+        userMessage('m3', 'tail'),
+      ]),
+    )
+    transcript.flush(0)
+    transcript.evictBeforeTail(1)
+    transcript.flush(0)
+
+    expect(transcript.slots.map((slot) => slot.kind)).toEqual([
+      'placeholder',
+      'placeholder',
+      'placeholder',
+      'materialized',
+    ])
+
+    transcript.apply(
+      {
+        type: 'message',
+        message: assistantMessage('m2', [textPart('final')], { time_end: 2 }),
+      },
+      0,
+    )
+    transcript.flush(LATER)
+
+    expect(transcript.totalCount).toBe(4)
+    expect(transcript.residentCount).toBe(2)
+    expect(transcript.slots.map((slot) => ({ seq: slot.seq, id: slot.id, kind: slot.kind }))).toEqual([
+      { seq: 0, id: 'm0', kind: 'placeholder' },
+      { seq: 1, id: 'c1', kind: 'placeholder' },
+      { seq: 2, id: 'm2', kind: 'materialized' },
+      { seq: 3, id: 'm3', kind: 'materialized' },
+    ])
+    expect(transcript.slots[2]).toMatchObject({ kind: 'materialized', stale: false, lastCompaction: false })
+
+    transcript.apply(
+      { type: 'message', message: userMessage('c1', 'summary updated', { kind: 'compaction' }) },
+      0,
+    )
+    transcript.apply({ type: 'message', message: userMessage('m0', 'old updated') }, 0)
+    transcript.flush(LATER)
+
+    expect(transcript.totalCount).toBe(4)
+    expect(transcript.residentCount).toBe(4)
+    expect(transcript.slots[0]).toMatchObject({
+      kind: 'materialized',
+      seq: 0,
+      stale: true,
+      lastCompaction: false,
+    })
+    expect(transcript.slots[1]).toMatchObject({
+      kind: 'materialized',
+      seq: 1,
+      stale: false,
+      lastCompaction: true,
+    })
+    expect(transcript.slots[2]).toMatchObject({
+      kind: 'materialized',
+      seq: 2,
+      stale: false,
+      lastCompaction: false,
+    })
+    expect(transcript.blocks.filter((block) => block.kind === 'compaction')).toMatchObject([
+      { messageId: 'c1', last: true },
+    ])
+  })
+
+  it('spares in-progress streaming assistant messages in evictOutside and evictBeforeTail', () => {
+    const { transcript } = setup()
+    transcript.load(
+      snapshot([
+        userMessage('u0', 'prompt 0'),
+        assistantMessage('a1', [textPart('done')], { time_end: 1 }),
+        assistantMessage('a2', [textPart('streaming...')]),
+        userMessage('u3', 'prompt 3'),
+        userMessage('u4', 'prompt 4'),
+      ]),
+    )
+    transcript.flush(0)
+
+    const outsideEvicted = transcript.evictOutside(3, 4)
+    transcript.flush(0)
+    expect(outsideEvicted).toEqual(['u0', 'a1'])
+    expect(transcript.slots[2]).toMatchObject({ kind: 'materialized', id: 'a2' })
+
+    transcript.load(
+      snapshot([
+        assistantMessage('a0', [textPart('still streaming')]),
+        userMessage('u1', 'one'),
+        userMessage('u2', 'two'),
+        userMessage('u3', 'three'),
+      ]),
+    )
+    transcript.setWindowSize(2)
+    transcript.flush(0)
+
+    // a0 is streaming and farthest from the midpoint (1.5); excess eviction must skip it.
+    const excessEvicted = transcript.evictOutside(0, 3)
+    transcript.flush(0)
+    expect(excessEvicted).toEqual(['u3'])
+    expect(transcript.slots[0]).toMatchObject({ kind: 'materialized', id: 'a0' })
+
+    transcript.setWindowSize(10)
+    transcript.load(
+      snapshot([
+        userMessage('u0', 'zero'),
+        assistantMessage('a1', [textPart('still streaming')]),
+        userMessage('u2', 'two'),
+        userMessage('u3', 'three'),
+      ]),
+    )
+    transcript.flush(0)
+    const tailEvicted = transcript.evictBeforeTail(1)
+    transcript.flush(0)
+    expect(tailEvicted).toEqual(['u0', 'u2'])
+    expect(transcript.slots.map((slot) => slot.kind)).toEqual([
+      'placeholder',
+      'materialized',
+      'placeholder',
+      'materialized',
+    ])
+  })
+
+  it('removes a placeholder slot on removed event and reindexes subsequent slots', () => {
+    const { transcript } = setup()
+    const metas = [meta(0, 'm0'), meta(1, 'm1'), meta(2, 'm2')]
+    const msgs: Message[] = [userMessage('m3', 'three'), userMessage('m4', 'four')]
+    transcript.load(
+      snapshot(msgs, { more_before: true, total_messages: 5, start_seq: 3, layout_metas: metas }),
+    )
+    transcript.flush(0)
+
+    transcript.apply({ type: 'removed', message_id: 'm1' }, 0)
+    transcript.flush(0)
+
+    expect(transcript.totalCount).toBe(4)
+    expect(transcript.residentCount).toBe(2)
+    expect(transcript.slots.map((slot) => ({ seq: slot.seq, id: slot.id, kind: slot.kind }))).toEqual([
+      { seq: 0, id: 'm0', kind: 'placeholder' },
+      { seq: 1, id: 'm2', kind: 'placeholder' },
+      { seq: 2, id: 'm3', kind: 'materialized' },
+      { seq: 3, id: 'm4', kind: 'materialized' },
+    ])
+    const shiftedPlaceholder = transcript.slots[1]
+    expect(shiftedPlaceholder?.kind).toBe('placeholder')
+    if (shiftedPlaceholder?.kind === 'placeholder') {
+      expect(shiftedPlaceholder.meta.seq).toBe(1)
+    }
+  })
 })

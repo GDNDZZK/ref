@@ -126,4 +126,58 @@ describe('config reload & config_changed coordination', () => {
     expect(sent.some((r) => r['op'] === 'mcp_status')).toBe(true)
     expect(notices.notices.map((n) => [n.level, n.text])).toEqual([['warn', 'external warning']])
   })
+
+  it('ignores stale out-of-order loadConfig and reloadConfig responses', async () => {
+    await boot()
+    const connection = useConnectionStore()
+    const notices = useNoticesStore()
+    const workspace = useWorkspaceStore()
+
+    handlers!.opened()
+    respond(sent[0]!['id'], { server_version: '0.2.3', protocol: PROTOCOL_VERSION, cwd: '/proj' })
+    await vi.waitFor(() => expect(connection.state).toBe('open'))
+
+    for (const req of sent.slice(1)) {
+      if (req['op'] === 'get_config') respond(req['id'], { config: EMPTY_CONFIG })
+      if (req['op'] === 'list_sessions') respond(req['id'], { sessions: [] })
+      if (req['op'] === 'list_history') respond(req['id'], { sessions: [] })
+    }
+    await vi.waitFor(() => expect(workspace.cwd).toBe('/proj'))
+    sent.length = 0
+    notices.notices.splice(0)
+
+    const slowOld = connection.loadConfig('/dir-a')
+    const oldReq = sent.find((r) => r['op'] === 'get_config' && r['cwd'] === '/dir-a')!
+    const fastNew = connection.loadConfig('/dir-b', { silentWarnings: true })
+    const newReq = sent.find((r) => r['op'] === 'get_config' && r['cwd'] === '/dir-b')!
+
+    const newConfig: ServerConfigInfo = { ...EMPTY_CONFIG, default_agent: 'plan', warnings: ['new warn'] }
+    const oldConfig: ServerConfigInfo = { ...EMPTY_CONFIG, default_agent: 'build', warnings: ['stale warn'] }
+
+    respond(newReq['id'], { config: newConfig })
+    expect(await fastNew).toEqual(newConfig)
+    expect(connection.config).toEqual(newConfig)
+
+    respond(oldReq['id'], { config: oldConfig })
+    expect(await slowOld).toEqual(oldConfig)
+    expect(connection.config).toEqual(newConfig)
+    expect(notices.notices).toEqual([])
+
+    sent.length = 0
+    const slowReload = connection.reloadConfig('/dir-a')
+    const reloadReq = sent.find((r) => r['op'] === 'reload_config' && r['cwd'] === '/dir-a')!
+    const fastLoad = connection.loadConfig('/dir-c', { silentWarnings: true })
+    const loadReq = sent.find((r) => r['op'] === 'get_config' && r['cwd'] === '/dir-c')!
+
+    const dirCConfig: ServerConfigInfo = { ...EMPTY_CONFIG, default_agent: 'review' }
+    respond(loadReq['id'], { config: dirCConfig })
+    expect(await fastLoad).toEqual(dirCConfig)
+    expect(connection.config).toEqual(dirCConfig)
+
+    const staleReloadResult = { config: oldConfig, warnings: ['stale reload warn'] }
+    respond(reloadReq['id'], staleReloadResult)
+    expect(await slowReload).toEqual(staleReloadResult)
+    expect(connection.config).toEqual(dirCConfig)
+    expect(notices.notices).toEqual([])
+  })
 })

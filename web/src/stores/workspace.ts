@@ -6,7 +6,7 @@
 // A ChatSession stays while the session lives, so switching away only detaches it.
 
 import { defineStore } from 'pinia'
-import { computed, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import { clamp } from '../clamp.ts'
 import { crossfade } from '../composables/crossfade.ts'
 import { emitDraftRestored } from '../composer/draftBus.ts'
@@ -97,6 +97,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   let sidebarHistorySerial = 0
   let sidebarHistoryInFlight = 0
   let groupsSerial = 0
+  let skipConfigWatch: { cwd: string | undefined } | undefined
+
+  function skipNextConfigWatch(targetCwd: string | undefined): void {
+    const token = { cwd: targetCwd }
+    skipConfigWatch = token
+    void nextTick().then(() => {
+      if (skipConfigWatch === token) skipConfigWatch = undefined
+    })
+  }
 
   const current = computed(() => (currentId.value ? chat(currentId.value) : undefined))
   // Background sessions get a tile: live ones nobody is attached to, excluding the current foreground session.
@@ -153,10 +162,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     },
     { flush: 'sync' },
   )
-  watch(effectiveCwd, () => {
+  watch(effectiveCwd, (nextCwd, prevCwd) => {
+    const skipped = skipConfigWatch
+    skipConfigWatch = undefined
     if (sidebarHistoryLoaded.value && settingsStore.settings.sidebarHistoryCurrentDir) {
       sidebarHistorySynced.value = false
       void refreshSidebarHistory().catch(notices.pushError)
+    }
+    if (skipped && nextCwd === skipped.cwd) return
+    if (connection.state === 'open' && nextCwd !== prevCwd) {
+      void connection.loadConfig(nextCwd, { silentWarnings: true }).catch(notices.pushError)
     }
   })
   // The session's object; made on first use, without any request.
@@ -306,8 +321,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
   async function setSessionCwd(id: string, path: string): Promise<void> {
     const info = await connection.getApi().setCwd(id, path)
+    const prevEffectiveCwd = effectiveCwd.value
     showInfo(info)
     cwd.value = info.cwd // new sessions of this window start there too
+    if (effectiveCwd.value !== prevEffectiveCwd) skipNextConfigWatch(effectiveCwd.value)
     await connection.loadConfig(info.cwd)
   }
 
@@ -704,6 +721,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     historySerial++
     sidebarHistorySerial++
     groupsSerial++
+    skipConfigWatch = undefined
     notices.clear()
     for (const session of chats.values()) session.dispose()
     chats.clear()
@@ -740,7 +758,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       void refreshGroups().catch(notices.pushError)
       return
     }
+    const prevEffectiveCwd = effectiveCwd.value
     cwd.value = start.cwd ?? connection.hello?.cwd ?? ''
+    if (effectiveCwd.value !== prevEffectiveCwd) skipNextConfigWatch(effectiveCwd.value)
     await connection.loadConfig(effectiveCwd.value)
     setLive(await api.listSessions())
     void refreshAllHistory().catch(notices.pushError)
