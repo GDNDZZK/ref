@@ -65,11 +65,11 @@ Item {
 		radius: Theme.radius
 		color: toast.fill
 		border.color: toast.edge
-		x: entered ? 0 : Motion.toastSlide
+		x: entered && !toast.leaving ? 0 : Motion.toastSlide
 
 		property bool entered: false
 
-		Behavior on x { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+		Behavior on x { NumberAnimation { duration: Motion.standard; easing.type: toast.leaving ? Motion.exitEase : Motion.ease } }
 		Component.onCompleted: {
 			entered = true
 			icon.enter()

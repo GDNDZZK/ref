@@ -138,9 +138,20 @@ Item {
 		anchors.fill: parent
 		color: Qt.rgba(0, 0, 0, lightbox.scrimOpacity)
 
-		TapHandler {
-			onTapped: eventPoint => {
-				const p = eventPoint.position
+		HoverHandler {
+			blocking: true
+			cursorShape: Qt.ArrowCursor
+		}
+		MouseArea {
+			anchors.fill: parent
+			hoverEnabled: true
+			acceptedButtons: Qt.AllButtons
+			preventStealing: true
+			onPressed: mouse => mouse.accepted = true
+			onClicked: mouse => {
+				if (mouse.button !== Qt.LeftButton)
+					return
+				const p = Qt.point(mouse.x, mouse.y)
 				if (zoomToolbar.contains(scrimRect.mapToItem(zoomToolbar, p)))
 					return
 				if (prevButton.visible && prevButton.contains(scrimRect.mapToItem(prevButton, p)))
@@ -151,10 +162,6 @@ Item {
 					return
 				lightbox.close()
 			}
-		}
-		MouseArea {
-			anchors.fill: parent
-			acceptedButtons: Qt.NoButton
 			onWheel: wheel => {
 				const angleY = wheel.angleDelta.y
 				const pixelY = wheel.pixelDelta.y
@@ -238,7 +245,9 @@ Item {
 			MouseArea {
 				id: panArea
 				anchors.fill: parent
-				acceptedButtons: Qt.LeftButton
+				hoverEnabled: true
+				acceptedButtons: Qt.AllButtons
+				preventStealing: true
 				enabled: !pinchHandler.active
 				cursorShape: lightbox.zoom > 1.0 ? (pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor) : Qt.ArrowCursor
 				property real lastX: 0
@@ -249,13 +258,15 @@ Item {
 						mouse.accepted = false
 						return
 					}
+					mouse.accepted = true
+					if (mouse.button !== Qt.LeftButton)
+						return
 					const pt = panArea.mapToItem(viewport, mouse.x, mouse.y)
 					lastX = pt.x
 					lastY = pt.y
-					mouse.accepted = true
 				}
 				onPositionChanged: mouse => {
-					if (!pressed || pinchHandler.active || lightbox.zoom <= 1.0)
+					if (!pressed || (mouse.buttons & Qt.LeftButton) === 0 || pinchHandler.active || lightbox.zoom <= 1.0)
 						return
 					const pt = panArea.mapToItem(viewport, mouse.x, mouse.y)
 					lightbox.panX += pt.x - lastX
@@ -263,7 +274,9 @@ Item {
 					lastX = pt.x
 					lastY = pt.y
 				}
-				onDoubleClicked: {
+				onDoubleClicked: mouse => {
+					if (mouse.button !== Qt.LeftButton)
+						return
 					if (Math.abs(lightbox.zoom - 1.0) > 0.01)
 						lightbox.resetView()
 					else
@@ -313,7 +326,15 @@ Item {
 		color: Theme.surface
 		border.color: Theme.border
 
-		TapHandler {}
+		HoverHandler { blocking: true }
+		MouseArea {
+			anchors.fill: parent
+			hoverEnabled: true
+			acceptedButtons: Qt.AllButtons
+			preventStealing: true
+			onPressed: mouse => mouse.accepted = true
+			onWheel: wheel => wheel.accepted = true
+		}
 
 		Row {
 			id: toolbarRow

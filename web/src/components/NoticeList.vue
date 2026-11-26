@@ -45,6 +45,7 @@ const store = useNoticesStore()
 
 .notice-leave-to {
   opacity: 0;
+  translate: var(--motion-toast-slide) 0;
   grid-template-rows: 0fr;
   margin-bottom: 0;
 }

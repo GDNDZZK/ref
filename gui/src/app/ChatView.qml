@@ -55,7 +55,6 @@ ListView {
 	property int lastReportedStart: -1
 	property int lastReportedEnd: -1
 	property int layoutRetryCount: 0
-	property int jumpToEndGen: 0
 	property bool pendingJumpToEnd: false
 	readonly property bool prepending: loadingOlder // rows added now are earlier history
 	property int permissionCount: 0 // tool calls waiting for the user's answer
@@ -124,23 +123,15 @@ ListView {
 		}
 	}
 
+	function cancelJumpToEnd() {
+		jumpToEndTimer.stop()
+		pendingJumpToEnd = false
+	}
+
 	function scheduleJumpToEnd() {
-		const gen = ++jumpToEndGen
-		const targetSession = session
 		pendingJumpToEnd = true
 		visibleRangeTimer.stop()
-		Qt.callLater(() => {
-			if (gen !== jumpToEndGen || session !== targetSession)
-				return
-			pendingJumpToEnd = false
-			jumpToEnd()
-			if (session && count > 0) {
-				lastReportedStart = -1
-				lastReportedEnd = -1
-				layoutRetryCount = 0
-				scheduleVisibleRangeReport()
-			}
-		})
+		jumpToEndTimer.restart()
 	}
 
 	// One frame of a scroll chase toward `target`, in whole pixels and at least one per
@@ -604,6 +595,28 @@ ListView {
 		}
 	}
 
+	Timer {
+		id: jumpToEndTimer
+		interval: 0
+		repeat: false
+		onTriggered: {
+			if (!view.pendingJumpToEnd)
+				return
+			view.pendingJumpToEnd = false
+			if (!view.following) {
+				view.scheduleVisibleRangeReport()
+				return
+			}
+			view.jumpToEnd()
+			if (view.session && view.count > 0) {
+				view.lastReportedStart = -1
+				view.lastReportedEnd = -1
+				view.layoutRetryCount = 0
+				view.scheduleVisibleRangeReport()
+			}
+		}
+	}
+
 	onColumnWidthChanged: if (session) columnWidthTimer.restart()
 	onSessionChanged: {
 		columnWidthTimer.stop()
@@ -618,8 +631,7 @@ ListView {
 			session.setFollowing(true)
 			scheduleJumpToEnd()
 		} else {
-			++jumpToEndGen
-			pendingJumpToEnd = false
+			cancelJumpToEnd()
 		}
 	}
 	Connections {
@@ -693,6 +705,7 @@ ListView {
 
 	ScrollBar.vertical: ScrollBar {
 		id: scrollBar
+		objectName: "chatScrollBar"
 
 		onPressedChanged: {
 			if (pressed)
@@ -837,8 +850,10 @@ ListView {
 	onFollowingChanged: {
 		if (session)
 			session.setFollowing(following)
-		if (!following)
+		if (!following) {
+			cancelJumpToEnd()
 			return
+		}
 		stopWheel()
 		stopCoast()
 	}
