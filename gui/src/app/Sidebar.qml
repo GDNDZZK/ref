@@ -341,81 +341,33 @@ Rectangle {
 			width: parent.width
 			height: sidebar.newRowHeight
 
-			Item {
+			IconButton {
 				id: stashButton
 				objectName: "sidebarStashButton"
 				anchors { left: parent.left; leftMargin: Theme.sidebarPadding; verticalCenter: parent.verticalCenter }
-				width: 36
-				height: 36
+				buttonSize: 36
+				iconSize: 20
+				iconName: Workspace.stash.groupCount > 0 ? "stash-count" : "stash"
+				badgeText: Workspace.stash.groupCount > 9 ? "9+" : (Workspace.stash.groupCount > 0 ? String(Workspace.stash.groupCount) : "")
 				enabled: Workspace.connectionState === "connected"
 				opacity: enabled ? 1 : Theme.disabledOpacity
-
-				Rectangle {
-					anchors.fill: parent
-					radius: width / 2
-					color: stashHover.hovered && stashButton.enabled ? Theme.surfaceHover : Theme.surface
-					border.color: Theme.border
-					scale: stashTap.pressed && stashButton.enabled ? 0.96 : 1
-
-					Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
-					Behavior on scale { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
-
-					Icon {
-						anchors.centerIn: parent
-						name: Workspace.stash.groupCount > 0 ? "stash-count" : "stash"
-						size: 20
-						color: Theme.textMuted
-					}
-
-					Text {
-						textFormat: Text.PlainText
-						visible: Workspace.stash.groupCount > 0
-						anchors.centerIn: parent
-						anchors.verticalCenterOffset: 1
-						text: String(Workspace.stash.groupCount)
-						color: Theme.text
-						font { pixelSize: 10; bold: true }
-					}
-				}
-
-				HoverHandler {
-					id: stashHover
-					enabled: stashButton.enabled
-					cursorShape: Qt.PointingHandCursor
-				}
-				TapHandler {
-					id: stashTap
-					enabled: stashButton.enabled
-					acceptedButtons: Qt.LeftButton
-					onTapped: {
-						if (Workspace.sessions.count > 0)
-							Workspace.stash.stashAll()
-						else
-							Workspace.openDialog(DialogId.stash)
-					}
-				}
-				TapHandler {
-					enabled: stashButton.enabled
-					acceptedButtons: Qt.RightButton
-					onTapped: Workspace.openDialog(DialogId.stash)
-				}
-				PlainToolTip {
-					readonly property int hoverDelayMs: 400
-					visible: stashHover.hovered
-					delay: hoverDelayMs
-					text: Workspace.sessions.count > 0
-						? qsTr("Stash all running sessions (right-click to manage)")
-						: qsTr("Manage stashed groups")
-				}
-				Accessible.role: Accessible.Button
+				tooltipText: Workspace.sessions.count > 0
+					? qsTr("Stash all running sessions (right-click to manage)")
+					: qsTr("Manage stashed groups")
 				Accessible.name: Workspace.sessions.count > 0 ? qsTr("Stash all running sessions") : qsTr("Manage stashed groups")
-				Accessible.onPressAction: {
+				onClicked: {
 					if (!stashButton.enabled)
 						return
 					if (Workspace.sessions.count > 0)
 						Workspace.stash.stashAll()
 					else
 						Workspace.openDialog(DialogId.stash)
+				}
+
+				TapHandler {
+					enabled: stashButton.enabled
+					acceptedButtons: Qt.RightButton
+					onTapped: Workspace.openDialog(DialogId.stash)
 				}
 			}
 			Item {
@@ -424,25 +376,222 @@ Rectangle {
 				anchors { left: stashButton.right; leftMargin: 8; right: folderButton.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
 				height: 36
 
+				readonly property real halfW: Math.max(1, width * 0.5)
+				readonly property real halfH: Math.max(1, height * 0.5)
+				readonly property real cursorNx: newHover.hovered ? Math.max(-1, Math.min(1, (newHover.point.position.x - halfW) / halfW)) : 0
+				readonly property real cursorNy: newHover.hovered ? Math.max(-1, Math.min(1, (newHover.point.position.y - halfH) / halfH)) : 0
+				readonly property real pixelScale: Math.max(1, (Screen.devicePixelRatio || 1) * UiScale.factor)
+				property real glowStrength: newHover.hovered ? 1.0 : 0.0
+				property real glowX: newHover.hovered ? newHover.point.position.x : width * 0.5
+				property real glowY: newHover.hovered ? newHover.point.position.y : height * 0.5
+
+				Behavior on glowStrength { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+				Behavior on glowX { SpringAnimation { spring: 4.6; damping: 0.36; epsilon: 0.2 } }
+				Behavior on glowY { SpringAnimation { spring: 4.6; damping: 0.36; epsilon: 0.2 } }
+
+				function cssRgba(c, alpha) {
+					const r = Math.round(c.r * 255)
+					const g = Math.round(c.g * 255)
+					const b = Math.round(c.b * 255)
+					const a = Math.max(0, Math.min(1, alpha))
+					return "rgba(" + r + "," + g + "," + b + "," + a.toFixed(4) + ")"
+				}
+				function scheduleNewGlow() {
+					if (newGlowCanvas.visible)
+						newGlowCanvas.requestPaint()
+				}
+
+				onGlowStrengthChanged: scheduleNewGlow()
+				onGlowXChanged: scheduleNewGlow()
+				onGlowYChanged: scheduleNewGlow()
+				onPixelScaleChanged: {
+					scheduleNewGlow()
+					chatPlusCanvas.requestPaint()
+				}
+
+				Connections {
+					target: Theme
+					function onDarkChanged() {
+						newButton.scheduleNewGlow()
+						chatPlusCanvas.requestPaint()
+					}
+				}
+
 				Rectangle {
+					id: newFace
 					anchors.fill: parent
 					radius: 18
 					color: newHover.hovered ? Theme.surfaceHover : Theme.surface
-					border.color: Theme.border
-					scale: newTap.pressed ? 0.96 : 1
+					border.color: newHover.hovered
+						? Qt.tint(Theme.border, Qt.alpha(Theme.success, Theme.dark ? 0.50 : 0.58))
+						: Theme.border
+					scale: newTap.pressed ? 0.96 : (newHover.hovered ? 1.02 : 1.0)
 
 					Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
-					Behavior on scale { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+					Behavior on border.color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+					Behavior on scale { SpringAnimation { spring: 5.2; damping: 0.30; epsilon: 0.002 } }
+
+					transform: Translate {
+						x: newHover.hovered ? newButton.cursorNx * 1.0 : 0
+						y: newHover.hovered ? newButton.cursorNy * 0.6 : 0
+
+						Behavior on x { SpringAnimation { spring: 4.2; damping: 0.34; epsilon: 0.05 } }
+						Behavior on y { SpringAnimation { spring: 4.2; damping: 0.34; epsilon: 0.05 } }
+					}
+
+					// Restrained creation-green pointer-following radial glow clipped cleanly inside the capsule.
+					Canvas {
+						id: newGlowCanvas
+						x: 0
+						y: 0
+						width: Math.max(1, Math.ceil(newFace.width * newButton.pixelScale))
+						height: Math.max(1, Math.ceil(newFace.height * newButton.pixelScale))
+						transformOrigin: Item.TopLeft
+						scale: 1 / newButton.pixelScale
+						renderTarget: Canvas.Image
+						visible: newButton.glowStrength > 0.005
+
+						onVisibleChanged: if (visible) requestPaint()
+						onWidthChanged: if (visible) requestPaint()
+						onHeightChanged: if (visible) requestPaint()
+
+						onPaint: {
+							const ctx = getContext("2d")
+							if (!ctx)
+								return
+							ctx.setTransform(1, 0, 0, 1, 0, 0)
+							ctx.clearRect(0, 0, width, height)
+							if (!visible || newFace.width <= 0 || newFace.height <= 0)
+								return
+							ctx.setTransform(newButton.pixelScale, 0, 0, newButton.pixelScale, 0, 0)
+
+							const w = newFace.width
+							const h = newFace.height
+							const r = Math.min(17.5, h * 0.5 - 0.5)
+							ctx.save()
+							ctx.beginPath()
+							ctx.moveTo(0.5 + r, 0.5)
+							ctx.lineTo(w - 0.5 - r, 0.5)
+							ctx.arcTo(w - 0.5, 0.5, w - 0.5, 0.5 + r, r)
+							ctx.lineTo(w - 0.5, h - 0.5 - r)
+							ctx.arcTo(w - 0.5, h - 0.5, w - 0.5 - r, h - 0.5, r)
+							ctx.lineTo(0.5 + r, h - 0.5)
+							ctx.arcTo(0.5, h - 0.5, 0.5, h - 0.5 - r, r)
+							ctx.lineTo(0.5, 0.5 + r)
+							ctx.arcTo(0.5, 0.5, 0.5 + r, 0.5, r)
+							ctx.closePath()
+							ctx.clip()
+
+							const gx = newButton.glowX
+							const gy = newButton.glowY
+							const gr = Math.max(56, w * 0.42)
+							const a = (Theme.dark ? 0.18 : 0.14) * newButton.glowStrength
+							const grad = ctx.createRadialGradient(gx, gy, 0, gx, gy, gr)
+							grad.addColorStop(0.0, newButton.cssRgba(Theme.success, a))
+							grad.addColorStop(0.55, newButton.cssRgba(Theme.success, a * 0.34))
+							grad.addColorStop(1.0, newButton.cssRgba(Theme.success, 0))
+							ctx.fillStyle = grad
+							ctx.fillRect(0, 0, w, h)
+							ctx.restore()
+						}
+					}
 
 					Row {
 						anchors.centerIn: parent
 						spacing: 8
 
-						Icon {
+						// Multi-part HiDPI Canvas chat-plus (1:1 assets/icons/chat-plus-16.svg).
+						Item {
+							id: chatPlusHost
 							anchors.verticalCenter: parent.verticalCenter
-							name: "chat-plus"
-							size: 16
-							color: Theme.text
+							width: 16
+							height: 16
+							readonly property real pad: 3
+							property real hoverVal: newTap.pressed ? -0.35 : (newHover.hovered ? 1.0 : 0.0)
+							property real plusRot: newHover.hovered ? 90.0 : 0.0
+							property color bubbleColor: Theme.text
+							property color plusColor: newHover.hovered ? Theme.successText : Theme.text
+
+							Behavior on hoverVal { SpringAnimation { spring: 5.0; damping: 0.28; epsilon: 0.004 } }
+							Behavior on plusRot { SpringAnimation { spring: 4.8; damping: 0.28; epsilon: 0.05 } }
+							Behavior on plusColor { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+
+							onHoverValChanged: chatPlusCanvas.requestPaint()
+							onPlusRotChanged: chatPlusCanvas.requestPaint()
+							onBubbleColorChanged: chatPlusCanvas.requestPaint()
+							onPlusColorChanged: chatPlusCanvas.requestPaint()
+
+							Canvas {
+								id: chatPlusCanvas
+								x: -chatPlusHost.pad
+								y: -chatPlusHost.pad
+								readonly property real logicalW: chatPlusHost.width + 2 * chatPlusHost.pad
+								readonly property real logicalH: chatPlusHost.height + 2 * chatPlusHost.pad
+								width: Math.max(1, Math.ceil(logicalW * newButton.pixelScale))
+								height: Math.max(1, Math.ceil(logicalH * newButton.pixelScale))
+								transformOrigin: Item.TopLeft
+								scale: 1 / newButton.pixelScale
+								renderTarget: Canvas.Image
+
+								onWidthChanged: requestPaint()
+								onHeightChanged: requestPaint()
+								Component.onCompleted: requestPaint()
+
+								onPaint: {
+									const ctx = getContext("2d")
+									if (!ctx || chatPlusHost.width <= 0 || chatPlusHost.height <= 0)
+										return
+									ctx.setTransform(1, 0, 0, 1, 0, 0)
+									ctx.clearRect(0, 0, width, height)
+									const ps = newButton.pixelScale
+									const s = chatPlusHost.width / 16.0
+									ctx.setTransform(ps, 0, 0, ps, 0, 0)
+									ctx.translate(chatPlusHost.pad, chatPlusHost.pad)
+									ctx.scale(s, s)
+
+									const hv = chatPlusHost.hoverVal
+									const bScale = 1.0 + 0.07 * hv
+									const bLift = -0.6 * hv
+									ctx.lineWidth = 1.45
+									ctx.lineCap = "round"
+									ctx.lineJoin = "round"
+
+									// 1. Chat bubble lifting and scaling gently on hover (exact chat-plus-16.svg).
+									ctx.save()
+									ctx.translate(8.0, 7.5 + bLift)
+									ctx.scale(bScale, bScale)
+									ctx.translate(-8.0, -7.5)
+									ctx.strokeStyle = newButton.cssRgba(chatPlusHost.bubbleColor, 1.0)
+									ctx.beginPath()
+									ctx.moveTo(3.75, 2.25)
+									ctx.lineTo(12.25, 2.25)
+									ctx.arcTo(13.75, 2.25, 13.75, 3.75, 1.5)
+									ctx.lineTo(13.75, 9.75)
+									ctx.arcTo(13.75, 11.25, 12.25, 11.25, 1.5)
+									ctx.lineTo(8.25, 11.25)
+									ctx.lineTo(5.75, 13.75)
+									ctx.lineTo(5.75, 11.25)
+									ctx.lineTo(3.75, 11.25)
+									ctx.arcTo(2.25, 11.25, 2.25, 9.75, 1.5)
+									ctx.lineTo(2.25, 3.75)
+									ctx.arcTo(2.25, 2.25, 3.75, 2.25, 1.5)
+									ctx.closePath()
+									ctx.stroke()
+
+									// 2. Inner '+' rotating +90° clockwise, elongating & lighting up in Theme.successText.
+									const halfArm = 2.0 + 0.32 * Math.max(0, hv)
+									ctx.translate(8.25, 6.75)
+									ctx.rotate(chatPlusHost.plusRot * Math.PI / 180)
+									ctx.strokeStyle = newButton.cssRgba(chatPlusHost.plusColor, 1.0)
+									ctx.beginPath()
+									ctx.moveTo(0, -halfArm)
+									ctx.lineTo(0, halfArm)
+									ctx.moveTo(-halfArm, 0)
+									ctx.lineTo(halfArm, 0)
+									ctx.stroke()
+									ctx.restore()
+								}
+							}
 						}
 						Text {
 							textFormat: Text.PlainText

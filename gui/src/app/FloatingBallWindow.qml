@@ -755,8 +755,7 @@ Item {
 					IconButton {
 						objectName: "floatingReturnButton"
 						buttonSize: root.headerButtonSize
-						iconName: "maximize"
-						iconSize: 20
+						iconName: "float-return"
 						tooltipText: qsTr("Return to full window")
 						Accessible.name: qsTr("Return to full window")
 						onClicked: Workspace.setFloatingMode(false)

@@ -163,6 +163,9 @@ Item {
 		anchors { bottom: questionCard.top; bottomMargin: 4 }
 		opacity: shown ? 1 : 0
 		visible: opacity > 0
+		rimColor: alerting ? Theme.danger : Theme.accent
+		rimCoreColor: alerting ? Theme.dangerText : Theme.accentText
+		rimStrengthScale: alerting ? 0.56 : 0.36
 		transform: Translate {
 			y: jumpToEnd.shown ? 0 : 10
 			Behavior on y { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
@@ -193,12 +196,66 @@ Item {
 		}
 
 		Chevron {
+			id: jumpArrow
 			anchors.centerIn: parent
 			width: 16
 			height: 16
 			rotation: 90 // points down
-			color: Theme.textMuted
+			color: jumpToEnd.hovered
+				? (jumpToEnd.alerting ? Theme.dangerText : Theme.accentText)
+				: Theme.textMuted
 			strokeWidth: 2
+
+			Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+
+			transform: Translate {
+				y: jumpToEnd.pressed ? 3.2 : (jumpToEnd.hovered ? 1.8 : 0)
+
+				Behavior on y {
+					SpringAnimation {
+						spring: 5.0
+						damping: 0.28
+						epsilon: 0.02
+					}
+				}
+			}
+		}
+
+		// Bottom touch-down bar that breathes in softly as the arrow sinks toward it.
+		Rectangle {
+			id: landingBar
+			anchors.horizontalCenter: parent.horizontalCenter
+			y: jumpToEnd.height * 0.5 + 6
+			width: jumpToEnd.pressed ? 13 : (jumpToEnd.hovered ? 11 : 2)
+			height: 2
+			radius: height / 2
+			color: jumpToEnd.alerting ? Theme.dangerText : Theme.accentText
+			opacity: jumpToEnd.hovered || jumpToEnd.pressed ? 0.85 : 0
+
+			Behavior on width {
+				NumberAnimation {
+					duration: 260
+					easing.type: Easing.OutCubic
+				}
+			}
+			Behavior on opacity {
+				NumberAnimation {
+					duration: 240
+					easing.type: Easing.InOutCubic
+				}
+			}
+			Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+
+			transform: Translate {
+				y: jumpToEnd.hovered || jumpToEnd.pressed ? 0 : 2.5
+
+				Behavior on y {
+					NumberAnimation {
+						duration: 240
+						easing.type: Easing.InOutCubic
+					}
+				}
+			}
 		}
 
 		Flourish {
@@ -259,6 +316,7 @@ Item {
 
 	Loader {
 		id: lightboxLoader
+		z: 100
 		anchors.fill: parent
 		active: false
 		property string pendingSessionId: ""

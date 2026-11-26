@@ -16,16 +16,17 @@ Item {
 	readonly property color color: face.color // for glyphs painted in the button's color
 	readonly property alias hovered: hover.hovered
 	readonly property alias pressed: tap.pressed
+	readonly property real pointerNormX: cursorNx
 	default property alias content: contentHost.data
 
 	// Customizable directional crescent rim-light, outer halo and optional inner eclipse vignette.
-	property color rimColor: Theme.dark ? Qt.rgba(0.68, 0.80, 1.0, 1.0) : Theme.accent
-	property color rimCoreColor: Theme.dark ? Qt.rgba(0.95, 0.97, 1.0, 1.0) : Theme.accentText
+	property color rimColor: Theme.accent
+	property color rimCoreColor: Theme.accentText
 	property real rimBiasAngle: NaN
-	property real rimStrengthScale: 1.0
+	property real rimStrengthScale: 0.36
 	property real eclipseShade: 0.0
-
-	readonly property real haloPad: 10
+	property bool forceLightSurface: false
+	readonly property real haloPad: 16
 	readonly property real pixelScale: Math.max(1, (Screen.devicePixelRatio || 1) * UiScale.factor)
 	readonly property real halfWidth: Math.max(1, width * 0.5)
 	readonly property real halfHeight: Math.max(1, height * 0.5)
@@ -36,7 +37,7 @@ Item {
 	property real glowAngle: targetGlowAngle
 	property real glowStrength: hover.hovered ? 1.0 : 0.0
 	property real pressPulse: tap.pressed ? 1.0 : 0.0
-	property real eclipseProgress: eclipseShade
+	property real eclipseProgress: hover.hovered ? eclipseShade : 0.0
 
 	implicitWidth: 34
 	implicitHeight: 34
@@ -131,11 +132,14 @@ Item {
 	}
 	onRimStrengthScaleChanged: scheduleRimPaint()
 	onEclipseProgressChanged: scheduleEclipsePaint()
+	onForceLightSurfaceChanged: {
+		scheduleRimPaint()
+		scheduleEclipsePaint()
+	}
 	onPixelScaleChanged: {
 		scheduleRimPaint()
 		scheduleEclipsePaint()
 	}
-
 	Connections {
 		target: Theme
 		function onDarkChanged() {
@@ -148,10 +152,26 @@ Item {
 		id: face
 		anchors.fill: parent
 		radius: width / 2
-		color: hover.hovered ? Theme.surfaceHover : Theme.surface
-		border.color: hover.hovered
-			? Qt.tint(Theme.border, Qt.alpha(button.rimColor, Theme.dark ? 0.44 : 0.52))
-			: Theme.border
+		color: button.forceLightSurface
+			? (hover.hovered ? "#e7e7e4" : "#f1f1ef")
+			: (hover.hovered ? Theme.surfaceHover : Theme.surface)
+		border.color: button.forceLightSurface
+			? (hover.hovered
+				? Qt.tint(
+					"#c8c8c4",
+					button.rimStrengthScale > 0 || button.eclipseShade > 0
+						? Qt.alpha(button.rimColor, 0.52)
+						: Qt.alpha("#6b6d75", 0.34)
+				)
+				: "#c8c8c4")
+			: (hover.hovered
+				? Qt.tint(
+					Theme.border,
+					button.rimStrengthScale > 0 || button.eclipseShade > 0
+						? Qt.alpha(button.rimColor, Theme.dark ? 0.44 : 0.52)
+						: Qt.alpha(Theme.textMuted, Theme.dark ? 0.30 : 0.34)
+				)
+				: Theme.border)
 		scale: tap.pressed ? 0.90 : (hover.hovered ? 1.06 : 1.0)
 
 		Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
@@ -198,7 +218,7 @@ Item {
 			transformOrigin: Item.TopLeft
 			scale: 1 / button.pixelScale
 			renderTarget: Canvas.Image
-			visible: button.glowStrength > 0.005 || button.pressPulse > 0.005
+			visible: button.rimStrengthScale > 0 && (button.glowStrength > 0.005 || button.pressPulse > 0.005)
 
 			onVisibleChanged: if (visible) requestPaint()
 			onWidthChanged: if (visible) requestPaint()
@@ -222,24 +242,10 @@ Item {
 				const ca = Math.cos(a)
 				const sa = Math.sin(a)
 				const strength = Math.max(button.glowStrength, button.pressPulse * 0.85) * button.rimStrengthScale
-				const alpha = Math.max(0, Math.min(1.5, strength))
+				const alpha = Math.max(0, Math.min(2.2, strength))
 				const pressBoost = 1.0 + button.pressPulse * 0.28
 
-				// 1. Soft directional ambient halo radiating outward along `glowAngle`.
-				const auraX = cx + ca * r * 0.42
-				const auraY = cy + sa * r * 0.42
-				const auraR = r + button.haloPad * 0.94 * pressBoost
-				const auraAlpha = (Theme.dark ? 0.34 : 0.24) * alpha * pressBoost
-				const aura = ctx.createRadialGradient(auraX, auraY, r * 0.35, auraX, auraY, auraR)
-				aura.addColorStop(0.0, button.cssRgba(button.rimColor, auraAlpha))
-				aura.addColorStop(0.58, button.cssRgba(button.rimColor, auraAlpha * 0.36))
-				aura.addColorStop(1.0, button.cssRgba(button.rimColor, 0))
-				ctx.fillStyle = aura
-				ctx.beginPath()
-				ctx.arc(auraX, auraY, auraR, 0, Math.PI * 2)
-				ctx.fill()
-
-				// 2. Luminous mid-bloom crescent hugging the outer rim edge.
+				// 1. Luminous mid-bloom crescent hugging the outer rim edge.
 				const midShift = 2.2 + button.pressPulse * 0.9
 				const midCx = cx + ca * midShift
 				const midCy = cy + sa * midShift
@@ -254,7 +260,7 @@ Item {
 				ctx.arc(midCx, midCy, r + 1.0, 0, Math.PI * 2)
 				ctx.fill()
 
-				// 3. Razor-sharp specular crescent core peeking cleanly around `face`'s edge.
+				// 2. Razor-sharp specular crescent core peeking cleanly around `face`'s edge.
 				const coreShift = 1.55 + button.pressPulse * 0.65
 				const coreCx = cx + ca * coreShift
 				const coreCy = cy + sa * coreShift
@@ -271,7 +277,7 @@ Item {
 			}
 		}
 
-		// Optional inner lunar-eclipse shadow sweep (strictly hidden unless `eclipseShade > 0`).
+		// Optional inner lunar-eclipse shadow sweep (strictly hidden unless hovered with `eclipseShade > 0`).
 		Canvas {
 			id: eclipseCanvas
 			z: 0
@@ -302,7 +308,9 @@ Item {
 				const cx = face.width * 0.5
 				const cy = face.height * 0.5
 				const r = Math.max(1, Math.min(face.width, face.height) * 0.5 - 0.5)
-				const p = Math.max(0, Math.min(1, button.eclipseProgress))
+				const p = Math.max(0, button.eclipseProgress)
+				const depth = Math.min(1.6, p)
+				const sweep = Math.min(1.2, p)
 				const a = button.glowAngle
 				const ca = Math.cos(a)
 				const sa = Math.sin(a)
@@ -313,20 +321,20 @@ Item {
 				ctx.clip()
 
 				// Creeping shadow arc entering from `glowAngle`.
-				const sx = cx + ca * r * (1.22 - 0.34 * p)
-				const sy = cy + sa * r * (1.22 - 0.34 * p)
-				const sr = r * (0.95 + 0.55 * p)
+				const sx = cx + ca * r * (1.22 - 0.38 * sweep)
+				const sy = cy + sa * r * (1.22 - 0.38 * sweep)
+				const sr = r * (0.98 + 0.62 * sweep)
 				const shadow = ctx.createRadialGradient(sx, sy, 0, sx, sy, sr)
-				shadow.addColorStop(0.0, button.cssRgba(button.rimCoreColor, 0.34 * p))
-				shadow.addColorStop(0.55, button.cssRgba(button.rimColor, 0.16 * p))
+				shadow.addColorStop(0.0, button.cssRgba(button.rimCoreColor, 0.42 * depth))
+				shadow.addColorStop(0.52, button.cssRgba(button.rimColor, 0.22 * depth))
 				shadow.addColorStop(1.0, button.cssRgba(button.rimColor, 0))
 				ctx.fillStyle = shadow
 				ctx.fillRect(0, 0, face.width, face.height)
 
 				// Subtle darkened inner vignette pulling light inward toward center.
-				const vignette = ctx.createRadialGradient(cx, cy, r * 0.52, cx, cy, r)
+				const vignette = ctx.createRadialGradient(cx, cy, r * 0.46, cx, cy, r)
 				vignette.addColorStop(0.0, button.cssRgba(button.rimCoreColor, 0))
-				vignette.addColorStop(1.0, button.cssRgba(button.rimCoreColor, 0.14 * p))
+				vignette.addColorStop(1.0, button.cssRgba(button.rimCoreColor, 0.16 * depth))
 				ctx.fillStyle = vignette
 				ctx.fillRect(0, 0, face.width, face.height)
 
