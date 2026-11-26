@@ -17,7 +17,6 @@ Item {
 	property string screenName: ""
 	property int ballX: 0
 	property int ballY: 0
-	property string selectedSessionId: ""
 	property int liveRevision: 0
 	property bool confirmCloseShown: false
 
@@ -37,15 +36,9 @@ Item {
 	readonly property int confirmBarHeight: 44
 	readonly property int headerIconReserve: 26
 	readonly property int switcherMenuGap: 4
+	readonly property int sessionRowHeight: 48
 
-	readonly property ChatSession activeSession: {
-		if (selectedSessionId !== "") {
-			const picked = Workspace.findSession(selectedSessionId)
-			if (picked !== null)
-				return picked
-		}
-		return Workspace.current
-	}
+	readonly property ChatSession activeSession: Workspace.current
 
 	readonly property var aggregateInfo: {
 		void Workspace.sessions.count
@@ -148,37 +141,17 @@ Item {
 		screenName = nextScreen
 		Workspace.settings.setFloatingBallPosition(screenName, ballX, ballY)
 	}
-
-	function ensureSessionSelected() {
-		if (Workspace.currentId !== "") {
-			selectedSessionId = Workspace.currentId
-			return
-		}
-		if (Workspace.sessions.count > 0) {
-			const row = Workspace.sessions.rowAt(0)
-			const firstId = String(row.sessionId ?? "")
-			if (firstId !== "") {
-				selectedSessionId = firstId
-				Workspace.openSession(firstId)
-			}
-		}
-	}
-
 	function openSessionInPanel(sessionId) {
 		confirmCloseShown = false
-		if (sessionId !== "") {
-			selectedSessionId = sessionId
+		if (sessionId !== "")
 			Workspace.openSession(sessionId)
-		} else {
-			ensureSessionSelected()
-		}
 		panelExpanded = true
 	}
 
 	function expandPanel() {
-		openSessionInPanel("")
+		confirmCloseShown = false
+		panelExpanded = true
 	}
-
 	function collapseToBall() {
 		confirmCloseShown = false
 		panelExpanded = false
@@ -204,8 +177,6 @@ Item {
 	Component.onCompleted: {
 		resolvePosition()
 		positionRestored = true
-		if (Workspace.currentId !== "")
-			selectedSessionId = Workspace.currentId
 	}
 
 	Timer {
@@ -217,19 +188,10 @@ Item {
 
 	Connections {
 		target: Workspace
-		function onCurrentChanged() {
-			root.selectedSessionId = Workspace.currentId
-		}
-		function onSessionDropped(session) {
-			if (session && session.sessionId === root.selectedSessionId)
-				root.selectedSessionId = Workspace.currentId
-		}
 		function onFloatingModeChanged() {
 			if (Workspace.floatingMode) {
 				root.resolvePosition()
 				root.positionRestored = true
-				if (Workspace.currentId !== "")
-					root.selectedSessionId = Workspace.currentId
 				root.syncWindowGeometry()
 			} else {
 				root.confirmCloseShown = false
@@ -433,10 +395,29 @@ Item {
 					onActiveChanged: if (active) floatingWindow.startSystemMove()
 				}
 
+				IconButton {
+					id: detachButton
+					objectName: "floatingDetachButton"
+					anchors { left: parent.left; leftMargin: 8; verticalCenter: parent.verticalCenter }
+					buttonSize: root.headerButtonSize
+					iconName: "chat-list"
+					iconSize: 16
+					visible: root.activeSession !== null
+					tooltipText: qsTr("Move to background")
+					Accessible.name: qsTr("Move to background")
+					onClicked: Workspace.detachCurrent()
+				}
+
 				Rectangle {
 					id: switcherPill
 					objectName: "floatingSessionSwitcher"
-					anchors { left: parent.left; leftMargin: 10; right: headerActions.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
+					anchors {
+						left: detachButton.visible ? detachButton.right : parent.left
+						leftMargin: detachButton.visible ? 6 : 10
+						right: headerActions.left
+						rightMargin: 8
+						verticalCenter: parent.verticalCenter
+					}
 					height: root.switcherPillHeight
 					radius: height / 2
 					color: switcherHover.hovered ? Theme.surfaceHover : Theme.background
@@ -459,14 +440,13 @@ Item {
 							textFormat: Text.PlainText
 							width: Math.max(0, parent.width - root.headerIconReserve)
 							anchors.verticalCenter: parent.verticalCenter
-							text: root.activeSession && root.activeSession.title !== ""
-								? root.activeSession.title
-								: (Workspace.sessions.count > 0 ? qsTr("Select session") : qsTr("No session"))
+							text: root.activeSession
+								? (root.activeSession.title !== "" ? root.activeSession.title : qsTr("Select session"))
+								: (Workspace.sessions.count > 0 ? qsTr("Running sessions") : qsTr("No session"))
 							color: Theme.text
 							font.pixelSize: Theme.smallFontSize
 							elide: Text.ElideRight
 						}
-
 						Chevron {
 							anchors.verticalCenter: parent.verticalCenter
 							width: 12
@@ -614,10 +594,100 @@ Item {
 					}
 				}
 
+				ListView {
+					id: sessionListView
+					objectName: "floatingSessionList"
+					anchors.fill: parent
+					clip: true
+					topMargin: 8
+					bottomMargin: 8
+					spacing: 4
+					visible: root.activeSession === null && Workspace.sessions.count > 0
+					model: Workspace.sessions
+
+					delegate: Rectangle {
+						id: sessionRow
+						objectName: "floatingSessionRow"
+
+						required property string sessionId
+						required property string displayTitle
+						required property string dirName
+						required property string activity
+						required property bool hasError
+						required property bool hasPermission
+
+						property string rowSessionId: sessionId
+						readonly property bool failed: Activity.isFailed(activity, hasError)
+						readonly property bool retrying: activity === Activity.retrying
+						readonly property string subtitleText: {
+							if (activity === Activity.waitingQuestion)
+								return qsTr("Waiting for your answer")
+							if (hasPermission)
+								return qsTr("Needs permission")
+							if (failed)
+								return qsTr("Failed")
+							if (retrying)
+								return qsTr("Retrying")
+							if (activity === Activity.compacting)
+								return qsTr("Compacting")
+							return dirName
+						}
+
+						x: 8
+						width: sessionListView.width - 16
+						height: root.sessionRowHeight
+						radius: Theme.radius
+						color: rowHover.hovered ? Theme.surfaceHover : "transparent"
+
+						Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+
+						SessionDot {
+							id: rowDot
+							anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
+							activity: sessionRow.activity
+							hasError: sessionRow.hasError
+						}
+
+						Column {
+							anchors { left: rowDot.right; leftMargin: 10; right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter }
+							spacing: 2
+
+							Text {
+								textFormat: Text.PlainText
+								width: parent.width
+								text: sessionRow.displayTitle
+								color: Theme.text
+								font { pixelSize: Theme.smallFontSize; bold: true }
+								elide: Text.ElideRight
+							}
+
+							Text {
+								textFormat: Text.PlainText
+								width: parent.width
+								text: sessionRow.subtitleText
+								color: (sessionRow.hasPermission || sessionRow.retrying)
+									? Theme.warningText
+									: (sessionRow.failed ? Theme.dangerText : Theme.textMuted)
+								font.pixelSize: Theme.microFontSize
+								elide: Text.ElideRight
+							}
+						}
+
+						HoverHandler {
+							id: rowHover
+							cursorShape: Qt.PointingHandCursor
+						}
+
+						TapHandler {
+							onTapped: root.openSessionInPanel(sessionRow.sessionId)
+						}
+					}
+				}
+
 				Column {
 					anchors.centerIn: parent
 					spacing: 10
-					visible: root.activeSession === null
+					visible: root.activeSession === null && Workspace.sessions.count === 0
 
 					Text {
 						textFormat: Text.PlainText

@@ -2320,64 +2320,100 @@ $ARGUMENTS</translation>
 <context>
     <name>FloatingBallWindow</name>
     <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="385"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="347"/>
         <source>Open mini panel</source>
         <translation>打开迷你面板</translation>
     </message>
     <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="386"/>
-        <location filename="../src/app/FloatingBallWindow.qml" line="537"/>
-        <location filename="../src/app/FloatingBallWindow.qml" line="538"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="348"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="517"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="518"/>
         <source>Return to full window</source>
         <translation>返回完整窗口</translation>
     </message>
     <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="387"/>
-        <location filename="../src/app/FloatingBallWindow.qml" line="517"/>
-        <location filename="../src/app/FloatingBallWindow.qml" line="518"/>
-        <location filename="../src/app/FloatingBallWindow.qml" line="633"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="349"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="497"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="498"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="703"/>
         <source>New session</source>
         <translation>新建会话</translation>
     </message>
     <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="464"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="406"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="407"/>
+        <source>Move to background</source>
+        <translation>挂到后台</translation>
+    </message>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="444"/>
         <source>Select session</source>
         <translation>选择会话</translation>
     </message>
     <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="464"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="445"/>
+        <source>Running sessions</source>
+        <translation>运行中的会话</translation>
+    </message>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="445"/>
         <source>No session</source>
         <translation>无会话</translation>
     </message>
     <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="527"/>
-        <location filename="../src/app/FloatingBallWindow.qml" line="528"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="507"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="508"/>
         <source>Collapse to ball</source>
         <translation>收起为悬浮球</translation>
     </message>
     <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="547"/>
-        <location filename="../src/app/FloatingBallWindow.qml" line="548"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="527"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="528"/>
         <source>Close</source>
         <translation>关闭</translation>
     </message>
     <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="576"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="556"/>
         <source>Work is still running. Quit anyway?</source>
         <translation>仍有任务在运行。确定要退出吗？</translation>
     </message>
     <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="589"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="569"/>
         <source>Cancel</source>
         <translation>取消</translation>
     </message>
     <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="597"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="577"/>
         <source>Quit</source>
         <translation>退出</translation>
     </message>
     <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="625"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="624"/>
+        <source>Waiting for your answer</source>
+        <translation>等待你的回答</translation>
+    </message>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="626"/>
+        <source>Needs permission</source>
+        <translation>需要授权</translation>
+    </message>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="628"/>
+        <source>Failed</source>
+        <translation>失败</translation>
+    </message>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="630"/>
+        <source>Retrying</source>
+        <translation>重试中</translation>
+    </message>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="632"/>
+        <source>Compacting</source>
+        <translation>压缩中</translation>
+    </message>
+    <message>
+        <location filename="../src/app/FloatingBallWindow.qml" line="695"/>
         <source>No session open</source>
         <translation>未打开会话</translation>
     </message>
@@ -3491,6 +3527,19 @@ $ARGUMENTS</translation>
         <translation>重启 ref-gui 以原生清晰度生效</translation>
     </message>
     <message>
+        <location filename="../src/app/SettingsDialog.qml" line="260"/>
+        <location filename="../src/app/SettingsDialog.qml" line="295"/>
+        <location filename="../src/app/SettingsDialog.qml" line="355"/>
+        <location filename="../src/app/SettingsDialog.qml" line="384"/>
+        <source>Message window</source>
+        <translation>消息窗口</translation>
+    </message>
+    <message>
+        <location filename="../src/app/SettingsDialog.qml" line="269"/>
+        <source>0 = unlimited (load all)</source>
+        <translation>0 表示不限制（全部加载）</translation>
+    </message>
+    <message>
         <location filename="../src/app/SettingsDialog.qml" line="84"/>
         <source>Configuration</source>
         <translation>配置</translation>
@@ -3661,125 +3710,130 @@ $ARGUMENTS</translation>
 <context>
     <name>StashDialog</name>
     <message>
-        <location filename="../src/app/StashDialog.qml" line="254"/>
+        <location filename="../src/app/StashDialog.qml" line="262"/>
         <source>Move to &quot;%1&quot;</source>
         <translation>移动到“%1”</translation>
     </message>
     <message>
-        <location filename="../src/app/StashDialog.qml" line="262"/>
+        <location filename="../src/app/StashDialog.qml" line="270"/>
         <source>Copy to &quot;%1&quot;</source>
         <translation>复制到“%1”</translation>
     </message>
     <message>
-        <location filename="../src/app/StashDialog.qml" line="271"/>
+        <location filename="../src/app/StashDialog.qml" line="279"/>
         <source>Add to &quot;%1&quot;</source>
         <translation>添加到“%1”</translation>
     </message>
     <message>
-        <location filename="../src/app/StashDialog.qml" line="281"/>
+        <location filename="../src/app/StashDialog.qml" line="289"/>
         <source>New group with session</source>
         <translation>用此会话新建分组</translation>
     </message>
     <message>
-        <location filename="../src/app/StashDialog.qml" line="293"/>
+        <location filename="../src/app/StashDialog.qml" line="301"/>
         <source>Stashed groups</source>
         <translation>暂存分组</translation>
     </message>
     <message>
-        <location filename="../src/app/StashDialog.qml" line="344"/>
+        <location filename="../src/app/StashDialog.qml" line="353"/>
         <source>RUNNING</source>
         <translation>运行中</translation>
     </message>
     <message>
-        <location filename="../src/app/StashDialog.qml" line="356"/>
+        <location filename="../src/app/StashDialog.qml" line="365"/>
         <source>Stash all</source>
         <translation>全部暂存</translation>
     </message>
     <message>
-        <location filename="../src/app/StashDialog.qml" line="368"/>
+        <location filename="../src/app/StashDialog.qml" line="377"/>
         <source>No running sessions</source>
         <translation>没有运行中的会话</translation>
     </message>
     <message>
-        <location filename="../src/app/StashDialog.qml" line="496"/>
-        <location filename="../src/app/StashDialog.qml" line="497"/>
+        <location filename="../src/app/StashDialog.qml" line="505"/>
+        <location filename="../src/app/StashDialog.qml" line="506"/>
         <source>Add to group</source>
         <translation>添加到分组</translation>
     </message>
     <message>
-        <location filename="../src/app/StashDialog.qml" line="528"/>
+        <location filename="../src/app/StashDialog.qml" line="537"/>
         <source>STASHED GROUPS</source>
         <translation>已暂存分组</translation>
     </message>
     <message>
-        <location filename="../src/app/StashDialog.qml" line="562"/>
+        <location filename="../src/app/StashDialog.qml" line="571"/>
         <source>New group</source>
         <translation>新建分组</translation>
     </message>
     <message>
-        <location filename="../src/app/StashDialog.qml" line="580"/>
+        <location filename="../src/app/StashDialog.qml" line="589"/>
         <source>Loading…</source>
         <translation>加载中…</translation>
     </message>
     <message>
-        <location filename="../src/app/StashDialog.qml" line="580"/>
+        <location filename="../src/app/StashDialog.qml" line="589"/>
         <source>No stashed groups yet</source>
         <translation>暂无已暂存分组</translation>
     </message>
     <message>
-        <location filename="../src/app/StashDialog.qml" line="774"/>
-        <location filename="../src/app/StashDialog.qml" line="775"/>
+        <location filename="../src/app/StashDialog.qml" line="783"/>
+        <location filename="../src/app/StashDialog.qml" line="784"/>
         <source>Rename group</source>
         <translation>重命名分组</translation>
     </message>
     <message>
-        <location filename="../src/app/StashDialog.qml" line="792"/>
-        <location filename="../src/app/StashDialog.qml" line="793"/>
+        <location filename="../src/app/StashDialog.qml" line="801"/>
+        <location filename="../src/app/StashDialog.qml" line="802"/>
         <source>Unlock group</source>
         <translation>解锁分组</translation>
     </message>
     <message>
-        <location filename="../src/app/StashDialog.qml" line="792"/>
-        <location filename="../src/app/StashDialog.qml" line="793"/>
+        <location filename="../src/app/StashDialog.qml" line="801"/>
+        <location filename="../src/app/StashDialog.qml" line="802"/>
         <source>Lock group</source>
         <translation>锁定分组</translation>
     </message>
     <message>
-        <location filename="../src/app/StashDialog.qml" line="800"/>
+        <location filename="../src/app/StashDialog.qml" line="809"/>
         <source>Restore all</source>
         <translation>全部恢复</translation>
     </message>
     <message>
-        <location filename="../src/app/StashDialog.qml" line="811"/>
-        <location filename="../src/app/StashDialog.qml" line="812"/>
+        <location filename="../src/app/StashDialog.qml" line="820"/>
+        <location filename="../src/app/StashDialog.qml" line="821"/>
         <source>Delete group</source>
         <translation>删除分组</translation>
     </message>
     <message>
-        <location filename="../src/app/StashDialog.qml" line="825"/>
+        <location filename="../src/app/StashDialog.qml" line="834"/>
         <source>Drop sessions here</source>
         <translation>将会话拖放到此处</translation>
     </message>
     <message>
-        <location filename="../src/app/StashDialog.qml" line="985"/>
-        <location filename="../src/app/StashDialog.qml" line="986"/>
+        <location filename="../src/app/StashDialog.qml" line="995"/>
+        <location filename="../src/app/StashDialog.qml" line="996"/>
         <source>Move or copy to group</source>
         <translation>移动或复制到分组</translation>
     </message>
     <message>
-        <location filename="../src/app/StashDialog.qml" line="995"/>
-        <location filename="../src/app/StashDialog.qml" line="996"/>
+        <location filename="../src/app/StashDialog.qml" line="1005"/>
+        <location filename="../src/app/StashDialog.qml" line="1006"/>
         <source>Restore session</source>
         <translation>恢复会话</translation>
     </message>
     <message>
-        <location filename="../src/app/StashDialog.qml" line="1007"/>
-        <location filename="../src/app/StashDialog.qml" line="1008"/>
+        <location filename="../src/app/StashDialog.qml" line="1017"/>
+        <location filename="../src/app/StashDialog.qml" line="1018"/>
         <source>Remove from group</source>
         <translation>从分组移除</translation>
     </message>
     <message>
-        <location filename="../src/app/StashDialog.qml" line="1045"/>
+        <location filename="../src/app/StashDialog.qml" line="1055"/>
+        <source>Drop to restore: %1</source>
+        <translation>松开以恢复：%1</translation>
+    </message>
+    <message>
+        <location filename="../src/app/StashDialog.qml" line="1057"/>
         <source>Drop to remove: %1</source>
         <translation>松开以移除：%1</translation>
     </message>

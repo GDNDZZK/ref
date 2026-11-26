@@ -399,6 +399,67 @@ private:
 			m_fake.respond(request, {{u"restored_ids"_s, restoredIds}, {u"groups"_s, m_groups}});
 			broadcastSessions();
 		}
+		else if(op == u"restore_group_member"_s)
+		{
+			const QString gid = request.value(u"group_id"_s).toString();
+			const QString sid = request.value(u"session_id"_s).toString();
+			bool restored = false;
+			for(int i = 0; i < m_groups.size(); ++i)
+			{
+				QJsonObject g = m_groups.at(i).toObject();
+				if(g.value(u"id"_s).toString() == gid)
+				{
+					QJsonArray members = g.value(u"members"_s).toArray();
+					for(int j = 0; j < members.size(); ++j)
+					{
+						QJsonObject m = members.at(j).toObject();
+						if(m.value(u"session_id"_s).toString() == sid)
+						{
+							if(m_sessions.contains(sid) && !m_sessions[sid].value(u"live"_s).toBool(true))
+							{
+								m_sessions[sid][u"live"_s] = true;
+								restored = true;
+							}
+							m[u"info"_s] = m_sessions.value(sid);
+							members[j] = m;
+						}
+					}
+					g[u"members"_s] = members;
+					m_groups[i] = g;
+				}
+			}
+			m_fake.respond(request, {{u"restored"_s, restored}, {u"groups"_s, m_groups}});
+			if(restored)
+			{
+				broadcastSessions();
+			}
+		}
+		else if(op == u"remove_from_group"_s)
+		{
+			const QString gid = request.value(u"group_id"_s).toString();
+			const QString sid = request.value(u"session_id"_s).toString();
+			for(int i = 0; i < m_groups.size(); ++i)
+			{
+				QJsonObject g = m_groups.at(i).toObject();
+				if(g.value(u"id"_s).toString() == gid)
+				{
+					QJsonArray nextMembers;
+					int pos = 0;
+					for(const QJsonValue& val : g.value(u"members"_s).toArray())
+					{
+						QJsonObject m = val.toObject();
+						if(m.value(u"session_id"_s).toString() != sid)
+						{
+							m[u"position"_s] = pos++;
+							nextMembers.append(m);
+						}
+					}
+					g[u"members"_s] = nextMembers;
+					m_groups[i] = g;
+				}
+			}
+			m_fake.respond(request, {{u"groups"_s, m_groups}});
+		}
 		else
 		{
 			m_fake.respond(request, {});
@@ -876,7 +937,11 @@ void TestMainWindow::sidebarFolderButtonDoesNotTriggerNewSession()
 	QQuickItem* folderButton = findItem(sidebar, [](QQuickItem* item) {
 		return item->property("iconName").toString() == u"folder-open"_s;
 	});
-	QQuickItem* newPill = findItem(sidebar, [](QQuickItem* item) {
+	QQuickItem* newButton = findItem(sidebar, [](QQuickItem* item) {
+		return item->objectName() == u"sidebarNewSessionButton"_s;
+	});
+	QVERIFY(newButton);
+	QQuickItem* newPill = findItem(newButton, [](QQuickItem* item) {
 		return QByteArray(item->metaObject()->className()).startsWith("QQuickRectangle")
 		       && qFuzzyCompare(item->property("radius").toReal(), 18.0);
 	});
@@ -4258,6 +4323,47 @@ void TestMainWindow::stashButtonDialogAndSplitFilterCapsuleWorkWithoutWarnings()
 	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, newGroupBtn->mapToScene(QPointF(newGroupBtn->width() / 2.0, newGroupBtn->height() / 2.0)).toPoint());
 	QTRY_COMPARE(f.workspace->stash()->groupCount(), 2);
 
+	// Dragging a stashed member to Running restores it; dragging outside both columns removes it.
+	QQuickItem* stashDialog = findByTypePrefix(window->contentItem(), "StashDialog");
+	QQuickItem* runningCol = findItem(window->contentItem(), [](QQuickItem* item) { return item->objectName() == u"stashRunningColumn"_s; });
+	QVERIFY(stashDialog && runningCol);
+	QTest::qWait(300);
+	auto findMemberRow = [&](const QString& sid) {
+		return findItem(stashDialog, [&sid](QQuickItem* item) {
+			return item->objectName() == u"stashMemberRow"_s && item->property("sessionId").toString() == sid && item->isVisible();
+		});
+	};
+	QQuickItem* memberA = nullptr;
+	QTRY_VERIFY([&] {
+		memberA = findMemberRow(u"ses_a"_s);
+		return memberA != nullptr && memberA->height() > 0.0;
+	}());
+	const QPoint startA = memberA->mapToScene(QPointF(24.0, memberA->height() / 2.0)).toPoint();
+	const QPoint runningPt = runningCol->mapToScene(QPointF(runningCol->width() / 2.0, runningCol->height() / 2.0)).toPoint();
+	QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, startA);
+	QTest::mouseMove(window, startA + QPoint(-12, 0));
+	QTest::mouseMove(window, runningPt);
+	QTRY_COMPARE(stashDialog->property("dropTargetKind").toString(), u"restore"_s);
+	QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, runningPt);
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 1);
+	QCOMPARE(f.workspace->stash()->groupIdsForSession(u"ses_a"_s).size(), 1);
+
+	QQuickItem* memberB = nullptr;
+	QTRY_VERIFY([&] {
+		memberB = findMemberRow(u"ses_b"_s);
+		return memberB != nullptr && memberB->height() > 0.0;
+	}());
+	const QPoint startB = memberB->mapToScene(QPointF(24.0, memberB->height() / 2.0)).toPoint();
+	const QPoint outsidePt(8, 8);
+	QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, startB);
+	QTest::mouseMove(window, startB + QPoint(-12, 0));
+	QTest::mouseMove(window, outsidePt);
+	QTRY_COMPARE(stashDialog->property("dropTargetKind").toString(), u"outside"_s);
+	QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, outsidePt);
+	QTRY_VERIFY(f.workspace->stash()->groupIdsForSession(u"ses_b"_s).isEmpty());
+	QCOMPARE(f.workspace->sessions()->rowCount(), 1);
+	QTest::qWait(50);
+	QCOMPARE(f.workspace->dialog(), u"stash"_s);
 	QVERIFY2(warningSpy.isEmpty(), "Stash UI or split filter capsule emitted QML warnings");
 }
 
@@ -4343,7 +4449,24 @@ void TestMainWindow::floatingBallModeExpandsAndCollapsesInSingleWindowWithoutWar
 	ballWin->requestActivate();
 	QCoreApplication::processEvents();
 
-	// Click collapse button: same window collapses back to 56x56 ball.
+	// Foreground session is open: detach button is visible; clicking it moves session to background
+	// and reveals the running sessions list without warnings.
+	QVERIFY(f.workspace->current() != nullptr);
+	QQuickItem* detachBtn = nullptr;
+	QTRY_VERIFY([&] {
+		detachBtn = findItem(ballWin->contentItem(), [](QQuickItem* item) { return item->objectName() == u"floatingDetachButton"_s; });
+		return detachBtn != nullptr && detachBtn->isVisible();
+	}());
+	QQuickItem* sessionList = findItem(ballWin->contentItem(), [](QQuickItem* item) { return item->objectName() == u"floatingSessionList"_s; });
+	QVERIFY(sessionList);
+	QVERIFY(!sessionList->isVisible());
+	const QPoint detachCenter = detachBtn->mapToScene(QPointF(detachBtn->width() / 2.0, detachBtn->height() / 2.0)).toPoint();
+	QTest::mouseMove(ballWin, detachCenter);
+	QTest::mouseClick(ballWin, Qt::LeftButton, Qt::NoModifier, detachCenter, 20);
+	QTRY_VERIFY(f.workspace->current() == nullptr);
+	QTRY_VERIFY(sessionList->isVisible());
+
+	// Click collapse button while current() == nullptr: same window collapses back to 56x56 ball.
 	QQuickItem* collapseBtn = nullptr;
 	QTRY_VERIFY([&] {
 		collapseBtn = findItem(ballWin->contentItem(), [](QQuickItem* item) { return item->objectName() == u"floatingCollapseButton"_s; });
@@ -4358,12 +4481,13 @@ void TestMainWindow::floatingBallModeExpandsAndCollapsesInSingleWindowWithoutWar
 		       && ballRoot->isVisible() && !panelRoot->isVisible();
 	}());
 	QCOMPARE(window->findChild<QQuickWindow*>(u"floatingBallWindow"_s), ballWin);
+	QCOMPARE(f.workspace->current(), nullptr);
 	if(!QGuiApplication::platformName().startsWith(u"wayland"_s))
 	{
 		QCOMPARE(ballWin->position(), initialBallPos);
 	}
 
-	// Click ball again -> expands to 380x520, then return to full window.
+	// Click ball again -> expands to 380x520 without auto-attaching a background session.
 	QTest::mouseMove(ballWin, QPoint(28, 28));
 	QTest::mouseClick(ballWin, Qt::LeftButton, Qt::NoModifier, QPoint(28, 28), 20);
 	QTRY_VERIFY([&] {
@@ -4371,6 +4495,22 @@ void TestMainWindow::floatingBallModeExpandsAndCollapsesInSingleWindowWithoutWar
 		       && ballWin->width() == 380 && ballWin->height() == 520
 		       && panelRoot->isVisible() && !ballRoot->isVisible();
 	}());
+	QCOMPARE(f.workspace->current(), nullptr);
+	QTRY_VERIFY(sessionList->isVisible());
+
+	// Click a row in floatingSessionList -> opens session into foreground and hides the list.
+	QQuickItem* sessionRow = nullptr;
+	QTRY_VERIFY([&] {
+		sessionRow = findItem(sessionList, [](QQuickItem* item) {
+			return item->objectName() == u"floatingSessionRow"_s && item->isVisible() && item->height() > 0.0;
+		});
+		return sessionRow != nullptr;
+	}());
+	const QPoint rowCenter = sessionRow->mapToScene(QPointF(sessionRow->width() / 2.0, sessionRow->height() / 2.0)).toPoint();
+	QTest::mouseMove(ballWin, rowCenter);
+	QTest::mouseClick(ballWin, Qt::LeftButton, Qt::NoModifier, rowCenter, 20);
+	QTRY_VERIFY(f.workspace->current() != nullptr);
+	QTRY_VERIFY(!sessionList->isVisible());
 
 	QQuickItem* returnBtn = nullptr;
 	QTRY_VERIFY([&] {
