@@ -578,8 +578,8 @@ void TestSessionController::tracksActivelyWorkingAcrossStates()
 void TestSessionController::debouncedRangeFetchDiscardsStaleAndEvictsOnDetach()
 {
 	Fixture f;
-	constexpr int Total = 250;
-	constexpr int StartSeq = 150;
+	constexpr int Total = 1500;
+	constexpr int StartSeq = 500;
 	QJsonArray metas;
 	for(int i = 0; i < StartSeq; ++i)
 	{
@@ -605,7 +605,7 @@ void TestSessionController::debouncedRangeFetchDiscardsStaleAndEvictsOnDetach()
 
 	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
 	QCOMPARE(f.controller.model().slotCount(), Total);
-	QCOMPARE(f.controller.model().residentCount(), 100);
+	QCOMPARE(f.controller.model().residentCount(), 1000);
 	QVERIFY(!f.controller.hasMoreBefore());
 
 	QList<QJsonObject> heldMessages;
@@ -621,7 +621,7 @@ void TestSessionController::debouncedRangeFetchDiscardsStaleAndEvictsOnDetach()
 	QSignalSpy evictedSpy(&f.controller, &SessionController::messagesEvicted);
 	f.controller.setFollowing(false);
 	// Rapidly scrub twice inside 80ms debounce window: only one request fires.
-	// setVisibleSeqRange(10, 20) immediately evicts slots outside [0, 170], leaving 150..170 (21 messages).
+	// setVisibleSeqRange(10, 20) immediately evicts slots outside [0, 520], leaving 500..520 (21 messages).
 	f.controller.setVisibleSeqRange(10, 20);
 	QCOMPARE(evictedSpy.count(), 1);
 	QCOMPARE(f.controller.model().residentCount(), 21);
@@ -630,7 +630,7 @@ void TestSessionController::debouncedRangeFetchDiscardsStaleAndEvictsOnDetach()
 	QTRY_COMPARE(heldMessages.size(), 1);
 	const QJsonObject firstReq = heldMessages.takeFirst();
 
-	// Scrub to [0, 5] after first request is in-flight: evicts 156..170 (leaving 150..155 = 6) and increments generation.
+	// Scrub to [0, 5] after first request is in-flight: evicts 506..520 (leaving 500..505 = 6) and increments generation.
 	f.controller.setVisibleSeqRange(0, 5);
 	QCOMPARE(evictedSpy.count(), 2);
 	QCOMPARE(f.controller.model().residentCount(), 6);
@@ -644,7 +644,7 @@ void TestSessionController::debouncedRangeFetchDiscardsStaleAndEvictsOnDetach()
 	// Stale response must be ignored: u_stale must not appear.
 	QVERIFY(!render(f.controller.model()).contains(u"user:stale"_s));
 
-	// Respond to the current (second) request (0..100) -> materializes 100 messages (+ 6 in 150..155 = 106).
+	// Respond to the current (second) request (0..500) -> materializes 500 messages (+ 6 in 500..505 = 506).
 	const quint64 secondStart = static_cast<quint64>(secondReq.value(u"start_seq"_s).toInteger());
 	const quint64 secondEnd = static_cast<quint64>(secondReq.value(u"end_seq"_s).toInteger());
 	QJsonArray validPayload;
@@ -654,12 +654,12 @@ void TestSessionController::debouncedRangeFetchDiscardsStaleAndEvictsOnDetach()
 	}
 	f.fake.respond(secondReq, {{u"messages"_s, validPayload}, {u"more_before"_s, false}, {u"start_seq"_s, static_cast<qint64>(secondStart)}, {u"end_seq"_s, static_cast<qint64>(secondEnd)}});
 	QTRY_VERIFY(render(f.controller.model()).contains(u"user:loaded_0"_s));
-	QCOMPARE(f.controller.model().residentCount(), 106);
+	QCOMPARE(f.controller.model().residentCount(), 506);
 
-	// Detach calls evictOldTail(100), evicting slots 0..149 (the 100 loaded messages) and emitting messagesEvicted.
+	// Detach calls evictOldTail(1000), evicting slots 0..499 (the 500 loaded messages) and emitting messagesEvicted.
 	QVERIFY(await(f.controller.detach()));
 	QCOMPARE(evictedSpy.count(), 3);
-	QCOMPARE(evictedSpy.last().at(0).toStringList().size(), 100);
+	QCOMPARE(evictedSpy.last().at(0).toStringList().size(), 500);
 	QCOMPARE(f.controller.model().residentCount(), 6);
 	QCOMPARE(f.controller.model().index(0).data(ConversationModel::KindRole).toString(), u"skeleton"_s);
 }

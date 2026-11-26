@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { Message, MessageLayoutMeta, SessionEvent } from '../proto/generated'
 import type { Block } from './blocks.ts'
-import { EVICT_BUFFER, PAGE_SIZE, TAIL_KEEP_MESSAGES, Transcript } from './transcript.ts'
+import {
+  EVICT_BUFFER,
+  MAX_RESIDENT_MESSAGES,
+  PAGE_SIZE,
+  TAIL_KEEP_MESSAGES,
+  Transcript,
+} from './transcript.ts'
 import {
   assistantMessage,
   info,
@@ -511,7 +517,9 @@ describe('Transcript: sliding window and eviction', () => {
   })
 
   it('exports expected sliding-window constants', () => {
-    expect([PAGE_SIZE, TAIL_KEEP_MESSAGES, EVICT_BUFFER]).toEqual([100, 100, 150])
+    expect([PAGE_SIZE, MAX_RESIDENT_MESSAGES, TAIL_KEEP_MESSAGES, EVICT_BUFFER]).toEqual([
+      500, 1000, 1000, 500,
+    ])
   })
 
   it('populates 0..total_messages slots from layout_metas and messages, inserts ranges, and evicts outside window', () => {
@@ -555,6 +563,22 @@ describe('Transcript: sliding window and eviction', () => {
       'placeholder',
       'placeholder',
     ])
+  })
+
+  it('enforces MAX_RESIDENT_MESSAGES when more than 1000 slots fall inside keep window', () => {
+    const { transcript } = setup()
+    const messages = Array.from({ length: 1200 }, (_, i) => userMessage(`m${i}`, `msg ${i}`))
+    transcript.load(snapshot(messages))
+    transcript.flush(0)
+    expect(transcript.residentCount).toBe(1200)
+
+    const evicted = transcript.evictOutside(0, 1199)
+    transcript.flush(0)
+    expect(evicted).toHaveLength(200)
+    expect(transcript.residentCount).toBe(MAX_RESIDENT_MESSAGES)
+    expect(transcript.slots[0]?.kind).toBe('placeholder')
+    expect(transcript.slots[1199]?.kind).toBe('placeholder')
+    expect(transcript.slots[600]?.kind).toBe('materialized')
   })
 
   it('evicts older than newest keepCount via evictBeforeTail', () => {

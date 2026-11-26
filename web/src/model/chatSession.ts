@@ -25,7 +25,7 @@ import type {
 } from '../proto/generated'
 import type { Block } from './blocks.ts'
 import { QuestionForm } from './questionForm.ts'
-import { EVICT_BUFFER, TAIL_KEEP_MESSAGES, Transcript } from './transcript.ts'
+import { EVICT_BUFFER, PAGE_SIZE, TAIL_KEEP_MESSAGES, Transcript } from './transcript.ts'
 import type { TranscriptSlot } from './transcript.ts'
 // How this window is attached: `foreground` counts as a direct connection, `watching` only
 // receives events (split view tiles).
@@ -310,7 +310,7 @@ export class ChatSession {
     this.state.loadingOlder = true
     this.state.olderError = ''
     try {
-      const page = await this.deps.api().messagesBefore(this.id, before)
+      const page = await this.deps.api().messagesBefore(this.id, before, PAGE_SIZE)
       if (generation !== this.state.generation) return
       this.recordMessageImages(page.messages)
       this.transcript.prepend(page.messages, page.more_before, page.start_seq)
@@ -361,7 +361,7 @@ export class ChatSession {
     this.publish()
   }
 
-  // Trigger 1: scroll away -> evict outside [visibleStart - 150, visibleEnd + 150].
+  // Trigger 1: scroll away -> evict outside [visibleStart - 500, visibleEnd + 500].
   evictAround(visibleStart: number, visibleEnd: number): void {
     const evicted = this.transcript.evictOutside(
       Math.max(0, visibleStart - EVICT_BUFFER),
@@ -372,7 +372,7 @@ export class ChatSession {
     this.publish()
   }
 
-  // Trigger 2: settle at bottom while following -> evict older than total - 100.
+  // Trigger 2: settle at bottom while following -> evict older than total - 1000.
   evictAtBottom(): void {
     const evicted = this.transcript.evictBeforeTail(TAIL_KEEP_MESSAGES)
     if (evicted.length === 0) return

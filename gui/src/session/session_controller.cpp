@@ -12,8 +12,6 @@ namespace refgui::session
 namespace
 {
 
-// Messages asked for at a time when scrolling back; the server caps a page at 1000.
-constexpr int OlderPageSize = 100;
 constexpr std::chrono::milliseconds RangeFetchDebounceMs{80};
 
 // What a request that outlived its controller reports to whoever still waits for it.
@@ -155,7 +153,7 @@ QCoro::Task<SessionController::Result<void>> SessionController::loadOlder()
 	setLoadingOlder(true);
 	const QPointer<SessionController> self(this); // the controller can be gone when the page arrives
 	const QString sessionId = m_sessionId;
-	const auto page = co_await m_backend.client().messages(sessionId, before, OlderPageSize);
+	const auto page = co_await m_backend.client().messages(sessionId, before, ConversationModel::PageSize);
 	if(!self)
 	{
 		co_return std::unexpected(destroyedError());

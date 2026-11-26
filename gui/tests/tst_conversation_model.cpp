@@ -728,8 +728,8 @@ void TestConversationModel::virtualizedPlaceholdersMaterializeAndEvict()
 	ConversationModel model;
 	QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
 
-	constexpr int Total = 420;
-	constexpr int StartSeq = 320;
+	constexpr int Total = 1420;
+	constexpr int StartSeq = 1320;
 	QList<refgui::proto::MessageLayoutMeta> metas;
 	for(int i = 0; i < StartSeq; ++i)
 	{
@@ -766,27 +766,33 @@ void TestConversationModel::virtualizedPlaceholdersMaterializeAndEvict()
 	QVERIFY(missing.has_value());
 	QVERIFY(missing->first <= 10 && missing->second > 20);
 
-	// Materialize 300 messages at 0..300 so resident count is 400 -> evictOutside caps at 300 and drops outside [v-150, v+150].
+	// Materialize 1000 messages at 0..1000 so resident count is 1100 -> evictOutside caps at 1000 and drops outside [v-500, v+500].
 	QList<refgui::proto::Message> block0;
-	for(int i = 0; i < 300; ++i)
+	for(int i = 0; i < 1000; ++i)
 	{
 		const QString id = u"m_%1"_s.arg(i);
 		block0.append(i % 2 == 0 ? user(id, u"hello"_s) : assistant(id, {text(u"reply"_s)}));
 	}
 	model.materializeRange(0, block0);
-	QCOMPARE(model.residentCount(), 400);
+	QCOMPARE(model.residentCount(), 1100);
 
 	QSignalSpy evictedSpy(&model, &ConversationModel::messagesEvicted);
 	const QStringList evicted = model.evictOutside(10, 20);
 	QVERIFY(!evicted.isEmpty());
 	QVERIFY(model.residentCount() <= ConversationModel::MaxResidentMessages);
 	QCOMPARE(evictedSpy.count(), 1);
-	// Tail at 400 should have been evicted back to skeleton.
-	const int row400 = model.firstRowForSeq(400);
-	QCOMPARE(model.index(row400).data(ConversationModel::KindRole).toString(), u"skeleton"_s);
+	// Tail at 1400 should have been evicted back to skeleton.
+	const int row1400 = model.firstRowForSeq(1400);
+	QCOMPARE(model.index(row1400).data(ConversationModel::KindRole).toString(), u"skeleton"_s);
 
-	// Materialize tail again and test evictOldTail(100)
-	model.materializeRange(StartSeq, tail);
+	// Materialize 420..1420 (1000 newest messages) and test evictOldTail(1000).
+	QList<refgui::proto::Message> tailWindow;
+	for(int i = 420; i < Total; ++i)
+	{
+		const QString id = u"m_%1"_s.arg(i);
+		tailWindow.append(i % 2 == 0 ? user(id, u"hello"_s) : assistant(id, {text(u"reply"_s)}));
+	}
+	model.materializeRange(420, tailWindow);
 	model.evictOldTail(ConversationModel::TailKeepMessages);
 	QCOMPARE(model.residentCount(), ConversationModel::TailKeepMessages);
 	QCOMPARE(model.index(0).data(ConversationModel::KindRole).toString(), u"skeleton"_s);
@@ -797,7 +803,7 @@ void TestConversationModel::evictOutsideCapsResidentInsideKeepWindow()
 	ConversationModel model;
 	QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
 
-	constexpr int Total = 420;
+	constexpr int Total = 1420;
 	QList<refgui::proto::MessageLayoutMeta> metas;
 	metas.reserve(Total);
 	for(int i = 0; i < Total; ++i)
@@ -813,9 +819,9 @@ void TestConversationModel::evictOutsideCapsResidentInsideKeepWindow()
 	model.reset({}, Total, Total, metas);
 	QCOMPARE(model.residentCount(), 0);
 
-	// Materialize 311 messages inside [200 - 150, 210 + 150] = [50, 360].
-	constexpr int KeepStart = 50;
-	constexpr int KeepEnd = 360;
+	// Materialize 1011 messages inside [700 - 500, 710 + 500] = [200, 1210].
+	constexpr int KeepStart = 200;
+	constexpr int KeepEnd = 1210;
 	QList<refgui::proto::Message> windowMsgs;
 	windowMsgs.reserve(KeepEnd - KeepStart + 1);
 	for(int i = KeepStart; i <= KeepEnd; ++i)
@@ -824,16 +830,16 @@ void TestConversationModel::evictOutsideCapsResidentInsideKeepWindow()
 		windowMsgs.append(i % 2 == 0 ? user(id, u"hello"_s) : assistant(id, {text(u"reply"_s)}));
 	}
 	model.materializeRange(KeepStart, windowMsgs);
-	QCOMPARE(model.residentCount(), 311);
+	QCOMPARE(model.residentCount(), 1011);
 
 	QSignalSpy evictedSpy(&model, &ConversationModel::messagesEvicted);
-	const QStringList evicted = model.evictOutside(200, 210);
+	const QStringList evicted = model.evictOutside(700, 710);
 	QCOMPARE(evicted.size(), 11);
 	QCOMPARE(model.residentCount(), ConversationModel::MaxResidentMessages);
 	QCOMPARE(evictedSpy.count(), 1);
-	QCOMPARE(model.index(model.firstRowForSeq(50)).data(ConversationModel::KindRole).toString(), u"skeleton"_s);
-	QCOMPARE(model.index(model.firstRowForSeq(360)).data(ConversationModel::KindRole).toString(), u"skeleton"_s);
-	QVERIFY(model.index(model.firstRowForSeq(205)).data(ConversationModel::KindRole).toString() != u"skeleton"_s);
+	QCOMPARE(model.index(model.firstRowForSeq(200)).data(ConversationModel::KindRole).toString(), u"skeleton"_s);
+	QCOMPARE(model.index(model.firstRowForSeq(1210)).data(ConversationModel::KindRole).toString(), u"skeleton"_s);
+	QVERIFY(model.index(model.firstRowForSeq(705)).data(ConversationModel::KindRole).toString() != u"skeleton"_s);
 }
 
 QTEST_GUILESS_MAIN(TestConversationModel)

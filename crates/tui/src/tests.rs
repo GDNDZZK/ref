@@ -4641,26 +4641,26 @@ fn history_range_is_requested_once_when_scrolled_to_placeholders() {
 
 #[test]
 fn history_range_materializes_slots_and_preserves_anchor() {
-    let (mut app, old, _) = history_app_with_count(100, 20);
+    let (mut app, old, _) = history_app_with_count(300, 20);
     let sid = TEST_SESSION;
     scroll_to_top_and_load_older(&mut app);
     let (id, start_seq, end_seq) = range_request(&app).expect("range requested");
-    assert_eq!((start_seq, end_seq), (0, 100));
+    assert_eq!((start_seq, end_seq), (0, 500));
 
     respond_to_range(
         &mut app,
         id,
         json!({
-            "messages": old[0..100].to_vec(),
+            "messages": old[0..500].to_vec(),
             "more_before": false,
             "start_seq": 0,
-            "end_seq": 100,
+            "end_seq": 500,
         }),
     );
-    assert_eq!(app.views[sid].slots.len(), 240);
-    assert_eq!(app.views[sid].resident_count(), 140);
+    assert_eq!(app.views[sid].slots.len(), 640);
+    assert_eq!(app.views[sid].resident_count(), 540);
     assert_eq!(app.views[sid].slots[0].id(), "hu0");
-    assert!(!app.views[sid].slots[100].is_materialized());
+    assert!(!app.views[sid].slots[500].is_materialized());
 
     // Rendering materializes the top and leaves no pending range while looking at 0..100.
     let (_, s) = render(&mut app, 100, 30);

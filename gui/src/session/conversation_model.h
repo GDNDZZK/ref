@@ -87,10 +87,11 @@ public:
 		HasErrorRole,        // whether the placeholder message ended with an error
 	};
 
-	static constexpr qsizetype PageSize = 100;
-	static constexpr qsizetype MaxResidentMessages = 300;
-	static constexpr qsizetype TailKeepMessages = 100;
-	static constexpr qsizetype EvictMargin = 150;
+	static constexpr qsizetype PageSize = 500;
+	static_assert(PageSize <= 1000); // matches ref_proto::PAGE_MAX
+	static constexpr qsizetype MaxResidentMessages = 1000;
+	static constexpr qsizetype TailKeepMessages = 1000;
+	static constexpr qsizetype EvictMargin = 500;
 	explicit ConversationModel(QObject* parent = nullptr);
 
 	// What the tool calls ask of the user, for the keys and the status line.

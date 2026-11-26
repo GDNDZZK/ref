@@ -3,6 +3,7 @@ import type { RefApi } from '../net/api.ts'
 import { RefError } from '../net/connection.ts'
 import { ChatSession } from './chatSession.ts'
 import { assistantMessage, info, snapshot, userMessage } from './testMessages.ts'
+import { PAGE_SIZE } from './transcript.ts'
 
 const FRAME_WAIT_MS = 60 // the session shows changes on the next animation frame
 const afterFrame = () => new Promise((resolve) => setTimeout(resolve, FRAME_WAIT_MS))
@@ -123,7 +124,7 @@ describe('ChatSession', () => {
     expect(session.moreBefore).toBe(true)
     await session.loadOlder()
     await afterFrame()
-    expect(messagesBefore).toHaveBeenCalledWith('ses_1', 'u2')
+    expect(messagesBefore).toHaveBeenCalledWith('ses_1', 'u2', PAGE_SIZE)
     expect(session.moreBefore).toBe(false)
     expect(session.blocks.map((block) => block.key)).toEqual(['u1:user', 'u1:meta', 'u2:user', 'u2:meta'])
   })
@@ -302,7 +303,7 @@ describe('ChatSession', () => {
 
   it('evicts outside window, drops evicted image caches, evicts at bottom, and trims on detach', async () => {
     const { api, session } = setup()
-    const messages = Array.from({ length: 200 }, (_, i) => ({
+    const messages = Array.from({ length: 1200 }, (_, i) => ({
       ...userMessage(`m${i}`, `text ${i}`),
       parts: [
         { type: 'text' as const, text: `text ${i}`, time: 0 },
@@ -318,25 +319,26 @@ describe('ChatSession', () => {
     Object.assign(api, { getImage })
     await session.attach(true)
     await session.imageUrl('img_0')
-    await session.imageUrl('img_199')
+    await session.imageUrl('img_1199')
     expect(getImage).toHaveBeenCalledTimes(2)
 
-    // Evict around [180, 199] -> keeps [30..199], evicts 0..29 (including img_0).
-    session.evictAround(180, 199)
-    expect(session.residentCount).toBe(170)
-    await session.imageUrl('img_199')
+    // Evict around [1180, 1199] -> keeps [680..1199], evicts 0..679 (including img_0).
+    session.evictAround(1180, 1199)
+    expect(session.residentCount).toBe(520)
+    await session.imageUrl('img_1199')
     expect(getImage).toHaveBeenCalledTimes(2) // still cached
     await session.imageUrl('img_0')
     expect(getImage).toHaveBeenCalledTimes(3) // evicted -> re-fetched
 
-    // Evict at bottom keeps newest 100.
+    // Re-attach to restore full window, then evict at bottom keeps newest 1000.
+    await session.attach(true)
     session.evictAtBottom()
-    expect(session.residentCount).toBe(100)
+    expect(session.residentCount).toBe(1000)
 
-    // Detach evicts all but newest 100 and clears image cache.
+    // Detach evicts all but newest 1000 and clears image cache.
     await session.detach()
-    expect(session.residentCount).toBe(100)
-    await session.imageUrl('img_199')
+    expect(session.residentCount).toBe(1000)
+    await session.imageUrl('img_1199')
     expect(getImage).toHaveBeenCalledTimes(4)
   })
 

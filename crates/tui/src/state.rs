@@ -12,14 +12,15 @@ use ref_proto::{
 use crate::ui::chat::ChatState;
 use crate::util::apply_delta;
 
-/// Messages per page for `Attach` and `Messages` range queries.
-pub const PAGE_SIZE: usize = ref_proto::PAGE_DEFAULT;
+/// Messages per page for `Attach` and `Messages` range queries (<= `ref_proto::PAGE_MAX`).
+pub const PAGE_SIZE: usize = 500;
+const _: () = assert!(PAGE_SIZE <= ref_proto::PAGE_MAX);
 /// Maximum materialized messages kept in a `SessionView` before evicting distant slots.
-pub const MAX_RESIDENT_MESSAGES: usize = 300;
+pub const MAX_RESIDENT_MESSAGES: usize = 1000;
 /// Newest messages retained when returning to the bottom or detaching.
-pub const TAIL_KEEP_MESSAGES: usize = 100;
+pub const TAIL_KEEP_MESSAGES: usize = 1000;
 /// Resident margin kept around the visible sequence range before eviction.
-const EVICT_MARGIN: usize = 150;
+const EVICT_MARGIN: usize = 500;
 /// Debounce before sending a viewport-driven `Request::Messages` range query.
 pub const RANGE_DEBOUNCE: Duration = Duration::from_millis(80);
 
@@ -565,7 +566,7 @@ impl SessionView {
         changed
     }
 
-    /// Evicts materialized messages outside `[visible_start - 150, visible_end + 150]` back to
+    /// Evicts materialized messages outside `[visible_start - EVICT_MARGIN, visible_end + EVICT_MARGIN]` back to
     /// `Placeholder` when resident count exceeds `MAX_RESIDENT_MESSAGES`.
     pub fn evict_outside(&mut self, visible_start: usize, visible_end: usize) {
         let mut resident = self.resident_count();
@@ -1128,7 +1129,7 @@ mod tests {
     #[test]
     fn eviction_and_trim_bound_resident_messages() {
         let mut v = SessionView::new(info(), true);
-        let total = 450usize;
+        let total = 1450usize;
         let msgs: Vec<Message> = (0..total)
             .map(|i| {
                 let mut m = msg(&format!("m{i}"), Role::User);
@@ -1156,13 +1157,13 @@ mod tests {
         v.evict_outside(10, 20);
         assert!(v.resident_count() <= MAX_RESIDENT_MESSAGES);
         assert!(v.slots[15].is_materialized());
-        assert!(!v.slots[440].is_materialized());
+        assert!(!v.slots[1440].is_materialized());
 
         // Trim to tail keeps only newest TAIL_KEEP_MESSAGES.
-        v.slots[440] = MessageSlot::Materialized(Box::new(msg("m440", Role::User)));
+        v.slots[1440] = MessageSlot::Materialized(Box::new(msg("m1440", Role::User)));
         v.trim_to_tail(TAIL_KEEP_MESSAGES);
         assert!(!v.slots[15].is_materialized());
-        assert!(v.slots[440].is_materialized());
+        assert!(v.slots[1440].is_materialized());
         assert!(v.more_before);
     }
     #[test]

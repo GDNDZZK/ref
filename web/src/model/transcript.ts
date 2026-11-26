@@ -27,9 +27,10 @@ import { PartView } from './partView.ts'
 import { StreamPacer } from './streamPacer.ts'
 import { partialPurpose } from './toolArgs.ts'
 
-export const PAGE_SIZE = 100
-export const TAIL_KEEP_MESSAGES = 100
-export const EVICT_BUFFER = 150
+export const PAGE_SIZE = 500
+export const MAX_RESIDENT_MESSAGES = 1000
+export const TAIL_KEEP_MESSAGES = 1000
+export const EVICT_BUFFER = 500
 
 export type TranscriptSlot =
   | {
@@ -259,31 +260,52 @@ export class Transcript {
     this.structureChanged = true
   }
 
-  // Evicts materialized messages outside [keepStart, keepEnd] inclusive, converting them to placeholders.
+  // Evicts materialized messages outside [keepStart, keepEnd] inclusive and enforces
+  // MAX_RESIDENT_MESSAGES by evicting the farthest slots from the window midpoint.
   evictOutside(keepStart: number, keepEnd: number): string[] {
     const evicted: string[] = []
+    const remaining: number[] = []
     for (let i = 0; i < this.slotModels.length; i++) {
       const slot = this.slotModels[i]!
       if (slot.kind !== 'materialized') continue
-      if (slot.seq >= keepStart && slot.seq <= keepEnd) continue
-      const message = slot.entry.entry.message
-      const id = message.id
-      slot.entry.entry.views.forEach((_view, index) => this.pacer.discard(streamKey(id, index)))
-      this.byId.delete(id)
-      this.dirty.delete(id)
-      this.pacedMessages.delete(id)
-      this.slotModels[i] = {
-        kind: 'placeholder',
-        seq: slot.seq,
-        id,
-        meta: layoutMetaFromMessage(slot.seq, message),
+      if (slot.seq >= keepStart && slot.seq <= keepEnd) {
+        remaining.push(i)
+        continue
       }
-      evicted.push(id)
+      evicted.push(this.evictSlotAt(i))
+    }
+    if (remaining.length > MAX_RESIDENT_MESSAGES) {
+      const midpoint = (keepStart + keepEnd) / 2
+      remaining.sort(
+        (a, b) => Math.abs(this.slotModels[b]!.seq - midpoint) - Math.abs(this.slotModels[a]!.seq - midpoint),
+      )
+      const excess = remaining.length - MAX_RESIDENT_MESSAGES
+      for (let i = 0; i < excess; i++) {
+        evicted.push(this.evictSlotAt(remaining[i]!))
+      }
     }
     if (evicted.length === 0) return evicted
     this.rebuildEntriesOrder()
     this.structureChanged = true
     return evicted
+  }
+
+  private evictSlotAt(index: number): string {
+    const slot = this.slotModels[index]!
+    if (slot.kind !== 'materialized') return ''
+    const message = slot.entry.entry.message
+    const id = message.id
+    slot.entry.entry.views.forEach((_view, partIndex) => this.pacer.discard(streamKey(id, partIndex)))
+    this.byId.delete(id)
+    this.dirty.delete(id)
+    this.pacedMessages.delete(id)
+    this.slotModels[index] = {
+      kind: 'placeholder',
+      seq: slot.seq,
+      id,
+      meta: layoutMetaFromMessage(slot.seq, message),
+    }
+    return id
   }
 
   // Evicts materialized messages older than the newest `keepCount`.
