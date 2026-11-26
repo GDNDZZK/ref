@@ -25,6 +25,25 @@ void TileStage::setLingerMs(int lingerMs)
 	emit lingerMsChanged();
 }
 
+void TileStage::setRetainedIds(const QSet<QString>& ids)
+{
+	m_retainedIds = ids;
+	for(int i = static_cast<int>(m_rows.size()) - 1; i >= 0; --i)
+	{
+		if(m_rows[i].leaving && m_rows[i].deferredRetire && !m_retainedIds.contains(m_rows[i].sessionId))
+		{
+			const Row row = m_rows[i];
+			beginRemoveRows({}, i, i);
+			m_rows.removeAt(i);
+			endRemoveRows();
+			if(row.deleteSession && row.session)
+			{
+				row.session->deleteLater();
+			}
+		}
+	}
+}
+
 int TileStage::rowOf(const ChatSession* session) const
 {
 	for(int i = 0; i < m_rows.size(); ++i)
@@ -55,6 +74,7 @@ void TileStage::sync()
 		if(row.leaving || row.place != place)
 		{
 			row.leaving = false;
+			row.deferredRetire = false;
 			row.place = place;
 			emit dataChanged(index(i), index(i), {LeavingRole, PlaceRole});
 		}
@@ -90,6 +110,11 @@ void TileStage::retire(const QString& sessionId, int leaveSerial)
 	{
 		if(m_rows[i].sessionId == sessionId && m_rows[i].leaving && m_rows[i].leaveSerial == leaveSerial)
 		{
+			if(!m_rows[i].deleteSession && m_retainedIds.contains(sessionId))
+			{
+				m_rows[i].deferredRetire = true;
+				return;
+			}
 			const Row row = m_rows[i];
 			beginRemoveRows({}, i, i);
 			m_rows.removeAt(i);
@@ -108,6 +133,14 @@ void TileStage::deleteWhenLeft(ChatSession* session)
 	const int row = rowOf(session);
 	if(row < 0 || !m_rows[row].leaving)
 	{
+		session->deleteLater();
+		return;
+	}
+	if(m_rows[row].deferredRetire)
+	{
+		beginRemoveRows({}, row, row);
+		m_rows.removeAt(row);
+		endRemoveRows();
 		session->deleteLater();
 		return;
 	}

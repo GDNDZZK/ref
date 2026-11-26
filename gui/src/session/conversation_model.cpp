@@ -1040,11 +1040,23 @@ void ConversationModel::setColumnWidth(double width)
 
 void ConversationModel::emitSkeletonHeightsChanged()
 {
-	if(rowCount() <= 0)
+	int first = -1;
+	int last = -1;
+	for(qsizetype i = 0; i < m_rows.size(); ++i)
 	{
-		return;
+		if(m_rows.at(i).kind == Block::Kind::Skeleton)
+		{
+			if(first < 0)
+			{
+				first = static_cast<int>(i);
+			}
+			last = static_cast<int>(i);
+		}
 	}
-	emit dataChanged(index(0), index(rowCount() - 1), {EstimatedHeightRole});
+	if(first >= 0)
+	{
+		emit dataChanged(index(first), index(last), {EstimatedHeightRole});
+	}
 }
 
 bool ConversationModel::hasPlaceholders() const

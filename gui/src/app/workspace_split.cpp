@@ -9,6 +9,21 @@
 
 using refgui::client::Result;
 using namespace Qt::StringLiterals;
+namespace
+{
+bool matchesSplitFilter(const refgui::proto::SessionInfo& info, const QString& filter)
+{
+	if(filter == u"user"_s)
+	{
+		return !info.parent || info.parent->isEmpty();
+	}
+	if(filter != u"all"_s && !filter.isEmpty())
+	{
+		return info.parent && *info.parent == filter;
+	}
+	return true;
+}
+} // namespace
 
 void Workspace::toggleSplit()
 {
@@ -55,6 +70,7 @@ QCoro::Task<> Workspace::leaveSplit(bool adoptZoomed, QString openId)
 	const bool wasZoomed = !m_zoomed.isEmpty();
 	m_zoomed.clear();
 	setFocusedTile({});
+	m_stage.setRetainedIds({});
 	m_tiles.setTiles({});
 	m_directory.live().setTileIds({});
 	updateHighlight();
@@ -110,29 +126,20 @@ QCoro::Task<> Workspace::leaveSplit(bool adoptZoomed, QString openId)
 	}
 }
 
-// The sessions to show, oldest first: live background sessions nobody is attached to, excluding the current one.
-QStringList Workspace::wantedTileIds() const
+// Live, free background sessions excluding the current and leaving ones, oldest first.
+QStringList Workspace::collectTileIds(bool applyFilter) const
 {
 	QList<const refgui::proto::SessionInfo*> infos;
+	const QString currentSessionId = currentId();
 	for(const refgui::proto::SessionInfo& info : m_directory.liveSessions())
 	{
-		if(info.id == currentId())
+		if(info.id == currentSessionId || m_leaving.contains(info.id))
 		{
 			continue;
 		}
-		if(m_splitFilter == u"user"_s)
+		if(applyFilter && !matchesSplitFilter(info, m_splitFilter))
 		{
-			if(info.parent && !info.parent->isEmpty())
-			{
-				continue;
-			}
-		}
-		else if(m_splitFilter != u"all"_s && !m_splitFilter.isEmpty())
-		{
-			if(!info.parent || *info.parent != m_splitFilter)
-			{
-				continue;
-			}
+			continue;
 		}
 		// While unzooming, the backend still counts the session as foreground until detach is answered.
 		const bool free = info.attached == 0 || info.id == m_zoomed || m_unzooming.contains(info.id);
@@ -143,11 +150,22 @@ QStringList Workspace::wantedTileIds() const
 	}
 	std::ranges::sort(infos, [](const auto* a, const auto* b) { return a->createdAt != b->createdAt ? a->createdAt < b->createdAt : a->id < b->id; });
 	QStringList ids;
+	ids.reserve(infos.size());
 	for(const auto* info : infos)
 	{
 		ids.append(info->id);
 	}
 	return ids;
+}
+
+QStringList Workspace::backgroundTileIds() const
+{
+	return collectTileIds(false);
+}
+
+QStringList Workspace::wantedTileIds() const
+{
+	return collectTileIds(true);
 }
 
 QString Workspace::splitFilterLabel() const
@@ -212,19 +230,31 @@ void Workspace::syncTiles()
 		return;
 	}
 	const QStringList wanted = wantedTileIds();
+	if(!m_zoomed.isEmpty() && !wanted.contains(m_zoomed))
+	{
+		if(m_leaving.contains(m_zoomed))
+		{
+			m_zoomed.clear();
+			emit zoomedChanged();
+			updateCommandContext();
+		}
+		else
+		{
+			unzoom();
+		}
+	}
+	const QStringList allBackground = backgroundTileIds();
+	const QSet<QString> retained(allBackground.begin(), allBackground.end());
+	m_stage.setRetainedIds(retained);
+
 	QList<ChatSession*> tiles;
-	QStringList ids;
+	tiles.reserve(wanted.size());
 	for(const QString& id : wanted)
 	{
-		if(m_leaving.contains(id))
-		{
-			continue;
-		}
 		tiles.append(&chat(id));
-		ids.append(id);
 	}
 	m_tiles.setTiles(tiles);
-	m_directory.live().setTileIds(ids);
+	m_directory.live().setTileIds(wanted);
 
 	for(ChatSession* tile : std::as_const(tiles))
 	{
@@ -235,17 +265,12 @@ void Workspace::syncTiles()
 	}
 	for(ChatSession* other : std::as_const(m_chats))
 	{
-		const bool shouldDetachFromTiles = other->isAttached() && !tiles.contains(other) && other != m_current && !m_leaving.contains(other->sessionId());
+		const QString otherId = other->sessionId();
+		const bool shouldDetachFromTiles = other->isAttached() && !retained.contains(otherId) && other != m_current && !m_leaving.contains(otherId);
 		if(shouldDetachFromTiles)
 		{
 			detachUnwaited(other);
 		}
-	}
-	if(!m_zoomed.isEmpty() && m_tiles.indexOf(m_zoomed) < 0)
-	{
-		m_zoomed.clear();
-		emit zoomedChanged();
-		updateCommandContext();
 	}
 	if(!m_focusedTile.isEmpty() && m_tiles.indexOf(m_focusedTile) < 0)
 	{

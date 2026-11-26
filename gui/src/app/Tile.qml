@@ -60,7 +60,6 @@ Item {
 	property bool resizingLayout: false
 	property real settledLayoutWidth: 0
 	readonly property int resizeSettleMs: 130
-	readonly property real pixelScale: Math.max(1, (Screen.devicePixelRatio || 1) * UiScale.factor)
 	x: expanded ? zoomRect.x : placedSlot.x
 	y: expanded ? zoomRect.y : placedSlot.y
 	width: targetWidth
@@ -134,7 +133,7 @@ Item {
 
 	Timer {
 		id: resizeSettleTimer
-		interval: tile.resizeSettleMs
+		interval: tile.resizeSettleMs + (tile.place % 4) * 16
 		onTriggered: tile.finishResizeLayout()
 	}
 
@@ -177,7 +176,7 @@ Item {
 	Ticker {
 		id: ticker
 		interval: Format.msPerSecond
-		running: tile.facts.busySince > 0 && tile.visible
+		running: tile.facts.busySince > 0 && tile.visible && !tile.leaving
 	}
 
 	Rectangle {
@@ -187,9 +186,6 @@ Item {
 		color: Theme.background
 		border.width: tile.targetBorderWidth
 		border.color: tile.fading ? Theme.background : (tile.focused || tile.expanded ? Theme.accentText : (tile.hasRoot ? tile.rootColor : Theme.border))
-		layer.enabled: !tile.travelling && (tile.fading || tile.othersZoomed)
-		layer.smooth: true
-		layer.textureSize: Qt.size(Math.max(1, Math.ceil(width * tile.pixelScale)), Math.max(1, Math.ceil(height * tile.pixelScale)))
 
 		Behavior on radius { NumberAnimation { duration: tile.travelDuration; easing.type: Motion.ease } }
 		Behavior on border.color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }

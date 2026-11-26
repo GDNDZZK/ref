@@ -297,8 +297,8 @@ void Workspace::applyBackendSwitch(refgui::client::Backend::Source source)
 	{
 		setFocusedTile({});
 	}
+	m_stage.setRetainedIds({});
 	m_tiles.setTiles({});
-	m_directory.live().setTileIds({});
 	if(wasZoomed)
 	{
 		emit zoomedChanged();

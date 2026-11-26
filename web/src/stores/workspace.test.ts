@@ -648,6 +648,61 @@ describe('stash groups and splitFilter', () => {
     await workspace.restoreGroup('g1')
     expect(workspace.groups).toEqual([])
   })
+
+  it('keeps background sessions attached across splitFilter switches until leaving split', async () => {
+    const workspace = setup([
+      session('ses_cur', { attached: 0, parent: null }),
+      session('ses_1', { attached: 0, parent: null }),
+      session('ses_2', { attached: 0, parent: 'ses_1' }),
+      session('ses_3', { attached: 0, parent: 'ses_other' }),
+    ])
+    await workspace.openSession('ses_cur')
+    await workspace.enterSplit()
+    workspace.onFrame({
+      kind: 'sessions',
+      sessions: [
+        session('ses_cur', { attached: 1, parent: null }),
+        session('ses_1', { attached: 0, parent: null }),
+        session('ses_2', { attached: 0, parent: 'ses_1' }),
+        session('ses_3', { attached: 0, parent: 'ses_other' }),
+      ],
+    })
+    expect(workspace.allSplitTileIds).toEqual(['ses_1', 'ses_2', 'ses_3'])
+    expect(workspace.tileIds).toEqual(['ses_1', 'ses_2', 'ses_3'])
+    expect(workspace.chat('ses_1').attachment).toBe('watching')
+    expect(workspace.chat('ses_2').attachment).toBe('watching')
+    expect(workspace.chat('ses_3').attachment).toBe('watching')
+
+    api.attach.mockClear()
+    api.detach.mockClear()
+
+    workspace.setSplitFilter('user')
+    await nextTick()
+    await Promise.resolve()
+    expect(workspace.tileIds).toEqual(['ses_1'])
+    expect(workspace.allSplitTileIds).toEqual(['ses_1', 'ses_2', 'ses_3'])
+    expect(api.detach).not.toHaveBeenCalled()
+    expect(api.attach).not.toHaveBeenCalled()
+
+    workspace.setSplitFilter('ses_1')
+    await nextTick()
+    await Promise.resolve()
+    expect(workspace.tileIds).toEqual(['ses_2'])
+    expect(api.detach).not.toHaveBeenCalled()
+    expect(api.attach).not.toHaveBeenCalled()
+
+    workspace.setSplitFilter('all')
+    await nextTick()
+    await Promise.resolve()
+    expect(workspace.tileIds).toEqual(['ses_1', 'ses_2', 'ses_3'])
+    expect(api.detach).not.toHaveBeenCalled()
+    expect(api.attach).not.toHaveBeenCalled()
+
+    await workspace.leaveSplit()
+    expect(api.detach).toHaveBeenCalledWith('ses_1')
+    expect(api.detach).toHaveBeenCalledWith('ses_2')
+    expect(api.detach).toHaveBeenCalledWith('ses_3')
+  })
 })
 
 describe('cross-directory config sync', () => {

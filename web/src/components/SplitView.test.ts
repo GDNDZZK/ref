@@ -11,8 +11,8 @@ import { useWorkspaceStore } from '../stores/workspace.ts'
 import SplitView from './SplitView.vue'
 
 const TileStub = {
-  props: ['session', 'focused'],
-  template: '<div class="tile" :data-tile="session.id" :class="{ focused }" />',
+  props: ['session', 'focused', 'hidden'],
+  template: '<div class="tile" :data-tile="session.id" :class="{ focused, hidden }" />',
 }
 
 describe('SplitView', () => {
@@ -284,5 +284,86 @@ describe('SplitView', () => {
     await nextTick()
     expect(wrapper.get('.split').classes()).not.toContain('with-top-chrome')
     wrapper.unmount()
+  })
+
+  it('keeps filtered-out tiles mounted and hidden at their last rect until leaving live', async () => {
+    const observers: ResizeObserverCallback[] = []
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          observers.push(callback)
+        }
+        observe() {}
+        disconnect() {}
+      },
+    )
+    try {
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      const workspace = useWorkspaceStore()
+      workspace.onFrame({
+        kind: 'sessions',
+        sessions: [
+          info({ id: 's1', name: 'main', attached: 1, parent: null }),
+          info({ id: 's2', name: 'user-bg', created_at: 2, attached: 0, parent: null }),
+          info({ id: 's3', name: 'child-bg', created_at: 3, attached: 0, parent: 's1' }),
+        ],
+      })
+      workspace.currentId = 's1'
+      workspace.mode = 'split'
+
+      const wrapper = mount(SplitView, {
+        global: { plugins: [pinia, createAppI18n(['en'])], stubs: { SplitTile: TileStub } },
+      })
+      observers[0]!(
+        [{ contentRect: { width: 1200, height: 600 } } as ResizeObserverEntry],
+        {} as ResizeObserver,
+      )
+      await nextTick()
+
+      const s3Tile = wrapper.get('[data-tile="s3"]')
+      const s3Element = s3Tile.element
+      const s3Style = s3Tile.attributes('style')
+      expect(s3Tile.classes()).not.toContain('hidden')
+      expect(s3Tile.classes()).not.toContain('filtered-out')
+      expect(s3Tile.attributes('inert')).toBeUndefined()
+
+      workspace.setSplitFilter('user')
+      await nextTick()
+      expect(wrapper.findAll('[data-tile]')).toHaveLength(2)
+      const s3Hidden = wrapper.get('[data-tile="s3"]')
+      expect(s3Hidden.element).toBe(s3Element)
+      expect(s3Hidden.classes()).toContain('hidden')
+      expect(s3Hidden.classes()).toContain('filtered-out')
+      expect(s3Hidden.attributes('inert')).toBeDefined()
+      expect(s3Hidden.attributes('style')).toBe(s3Style)
+      expect(wrapper.get('[data-tile="s2"]').classes()).not.toContain('hidden')
+
+      workspace.setSplitFilter('all')
+      await nextTick()
+      const s3Restored = wrapper.get('[data-tile="s3"]')
+      expect(s3Restored.element).toBe(s3Element)
+      expect(s3Restored.classes()).not.toContain('hidden')
+      expect(s3Restored.classes()).not.toContain('filtered-out')
+      expect(s3Restored.attributes('inert')).toBeUndefined()
+
+      workspace.setSplitFilter('user')
+      await nextTick()
+      expect(wrapper.find('[data-tile="s3"]').exists()).toBe(true)
+      workspace.onFrame({
+        kind: 'sessions',
+        sessions: [
+          info({ id: 's1', name: 'main', attached: 1, parent: null }),
+          info({ id: 's2', name: 'user-bg', created_at: 2, attached: 0, parent: null }),
+        ],
+      })
+      await nextTick()
+      expect(wrapper.find('[data-tile="s3"]').exists()).toBe(false)
+      expect(wrapper.findAll('[data-tile]')).toHaveLength(1)
+      wrapper.unmount()
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

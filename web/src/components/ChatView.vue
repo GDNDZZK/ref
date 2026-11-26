@@ -211,11 +211,35 @@ function measureRenderedMessages(): void {
   if (changed) measuredHeights.value = current
 }
 
-// Recompute estimates synchronously on column width or fold changes with zero network requests.
-watch([columnWidth, () => props.session.thinkingExpanded, () => props.session.detailsExpanded], () => {
+const WIDTH_SETTLE_MS = 150
+let measureFrame: number | undefined
+let widthSettleTimer: ReturnType<typeof setTimeout> | undefined
+
+function scheduleMeasureRendered(): void {
+  if (measureFrame !== undefined) return
+  measureFrame = requestAnimationFrame(() => {
+    measureFrame = undefined
+    measureRenderedMessages()
+  })
+}
+
+// Recompute estimates synchronously on fold changes with zero network requests.
+watch([() => props.session.thinkingExpanded, () => props.session.detailsExpanded], () => {
   if (!virtualized.value) return
   measuredHeights.value = new Map()
   void nextTick(measureRenderedMessages)
+})
+
+// Debounce clearing measured heights across tile reflow transition frames.
+watch(columnWidth, () => {
+  if (!virtualized.value) return
+  clearTimeout(widthSettleTimer)
+  widthSettleTimer = setTimeout(() => {
+    widthSettleTimer = undefined
+    if (!virtualized.value) return
+    measuredHeights.value = new Map()
+    void nextTick(measureRenderedMessages)
+  }, WIDTH_SETTLE_MS)
 })
 
 // --- Rows that appeared after the history was loaded play their entrance; rows that went away
@@ -440,7 +464,7 @@ function pinToEnd(): void {
 
 const sizeObserver = new ResizeObserver((entries) => {
   syncViewportMetrics()
-  if (virtualized.value) measureRenderedMessages()
+  if (virtualized.value) scheduleMeasureRendered()
   const viewportResized = entries.some((entry) => entry.target === scroller.value)
   if (following.value && !gesturing && viewportResized) pinToEnd()
   else chaseEnd()
@@ -612,6 +636,11 @@ onBeforeUnmount(() => {
   clearTimeout(gestureTimer)
   clearTimeout(settleEvictTimer)
   clearTimeout(fadeClearTimer)
+  clearTimeout(widthSettleTimer)
+  if (measureFrame !== undefined) {
+    cancelAnimationFrame(measureFrame)
+    measureFrame = undefined
+  }
 })
 </script>
 

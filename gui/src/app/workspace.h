@@ -346,7 +346,9 @@ private:
 	QCoro::Task<> zoomTask(QString sessionId);
 	QCoro::Task<> unzoomTask();
 	void syncTiles();
+	QStringList backgroundTileIds() const;
 	QStringList wantedTileIds() const;
+	QStringList collectTileIds(bool applyFilter) const;
 	void setFocusedTile(const QString& sessionId);
 	void applyBackendSwitch(refgui::client::Backend::Source source);
 

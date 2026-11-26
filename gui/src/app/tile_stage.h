@@ -3,6 +3,7 @@
 #include <QAbstractListModel>
 #include <QList>
 #include <QPointer>
+#include <QSet>
 #include <QString>
 #include <QtQmlIntegration>
 
@@ -35,6 +36,7 @@ public:
 	int placed() const { return m_placed; }
 	int lingerMs() const { return m_lingerMs; }
 	void setLingerMs(int lingerMs);
+	void setRetainedIds(const QSet<QString>& ids);
 
 	// Deletes a session that is gone: at once when no tile shows it, else when its tile has left.
 	void deleteWhenLeft(ChatSession* session);
@@ -55,6 +57,7 @@ private:
 		bool leaving = false;
 		int leaveSerial = 0; // which leave this is, so that only its timer retires the row
 		bool deleteSession = false; // the stage deletes the session when the row goes
+		bool deferredRetire = false; // linger timer finished while retained; remove immediately when unretained
 		int place = 0;
 	};
 
@@ -66,6 +69,7 @@ private:
 
 	const TileModel* m_source;
 	QList<Row> m_rows;
+	QSet<QString> m_retainedIds;
 	int m_placed = 0;
 	int m_lingerMs = 0;
 	int m_leaves = 0;

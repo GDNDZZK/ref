@@ -2172,23 +2172,58 @@ void TestWorkspace::splitFilterFiltersByDirectParentAndUserCreated()
 		stub.add(u"ses_child"_s, 3, u"/work"_s, u"ses_parent"_s);
 		stub.add(u"ses_grandchild"_s, 4, u"/work"_s, u"ses_child"_s);
 	});
+	const int lingerMs = 50;
+	f.workspace->tileStage()->setLingerMs(lingerMs);
 	f.workspace->toggleSplit();
 	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 3);
 	QCOMPARE(f.workspace->splitCreators().size(), 2);
+	QTRY_COMPARE(f.stub.requests(u"watch_all"_s).size(), 1);
+	QTRY_VERIFY(f.workspace->session(u"ses_parent"_s)->isAttached());
+	QTRY_VERIFY(f.workspace->session(u"ses_child"_s)->isAttached());
+	QTRY_VERIFY(f.workspace->session(u"ses_grandchild"_s)->isAttached());
+	const qsizetype attachesAfterEnter = f.stub.requests(u"attach"_s).size();
+	const qsizetype detachesAfterEnter = f.stub.requests(u"detach"_s).size();
 
-	// User-created shows only sessions without a parent.
+	// User-created shows only sessions without a parent; hidden tiles remain attached and retained.
 	f.workspace->setSplitFilter(u"user"_s);
 	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
 	QCOMPARE(f.workspace->visibleSessionIds(), (QStringList{u"ses_parent"_s}));
+	QCOMPARE(f.workspace->tileStage()->placed(), 1);
+	QTest::qWait(2 * lingerMs + 50);
+	QCOMPARE(f.workspace->tileStage()->rowCount(), 3);
+	QVERIFY(f.workspace->session(u"ses_child"_s)->isAttached());
+	QVERIFY(f.workspace->session(u"ses_grandchild"_s)->isAttached());
 
 	// Direct-parent filter matches only direct children of ses_parent (not ses_grandchild).
 	f.workspace->setSplitFilter(u"ses_parent"_s);
 	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
 	QCOMPARE(f.workspace->visibleSessionIds(), (QStringList{u"ses_child"_s}));
 	QCOMPARE(f.workspace->splitFilterLabel(), u"Title ses_parent"_s);
+	QTest::qWait(2 * lingerMs + 50);
+	QCOMPARE(f.workspace->tileStage()->placed(), 1);
+	QCOMPARE(f.workspace->tileStage()->rowCount(), 3);
+	QVERIFY(f.workspace->session(u"ses_parent"_s)->isAttached());
+	QVERIFY(f.workspace->session(u"ses_grandchild"_s)->isAttached());
 
+	// Switching back to all revives retained tiles without re-attaching or detaching.
 	f.workspace->setSplitFilter(u"all"_s);
 	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 3);
+	QCOMPARE(f.workspace->tileStage()->placed(), 3);
+	QCOMPARE(f.workspace->tileStage()->rowCount(), 3);
+	QCOMPARE(f.stub.requests(u"attach"_s).size(), attachesAfterEnter);
+	QCOMPARE(f.stub.requests(u"detach"_s).size(), detachesAfterEnter);
+
+	// Hide some tiles again and leave split view: retained IDs clear, all tiles retire, and background sessions detach.
+	f.workspace->setSplitFilter(u"user"_s);
+	QTRY_COMPARE(f.workspace->tileStage()->placed(), 1);
+	QTest::qWait(2 * lingerMs + 50);
+	QCOMPARE(f.workspace->tileStage()->rowCount(), 3);
+	f.workspace->toggleSplit();
+	QTRY_VERIFY(!f.workspace->isSplitView());
+	QTRY_COMPARE(f.workspace->tileStage()->rowCount(), 0);
+	QTRY_VERIFY(!f.workspace->session(u"ses_parent"_s)->isAttached());
+	QTRY_VERIFY(!f.workspace->session(u"ses_child"_s)->isAttached());
+	QTRY_VERIFY(!f.workspace->session(u"ses_grandchild"_s)->isAttached());
 }
 
 void TestWorkspace::switchBackendResetsWorkspaceAndConnectsToNewEndpoint()

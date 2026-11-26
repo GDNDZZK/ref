@@ -108,16 +108,25 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const current = computed(() => (currentId.value ? chat(currentId.value) : undefined))
+  function isSplitTileEligible(session: SessionInfo): boolean {
+    return session.live && session.id !== currentId.value && session.attached === 0
+  }
+
+  function matchesSplitFilter(session: SessionInfo, filter: SplitFilter): boolean {
+    if (filter === 'user') return !session.parent
+    if (filter !== 'all') return session.parent === filter
+    return true
+  }
+
   // Background sessions get a tile: live ones nobody is attached to, excluding the current foreground session.
+  const allSplitTileIds = computed<readonly string[]>(() =>
+    live.value.filter(isSplitTileEligible).map((session) => session.id),
+  )
   const tileIds = computed(() => {
-    const base = live.value.filter(
-      (session) => session.live && session.id !== currentId.value && session.attached === 0,
-    )
     const filter = splitFilter.value
-    if (filter === 'user') return base.filter((session) => !session.parent).map((session) => session.id)
-    if (filter !== 'all')
-      return base.filter((session) => session.parent === filter).map((session) => session.id)
-    return base.map((session) => session.id)
+    return live.value
+      .filter((session) => isSplitTileEligible(session) && matchesSplitFilter(session, filter))
+      .map((session) => session.id)
   })
   const visibleSessionIds = computed<string[]>(() => {
     if (mode.value === 'single') return currentId.value ? [currentId.value] : []
@@ -460,6 +469,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function syncTiles(): Promise<void> {
     if (mode.value !== 'split') return
     const wanted = new Set(tileIds.value)
+    const retained = new Set(allSplitTileIds.value)
     const jobs: Promise<void>[] = []
     for (const id of wanted) {
       if (chat(id).attachment !== 'detached' || attachingTiles.has(id)) continue
@@ -472,7 +482,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     for (const [id, session] of chats) {
       const isCurrent = id === currentId.value
-      if (wanted.has(id) || isCurrent || session.attachment === 'detached' || detachingTiles.has(id)) continue
+      if (retained.has(id) || isCurrent || session.attachment === 'detached' || detachingTiles.has(id)) {
+        continue
+      }
       detachingTiles.add(id)
       jobs.push(session.detach().finally(() => detachingTiles.delete(id)))
     }
@@ -796,6 +808,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     mode,
     zoomedId,
     tileFocusId,
+    allSplitTileIds,
     tileIds,
     visibleSessionIds,
     cwd,

@@ -18,7 +18,7 @@ import { motion, motionEasing } from '../theme/generated/motion.ts'
 import { metrics } from '../theme/generated/theme.ts'
 import { tween } from '../motion/tween.ts'
 import { cornerClearance, gridHeight, tileRects, TILE_SPEC } from '../shell/tileLayout.ts'
-import type { Band } from '../shell/tileLayout.ts'
+import type { Band, Rect } from '../shell/tileLayout.ts'
 import { useCommandsStore } from '../stores/commands.ts'
 import { useLayoutStore } from '../stores/layout.ts'
 import { useNoticesStore } from '../stores/notices.ts'
@@ -48,13 +48,29 @@ onBeforeUnmount(() => observer?.disconnect())
 // Freeze visual tile/focus/zoom state once mode leaves 'split' so the split-fade exit transition
 // fades the focused tile border and grid cleanly instead of snapping off on frame 1.
 const activeTileIds = shallowRef<readonly string[]>(workspace.tileIds)
+const mountedIds = shallowRef<readonly string[]>([])
+const activeMountedIds = shallowRef<readonly string[]>([])
 const activeFocusId = ref<string | undefined>(workspace.tileFocusId)
 const activeZoomedId = ref<string | undefined>(workspace.zoomedId)
+const lastRects = new Map<string, Rect>()
 watchEffect(() => {
   if (workspace.mode !== 'split') return
   activeTileIds.value = workspace.tileIds
   activeFocusId.value = workspace.tileFocusId
   activeZoomedId.value = workspace.zoomedId
+  const eligible = new Set(workspace.allSplitTileIds)
+  const next = mountedIds.value.filter((id) => eligible.has(id))
+  const present = new Set(next)
+  for (const id of activeTileIds.value) {
+    if (eligible.has(id) && !present.has(id)) {
+      next.push(id)
+      present.add(id)
+    }
+  }
+  if (next.length !== mountedIds.value.length || next.some((id, index) => id !== mountedIds.value[index])) {
+    mountedIds.value = next
+  }
+  activeMountedIds.value = mountedIds.value
 })
 
 // No rects before the observer has reported the area size: tiles mounted on the unmeasured 0×0
@@ -64,14 +80,39 @@ const rects = computed(() =>
     ? []
     : tileRects(activeTileIds.value.length, size.value.width, size.value.height, TILE_SPEC),
 )
+watch(
+  [activeTileIds, rects],
+  ([ids, nextRects]) => {
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i]
+      const rect = nextRects[i]
+      if (id !== undefined && rect !== undefined) lastRects.set(id, rect)
+    }
+  },
+  { immediate: true },
+)
+watch(mountedIds, (ids) => {
+  const keep = new Set(ids)
+  for (const id of lastRects.keys()) {
+    if (!keep.has(id)) lastRects.delete(id)
+  }
+})
 watchEffect(() => {
   if (workspace.mode === 'split') workspace.setTileRects(rects.value)
 })
 
 // Which tiles have a rect yet: none until the area is measured, so no tile is ever placed on the
 // degenerate 0×0 grid.
-const laidOutIds = computed(() => (size.value.width > 0 ? activeTileIds.value : []))
-
+const laidOutIds = computed(() => (size.value.width > 0 ? activeMountedIds.value : []))
+const visibleIndexById = computed(() => {
+  const map = new Map<string, number>()
+  const ids = activeTileIds.value
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i]
+    if (id !== undefined) map.set(id, i)
+  }
+  return map
+})
 const zoomed = computed(() => activeZoomedId.value !== undefined)
 const hasTopChrome = computed(() => !zoomed.value && !layout.narrow)
 // The floating window buttons sit over the content. The header of a tile under them keeps its
@@ -135,11 +176,28 @@ function measureClearances(): void {
 
 watch([rects, zoomed, () => layout.sidebarVisible], () => void nextTick(measureClearances), { flush: 'post' })
 
-// A zoomed tile fills the area; the others keep their slots, faded out.
-function frame(index: number, id: string): Record<string, string> {
-  const rect = id === activeZoomedId.value ? { x: 0, y: 0, ...size.value } : rects.value[index]
+// A zoomed tile fills the area; hidden tiles keep their last rect while fading out.
+function frame(id: string): Record<string, string> {
+  const visibleIdx = visibleIndexById.value.get(id)
+  let rect: Rect | undefined
+  if (id === activeZoomedId.value) {
+    rect = { x: 0, y: 0, ...size.value }
+  } else if (visibleIdx !== undefined) {
+    rect = rects.value[visibleIdx]
+  } else {
+    rect = lastRects.get(id)
+  }
   if (!rect) return {}
   return { left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.width}px`, height: `${rect.height}px` }
+}
+
+function clearanceFor(id: string): Clearance {
+  const visibleIdx = visibleIndexById.value.get(id)
+  return visibleIdx !== undefined ? (clearances.value[visibleIdx] ?? NO_CLEARANCE) : NO_CLEARANCE
+}
+
+function isHiddenTile(id: string): boolean {
+  return (zoomed.value && id !== activeZoomedId.value) || visibleIndexById.value.get(id) === undefined
 }
 
 // Zooming in or out takes the slow duration; reflowing the grid the standard one.
@@ -198,15 +256,16 @@ function onBackgroundClick(event: MouseEvent): void {
   >
     <TransitionGroup tag="div" name="tile" class="grid" :style="{ height: `${contentHeight}px` }">
       <SplitTile
-        v-for="(id, index) in laidOutIds"
+        v-for="id in laidOutIds"
         :key="id"
-        class="slot"
-        :style="frame(index, id)"
+        :class="['slot', { 'filtered-out': visibleIndexById.get(id) === undefined }]"
+        :style="frame(id)"
         :session="workspace.chat(id)"
         :focused="id === activeFocusId"
         :zoomed="id === activeZoomedId"
-        :hidden="zoomed && id !== activeZoomedId"
-        :clearance="clearances[index] ?? NO_CLEARANCE"
+        :hidden="isHiddenTile(id)"
+        :inert="isHiddenTile(id) || undefined"
+        :clearance="clearanceFor(id)"
         @focus="workspace.focusTile(id)"
         @unfocus="workspace.focusTile(undefined)"
         @zoom="activeZoomedId === id ? workspace.unzoom() : workspace.zoomTile(id)"
@@ -253,12 +312,17 @@ function onBackgroundClick(event: MouseEvent): void {
 
 .grid {
   position: relative;
+  overflow: clip;
   transition: height var(--geometry-duration) var(--motion-ease);
 }
 
 .slot {
   position: absolute;
   z-index: 1;
+}
+
+.slot.filtered-out {
+  z-index: 0;
 }
 
 .slot.tile-enter-from {
