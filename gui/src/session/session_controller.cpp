@@ -60,6 +60,8 @@ SessionController::SessionController(client::Backend& backend, QObject* parent)
 		}
 		emit connectionChanged();
 	});
+	connect(&m_model, &ConversationModel::aboutToEvict, this, &SessionController::aboutToEvict);
+	connect(&m_model, &ConversationModel::evicted, this, &SessionController::evicted);
 	connect(&m_model, &ConversationModel::messagesEvicted, this, &SessionController::messagesEvicted);
 	m_rangeFetchTimer.setSingleShot(true);
 	m_rangeFetchTimer.setInterval(RangeFetchDebounceMs);

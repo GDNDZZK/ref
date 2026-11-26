@@ -13,10 +13,11 @@ import RefGui
 // touchpad, touch) or dragging the scroll bar releases it, and ending such a gesture
 // at the end re-engages it.
 //
-// Wheel: each notch moves `wheelTarget` and contentY chases it, so fast notches add
-// up. Flickable's own wheel animation restarts from wherever the previous notch got
-// to and drops the rest of its distance. Touchpad deltas are already continuous and
-// move the content directly.
+// Wheel: each notch adds to the relative `wheelRemaining` distance (with `wheelTarget`
+// derived from `contentY + wheelRemaining`), so fast notches add up and survive
+// contentY shifts while gliding. Flickable's own wheel animation restarts from wherever
+// the previous notch got to and drops the rest of its distance. Touchpad deltas are
+// already continuous and move the content directly.
 //
 // Both chases (following, wheel) step in whole pixels; see scrollStep().
 //
@@ -37,13 +38,19 @@ ListView {
 	property string sessionId // the session whose pictures the rows show
 	property var session: null
 	property bool materializing: false
+	property bool evicting: false
+	readonly property bool mutatingWindow: materializing || evicting
+	property int materializingGen: 0
+	property int evictingGen: 0
 	property int anchorSeq: -1
+	property int anchorRowOffset: 0
 	property real anchorOffset: 0
 	property bool moreBefore: false // the backend has earlier messages
 	property bool loadingOlder: false
 	property string olderError
 	readonly property string rangeError: session ? (session.rangeError ?? "") : ""
 	readonly property int columnWidthDebounceMs: 16
+	readonly property int visibleRangeDebounceMs: 80
 	property int lastReportedStart: -1
 	property int lastReportedEnd: -1
 	readonly property bool prepending: loadingOlder // rows added now are earlier history
@@ -72,7 +79,8 @@ ListView {
 	readonly property real followTarget: Math.max(minContentY, boundedEnd - height)
 
 	property bool wheeling: false // chasing wheelTarget; never while following
-	property real wheelTarget: 0
+	property real wheelRemaining: 0
+	readonly property real wheelTarget: Math.max(minContentY, Math.min(maxContentY, contentY + wheelRemaining))
 	readonly property int wheelNotch: 120 // angleDelta of one notch, per QWheelEvent
 	readonly property int wheelPixelsPerLine: 40
 	readonly property int minWheelStep: 120
@@ -107,20 +115,9 @@ ListView {
 	// contentY (qquickflickable.cpp:537-549). While a row resizes every frame, that
 	// rounding undid sub-pixel steps: the chase stalled a few pixels short and only
 	// finished once the rows settled, as a small late scroll.
-	function wheelChase(current, target, frameTime) {
-		if (Motion.arrived(current, target))
-			return target
-		return current + (target - current) * (1 - Math.exp(-frameTime * Format.msPerSecond / wheelLag))
-	}
-
-	// One frame of a scroll chase toward `target`, in whole pixels and at least one per
-	// frame. Every ListView layout fixes up the position, which rounds a fractional
-	// contentY (qquickflickable.cpp:537-549). While a row resizes every frame, that
-	// rounding undid sub-pixel steps: the chase stalled a few pixels short and only
-	// finished once the rows settled, as a small late scroll.
-	function scrollStep(target, frameTime, forWheel) {
+	function scrollStep(target, frameTime) {
 		const from = Math.round(contentY)
-		const raw = forWheel ? wheelChase(contentY, target, frameTime) : Motion.chase(contentY, target, frameTime)
+		const raw = Motion.chase(contentY, target, frameTime)
 		const next = Math.round(raw)
 		const step = next !== from ? next : from + Math.sign(target - from)
 		const overshoots = (step - target) * (from - target) < 0 // ends up past a fractional target
@@ -130,6 +127,11 @@ ListView {
 	// Within a pixel of the target counts as there: scrolling moves in whole pixels.
 	function scrollArrived(target) {
 		return Math.abs(target - contentY) < 1
+	}
+
+	function stopWheel() {
+		wheeling = false
+		wheelRemaining = 0
 	}
 
 	function stopCoast() {
@@ -188,7 +190,7 @@ ListView {
 		if (velocity > 0 && (contentY >= maxContentY || following))
 			return
 		following = false
-		wheeling = false
+		stopWheel()
 		coastVelocity = velocity
 		coastRemainder = 0
 		coasting = true
@@ -209,19 +211,55 @@ ListView {
 			contentY = next
 			if (next <= minContentY && coastVelocity < 0) {
 				stopCoast()
+				flushVisibleRangeReport()
 				return
 			}
 			if (next >= maxContentY && coastVelocity > 0) {
 				stopCoast()
-				following = true
+				if (!mutatingWindow)
+					following = true
+				flushVisibleRangeReport()
 				return
 			}
 		}
 		if (Math.abs(coastVelocity) < coastStopVelocity) {
 			stopCoast()
-			if (contentY >= maxContentY)
+			if (prevVelocity > 0 && contentY >= maxContentY && !mutatingWindow)
 				following = true
+			flushVisibleRangeReport()
 		}
+	}
+
+	function scrollBy(deltaY, glide) {
+		scrollActivity.restart()
+		if (!glide) {
+			scrollTo(contentY + deltaY, false)
+			return
+		}
+		if (deltaY > 0 && (following || contentY >= maxContentY)) {
+			stopWheel()
+			if (!mutatingWindow)
+				following = true
+			return
+		}
+		if (deltaY < 0 && contentY <= minContentY) {
+			stopWheel()
+			return
+		}
+		following = false
+		const base = wheeling && wheelRemaining * deltaY > 0 ? wheelRemaining : 0
+		const desired = base + deltaY
+		wheelRemaining = Math.max(minContentY - contentY, Math.min(maxContentY - contentY, desired))
+		if (Math.abs(wheelRemaining) < 1) {
+			stopWheel()
+			if (deltaY > 0 && contentY + desired >= maxContentY) {
+				contentY = maxContentY
+				if (!mutatingWindow)
+					following = true
+			}
+			return
+		}
+		wheeling = true
 	}
 
 	// A user scroll to `y`: `glide` chases it (wheel notches), otherwise it applies at
@@ -229,23 +267,68 @@ ListView {
 	// with new content.
 	function scrollTo(y, glide) {
 		scrollActivity.restart()
+		if (glide) {
+			scrollBy(y - contentY, true)
+			return
+		}
+		stopWheel()
 		const target = Math.max(minContentY, Math.min(maxContentY, y))
-		if (target === maxContentY) {
+		if (y >= contentY && target >= maxContentY && !mutatingWindow) {
 			following = true
 			return
 		}
 		following = false
-		if (glide) {
-			wheelTarget = target
-			wheeling = true
-			return
-		}
-		wheeling = false
 		contentY = target
 	}
 
+	function wheelStepFrame(frameTime) {
+		scrollActivity.restart()
+		if (Math.abs(wheelRemaining) < 1) {
+			if (wheelRemaining > 0 && contentY + wheelRemaining >= maxContentY - 1) {
+				contentY = maxContentY
+				if (!mutatingWindow)
+					following = true
+			}
+			stopWheel()
+			flushVisibleRangeReport()
+			return
+		}
+		const sign = Math.sign(wheelRemaining)
+		const decay = Math.exp(-frameTime * Format.msPerSecond / wheelLag)
+		const rawStep = wheelRemaining * (1 - decay)
+		let step = Math.abs(wheelRemaining) <= 1.5 ? Math.round(wheelRemaining) : Math.round(rawStep)
+		if (step === 0)
+			step = sign
+		if (Math.abs(step) > Math.abs(wheelRemaining))
+			step = sign * Math.floor(Math.abs(wheelRemaining))
+		const next = Math.max(minContentY, Math.min(maxContentY, contentY + step))
+		wheelRemaining -= step
+		contentY = next
+		if (next <= minContentY && sign < 0) {
+			stopWheel()
+			flushVisibleRangeReport()
+			return
+		}
+		if (next >= maxContentY && sign > 0) {
+			stopWheel()
+			if (!mutatingWindow)
+				following = true
+			flushVisibleRangeReport()
+			return
+		}
+		if (Math.abs(wheelRemaining) < 1) {
+			if (sign > 0 && (contentY > maxContentY - 1 || contentY + wheelRemaining >= maxContentY - 1)) {
+				contentY = maxContentY
+				if (!mutatingWindow)
+					following = true
+			}
+			stopWheel()
+			flushVisibleRangeReport()
+		}
+	}
+
 	function stopScrollMotion() {
-		wheeling = false
+		stopWheel()
 		wheelBoost = 1.0
 		lastWheelTime = 0
 		lastWheelDirection = 0
@@ -254,22 +337,127 @@ ListView {
 		pendingTouchDelta = 0
 		lastTouchTime = 0
 	}
-	function prepareMaterialize() {
+
+	function rowNearY(y, stepDir) {
+		if (count === 0 || contentHeight <= 0)
+			return -1
+		const minY = originY
+		const maxY = originY + Math.max(0, contentHeight - 1)
+		const step = spacing + 2
+		const probes = [y, y + stepDir * step, y - stepDir * step]
+		for (let i = 0; i < probes.length; ++i) {
+			const py = Math.max(minY, Math.min(maxY, probes[i]))
+			const idx = indexAt(width / 2, py)
+			if (idx >= 0)
+				return idx
+		}
+		return -1
+	}
+
+	function captureAnchor() {
 		if (!session || count === 0) {
 			anchorSeq = -1
-			materializing = true
+			anchorRowOffset = 0
+			anchorOffset = 0
 			return
 		}
-		const row = indexAt(width / 2, Math.max(originY, contentY + 2))
+		let row = rowNearY(Math.max(originY, contentY + 2), 1)
+		if (row < 0)
+			row = rowNearY(contentY + height / 2, 1)
 		if (row >= 0) {
 			const seq = session.seqForRow(row)
-			const item = itemAtIndex(row)
-			anchorSeq = seq
-			anchorOffset = item ? (contentY - item.y) : 0
-		} else {
-			anchorSeq = -1
+			if (seq >= 0) {
+				const firstRow = session.firstRowForSeq(seq)
+				const item = itemAtIndex(row)
+				anchorSeq = seq
+				anchorRowOffset = firstRow >= 0 ? Math.max(0, row - firstRow) : 0
+				anchorOffset = item ? (contentY - item.y) : 0
+				return
+			}
 		}
+		anchorSeq = -1
+		anchorRowOffset = 0
+		anchorOffset = 0
+	}
+
+	function restoreAnchor() {
+		const targetSeq = anchorSeq
+		const targetRowOffset = anchorRowOffset
+		const targetOffset = anchorOffset
+		anchorSeq = -1
+		anchorRowOffset = 0
+		anchorOffset = 0
+		if (!session || count === 0)
+			return
+		if (following) {
+			forceLayout()
+			positionViewAtEnd()
+			contentY = followTarget
+			return
+		}
+		if (targetSeq < 0)
+			return
+		const firstRow = session.firstRowForSeq(targetSeq)
+		const seqRows = session.rowCountForSeq(targetSeq)
+		if (firstRow < 0 || seqRows <= 0)
+			return
+		const row = firstRow + Math.min(targetRowOffset, seqRows - 1)
+		forceLayout()
+		let item = itemAtIndex(row)
+		const needsReposition = !item || Math.abs((item.y + targetOffset) - contentY) >= height
+		if (needsReposition) {
+			positionViewAtIndex(row, ListView.Beginning)
+			item = itemAtIndex(row)
+		}
+		if (item) {
+			const desired = Math.max(minContentY, Math.min(maxContentY, item.y + targetOffset))
+			if (Math.abs(desired - contentY) >= 0.5)
+				contentY = desired
+		}
+	}
+
+	function prepareMaterialize() {
+		if (!following)
+			captureAnchor()
+		++materializingGen
 		materializing = true
+	}
+
+	function finishMaterialize() {
+		restoreAnchor()
+		const gen = materializingGen
+		Qt.callLater(() => {
+			if (gen === materializingGen) {
+				materializing = false
+				if (!mutatingWindow) {
+					loadOlderIfNear()
+					if (!wheeling && !coasting)
+						scheduleVisibleRangeReport()
+				}
+			}
+		})
+	}
+
+	function prepareEvict() {
+		if (!following)
+			captureAnchor()
+		++evictingGen
+		evicting = true
+	}
+
+	function finishEvict() {
+		restoreAnchor()
+		const gen = evictingGen
+		Qt.callLater(() => {
+			if (gen === evictingGen) {
+				evicting = false
+				if (!mutatingWindow) {
+					loadOlderIfNear()
+					if (!wheeling && !coasting)
+						scheduleVisibleRangeReport()
+				}
+			}
+		})
 	}
 
 	function retryRangeFetch() {
@@ -277,38 +465,34 @@ ListView {
 			session.retryRangeFetch()
 	}
 
-	function finishMaterialize() {
-		const targetSeq = anchorSeq
-		const targetOffset = anchorOffset
-		anchorSeq = -1
-		if (!following && targetSeq >= 0 && session) {
-			const row = session.firstRowForSeq(targetSeq)
-			if (row >= 0) {
-				forceLayout()
-				positionViewAtIndex(row, ListView.Beginning)
-				const item = itemAtIndex(row)
-				const baseY = item ? item.y : contentY
-				contentY = Math.max(minContentY, Math.min(maxContentY, baseY + targetOffset))
-			}
-		}
-		Qt.callLater(() => { materializing = false })
-	}
-
 	function reportVisibleRange() {
-		if (!session || count === 0)
+		if (!session || count === 0 || height <= 0 || mutatingWindow)
 			return
-		const topIdx = Math.max(0, indexAt(width / 2, Math.max(originY, contentY)))
-		const botIdx = indexAt(width / 2, Math.min(originY + contentHeight - 1, contentY + height))
-		const endIdx = botIdx >= 0 ? botIdx : count - 1
-		if (topIdx < 0 || endIdx < topIdx)
+		const contentTop = originY + (headerItem ? headerItem.height : 0)
+		const contentBot = originY + contentHeight - (footerItem ? footerItem.height : 0) - 1
+		const topIdx = rowNearY(Math.max(contentTop, contentY), 1)
+		const botIdx = rowNearY(Math.min(contentBot, contentY + height), -1)
+		if (topIdx < 0 || botIdx < 0 || botIdx < topIdx)
 			return
 		const s = session.seqForRow(topIdx)
-		const e = session.seqForRow(endIdx)
+		const e = session.seqForRow(botIdx)
 		if (s >= 0 && e >= s && (s !== lastReportedStart || e !== lastReportedEnd)) {
 			lastReportedStart = s
 			lastReportedEnd = e
 			session.setVisibleSeqRange(s, e)
 		}
+	}
+
+	function scheduleVisibleRangeReport() {
+		if (!session || count === 0 || mutatingWindow || scrollBar.pressed || dragging)
+			return
+		visibleRangeTimer.restart()
+	}
+
+	function flushVisibleRangeReport() {
+		visibleRangeTimer.stop()
+		if (!mutatingWindow && !scrollBar.pressed && !dragging)
+			reportVisibleRange()
 	}
 	clip: true
 	spacing: Theme.blockSpacing
@@ -322,6 +506,8 @@ ListView {
 
 	// Loads earlier messages when the top is near.
 	function loadOlderIfNear() {
+		if (mutatingWindow)
+			return
 		const nearTop = contentY - originY < olderTriggerDistance
 		if (canLoadOlder && nearTop && !following)
 			loadOlderRequested()
@@ -337,22 +523,35 @@ ListView {
 		onTriggered: if (view.session) view.session.setColumnWidth(view.columnWidth)
 	}
 
+	Timer {
+		id: visibleRangeTimer
+		interval: view.visibleRangeDebounceMs
+		repeat: false
+		onTriggered: if (!view.mutatingWindow && !scrollBar.pressed && !view.dragging) view.reportVisibleRange()
+	}
+
 	onColumnWidthChanged: if (session) columnWidthTimer.restart()
 	onSessionChanged: {
 		columnWidthTimer.stop()
+		visibleRangeTimer.stop()
 		lastReportedStart = -1
 		lastReportedEnd = -1
 		if (session) {
 			session.setColumnWidth(columnWidth)
 			session.setFollowing(following)
+			if (count > 0)
+				scheduleVisibleRangeReport()
 		}
 	}
 	Connections {
 		target: view.model ? view.model : null
 		function onModelReset() {
+			visibleRangeTimer.stop()
 			view.lastReportedStart = -1
 			view.lastReportedEnd = -1
 			view.stopScrollMotion()
+			if (view.count > 0)
+				view.scheduleVisibleRangeReport()
 		}
 	}
 	onHeightChanged: {
@@ -366,12 +565,18 @@ ListView {
 		previousHeight = height
 	}
 	onContentYChanged: {
+		if (mutatingWindow)
+			return
 		loadOlderIfNear()
-		reportVisibleRange()
+		scheduleVisibleRangeReport()
 	}
-	onCountChanged: reportVisibleRange()
+	onCountChanged: {
+		if (!mutatingWindow)
+			scheduleVisibleRangeReport()
+	}
 	onMoreBeforeChanged: loadOlderIfNear()
 	onLoadingOlderChanged: loadOlderIfNear()
+	onDraggingChanged: if (dragging) visibleRangeTimer.stop()
 
 	header: Item {
 		width: view.width
@@ -398,9 +603,13 @@ ListView {
 		id: scrollBar
 
 		onPressedChanged: {
-			view.wheeling = false
+			if (pressed)
+				visibleRangeTimer.stop()
+			view.stopWheel()
 			view.stopCoast()
-			view.following = !pressed && view.atYEnd
+			view.following = !pressed && !view.mutatingWindow && view.atYEnd
+			if (!pressed)
+				view.flushVisibleRangeReport()
 		}
 
 		// Basic's handle takes the system palette; this one follows Theme.
@@ -445,7 +654,7 @@ ListView {
 				switch (event.phase) {
 				case Qt.ScrollBegin:
 					view.stopCoast()
-					view.wheeling = false
+					view.stopWheel()
 					view.resetTouchTracker()
 					if (event.pixelDelta.y !== 0)
 						view.scrollTo(view.contentY - event.pixelDelta.y, false)
@@ -495,8 +704,10 @@ ListView {
 			// old-direction distance is dropped, so the view turns around at once.
 			const reversed = dir !== view.lastWheelDirection
 			view.lastWheelDirection = dir
-			const start = view.wheeling && !reversed ? view.wheelTarget : view.contentY
-			view.scrollTo(start - event.angleDelta.y / view.wheelNotch * view.wheelStep * view.wheelBoost, true)
+			if (reversed)
+				view.wheelRemaining = 0
+			const deltaY = -event.angleDelta.y / view.wheelNotch * view.wheelStep * view.wheelBoost
+			view.scrollBy(deltaY, true)
 		}
 	}
 
@@ -509,12 +720,7 @@ ListView {
 
 	FrameAnimation {
 		running: view.wheeling
-		onTriggered: {
-			const target = Math.max(view.minContentY, Math.min(view.maxContentY, view.wheelTarget))
-			view.wheelTarget = target
-			view.scrollStep(target, frameTime, true)
-			view.wheeling = !view.scrollArrived(target)
-		}
+		onTriggered: view.wheelStepFrame(frameTime)
 	}
 
 	FrameAnimation {
@@ -523,18 +729,22 @@ ListView {
 	}
 
 	onMovementStarted: {
-		wheeling = false
+		stopWheel()
 		stopCoast()
 		following = false
 	}
-	onMovementEnded: following = atYEnd
+	onMovementEnded: {
+		if (!mutatingWindow)
+			following = atYEnd
+		flushVisibleRangeReport()
+	}
 
 	onFollowingChanged: {
 		if (session)
 			session.setFollowing(following)
 		if (!following)
 			return
-		wheeling = false
+		stopWheel()
 		stopCoast()
 	}
 	FrameAnimation {

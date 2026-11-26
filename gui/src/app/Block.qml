@@ -42,9 +42,9 @@ Item {
 	transform: Translate { id: entryShift }
 
 	ListView.onAdd: {
-		if (chat.prepending) // earlier history, not news
+		if (chat && chat.prepending) // earlier history, not news
 			return
-		if (chat.materializing) {
+		if (chat && chat.mutatingWindow) {
 			quickFade.restart()
 			return
 		}
@@ -53,7 +53,12 @@ Item {
 	}
 
 	// A removed row (undo, a rewritten history) fades out, then its space closes.
-	ListView.onRemove: exit.start()
+	ListView.onRemove: {
+		releaseHeader()
+		if (chat && chat.mutatingWindow)
+			return
+		exit.start()
+	}
 
 	function toggleExpanded() {
 		chat.model.toggleExpanded(index)
@@ -81,7 +86,7 @@ Item {
 	}
 
 	onHeightChanged: {
-		if (heldHeaderHeight === 0)
+		if (heldHeaderHeight === 0 || !chat || chat.mutatingWindow)
 			return
 		const pinLimit = y + height - heldHeaderHeight // furthest contentY that keeps the header pinned
 		if (chat.contentY > pinLimit)
@@ -91,7 +96,7 @@ Item {
 	Component.onCompleted: {
 		easedHeight = naturalHeight
 		easing = streaming
-		if (chat.materializing)
+		if (chat && chat.mutatingWindow)
 			quickFade.restart()
 	}
 	onStreamingChanged: {

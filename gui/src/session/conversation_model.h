@@ -161,6 +161,7 @@ public:
 	                                                              qsizetype limit = PageSize) const;
 	std::optional<std::pair<quint64, quint64>> newestMissingRange(qsizetype limit = MaxServerPageSize) const;
 	Q_INVOKABLE int firstRowForSeq(quint64 seq) const;
+	Q_INVOKABLE int rowCountForSeq(quint64 seq) const;
 	Q_INVOKABLE int seqForRow(int row) const;
 	// Adds the message, or replaces the one with the same id.
 	void setMessage(const proto::Message& message);
@@ -190,6 +191,8 @@ public:
 	QVariantList allImages() const;
 signals:
 	void toolSummaryChanged();
+	void aboutToEvict();
+	void evicted();
 	void messagesEvicted(const QStringList& messageIds);
 
 private:

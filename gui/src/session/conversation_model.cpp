@@ -1066,6 +1066,15 @@ int ConversationModel::firstRowForSeq(quint64 seq) const
 	return static_cast<int>(firstRowOf(static_cast<qsizetype>(seq)));
 }
 
+int ConversationModel::rowCountForSeq(quint64 seq) const
+{
+	if(seq >= static_cast<quint64>(m_messages.size()))
+	{
+		return 0;
+	}
+	return static_cast<int>(m_messages.at(static_cast<qsizetype>(seq)).rows());
+}
+
 int ConversationModel::seqForRow(int row) const
 {
 	if(row < 0 || row >= m_rows.size())
@@ -1189,11 +1198,12 @@ std::optional<std::pair<quint64, quint64>> ConversationModel::newestMissingRange
 
 void ConversationModel::materializeRange(quint64 startSeq, const QList<proto::Message>& messages)
 {
-	if(messages.isEmpty())
+	if(messages.isEmpty() || startSeq >= static_cast<quint64>(m_messages.size()))
 	{
 		return;
 	}
 	bool anyChanged = false;
+	qsizetype first = firstRowOf(static_cast<qsizetype>(startSeq));
 	for(qsizetype i = 0; i < messages.size(); ++i)
 	{
 		const qsizetype slot = static_cast<qsizetype>(startSeq) + i;
@@ -1204,6 +1214,7 @@ void ConversationModel::materializeRange(quint64 startSeq, const QList<proto::Me
 		const proto::Message& incoming = messages.at(i);
 		if(m_messages.at(slot).materialized && m_messages.at(slot).header.id == incoming.id)
 		{
+			first += m_messages.at(slot).rows();
 			continue;
 		}
 		std::optional<proto::MessageLayoutMeta> cachedMeta = m_messages.at(slot).layoutMeta;
@@ -1214,7 +1225,6 @@ void ConversationModel::materializeRange(quint64 startSeq, const QList<proto::Me
 		{
 			b.seq = static_cast<quint64>(slot);
 		}
-		const qsizetype first = firstRowOf(slot);
 		const qsizetype oldRows = m_messages.at(slot).rows();
 		m_messages[slot] = std::move(node);
 		replaceRows(first, oldRows, rows);
@@ -1222,6 +1232,7 @@ void ConversationModel::materializeRange(quint64 startSeq, const QList<proto::Me
 		{
 			notifyOpensTurn(first + rows.size());
 		}
+		first += rows.size();
 		anyChanged = true;
 	}
 	if(anyChanged)
@@ -1232,24 +1243,35 @@ void ConversationModel::materializeRange(quint64 startSeq, const QList<proto::Me
 
 QStringList ConversationModel::evictSlots(const QList<qsizetype>& indices)
 {
-	if(indices.isEmpty())
-	{
-		return {};
-	}
-	QList<qsizetype> sorted = indices;
-	std::ranges::sort(sorted, std::greater<>{});
-	QStringList evictedIds;
-	for(const qsizetype slot : sorted)
+	QList<qsizetype> valid;
+	valid.reserve(indices.size());
+	for(const qsizetype slot : indices)
 	{
 		if(slot < 0 || slot >= m_messages.size())
 		{
 			continue;
 		}
-		MessageNode& node = m_messages[slot];
+		const MessageNode& node = m_messages.at(slot);
 		if(!node.materialized || !isEnded(node.header))
 		{
 			continue;
 		}
+		valid.append(slot);
+	}
+	if(valid.isEmpty())
+	{
+		return {};
+	}
+	std::ranges::sort(valid, std::greater<>{});
+	const auto dup = std::ranges::unique(valid);
+	valid.erase(dup.begin(), dup.end());
+
+	emit aboutToEvict();
+	QStringList evictedIds;
+	evictedIds.reserve(valid.size());
+	for(const qsizetype slot : valid)
+	{
+		MessageNode& node = m_messages[slot];
 		if(!node.layoutMeta)
 		{
 			node.layoutMeta = LayoutEstimator::computeMeta(static_cast<quint64>(slot), materializeHeaderAndParts(node));
@@ -1265,11 +1287,9 @@ QStringList ConversationModel::evictSlots(const QList<qsizetype>& indices)
 			notifyOpensTurn(first + 1);
 		}
 	}
-	if(!evictedIds.isEmpty())
-	{
-		refreshDerivedState();
-		emit messagesEvicted(evictedIds);
-	}
+	refreshDerivedState();
+	emit evicted();
+	emit messagesEvicted(evictedIds);
 	return evictedIds;
 }
 

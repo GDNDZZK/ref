@@ -102,6 +102,12 @@ Item {
 		function onMaterialized() {
 			chat.finishMaterialize()
 		}
+		function onAboutToEvict() {
+			chat.prepareEvict()
+		}
+		function onEvicted() {
+			chat.finishEvict()
+		}
 	}
 
 	// Takes the keyboard from the input box once the keys may answer a permission request

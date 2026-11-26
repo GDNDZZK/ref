@@ -170,6 +170,7 @@ public:
 	Q_INVOKABLE void setFollowing(bool following);
 	void setMessageWindowSize(int size);
 	Q_INVOKABLE int firstRowForSeq(int seq) const;
+	Q_INVOKABLE int rowCountForSeq(int seq) const;
 	Q_INVOKABLE int seqForRow(int row) const;
 	Q_INVOKABLE QVariantList allImages() const;
 signals:
@@ -193,6 +194,8 @@ signals:
 	void draftRestored(const QString& text, const QList<refgui::proto::NamedImage>& images);
 	void aboutToMaterialize();
 	void materialized();
+	void aboutToEvict();
+	void evicted();
 	void messagesEvicted(const QStringList& messageIds);
 
 private:

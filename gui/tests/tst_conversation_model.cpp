@@ -71,6 +71,7 @@ private slots:
 	void virtualizedPlaceholdersMaterializeAndEvict();
 	void evictOutsideCapsResidentInsideKeepWindow();
 	void configurableWindowAndNewestMissingRange();
+	void rowCountForSeqAndEvictionSignals();
 };
 
 void TestConversationModel::splitsAssistantTextIntoBlocks()
@@ -950,6 +951,85 @@ void TestConversationModel::configurableWindowAndNewestMissingRange()
 	chunkModel.setMessageWindowSize(200);
 	chunkModel.evictOldTail();
 	QCOMPARE(chunkModel.residentCount(), 200);
+}
+
+void TestConversationModel::rowCountForSeqAndEvictionSignals()
+{
+	ConversationModel model;
+	QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
+
+	const QList<refgui::proto::MessageLayoutMeta> metas{
+		refgui::proto::MessageLayoutMeta{
+			.seq = 0,
+			.id = u"m_0"_s,
+			.role = refgui::proto::Role::User,
+			.sourceKind = u"human"_s,
+			.parts = {refgui::proto::PartLayoutMeta{.kind = u"text"_s, .chars = 20, .lines = 1}},
+		},
+	};
+	const refgui::proto::Message multi = assistant(
+		u"a2"_s,
+		{reasoning(u"Thinking"_s), text(u"Intro\n\n```cpp\nint x = 1;\n```\n\nOutro"_s)});
+	model.reset({user(u"u1"_s, u"go"_s), multi}, 3, 1, metas);
+	model.setMessageWindowSize(1);
+
+	QCOMPARE(model.rowCountForSeq(0ULL), 1);
+	QCOMPARE(model.rowCountForSeq(1ULL), 2);
+	QCOMPARE(model.rowCountForSeq(2ULL), 5);
+	QCOMPARE(model.rowCountForSeq(3ULL), 0);
+	QCOMPARE(model.rowCountForSeq(999ULL), 0);
+
+	QStringList signalOrder;
+	QSignalSpy aboutSpy(&model, &ConversationModel::aboutToEvict);
+	QSignalSpy evictedSpy(&model, &ConversationModel::evicted);
+	QSignalSpy idsSpy(&model, &ConversationModel::messagesEvicted);
+	connect(&model, &ConversationModel::aboutToEvict, this, [&] { signalOrder.append(u"aboutToEvict"_s); });
+	connect(&model, &ConversationModel::rowsRemoved, this, [&] { signalOrder.append(u"rowsRemoved"_s); });
+	connect(&model, &ConversationModel::evicted, this, [&] { signalOrder.append(u"evicted"_s); });
+	connect(&model, &ConversationModel::messagesEvicted, this, [&] { signalOrder.append(u"messagesEvicted"_s); });
+
+	// No-op eviction (keepCount >= slotCount) emits zero eviction signals.
+	QVERIFY(model.evictOldTail(10).isEmpty());
+	QCOMPARE(aboutSpy.count(), 0);
+	QCOMPARE(evictedSpy.count(), 0);
+	QCOMPARE(idsSpy.count(), 0);
+
+	// Evicting seq 2 emits symmetric aboutToEvict / evicted around model mutations.
+	const QStringList evictedIds = model.evictOutside(1, 1);
+	QCOMPARE(evictedIds, QStringList{u"a2"_s});
+	QCOMPARE(aboutSpy.count(), 1);
+	QCOMPARE(evictedSpy.count(), 1);
+	QCOMPARE(idsSpy.count(), 1);
+	QCOMPARE(model.rowCountForSeq(2ULL), 1);
+	QCOMPARE(signalOrder, (QStringList{u"aboutToEvict"_s, u"rowsRemoved"_s, u"evicted"_s, u"messagesEvicted"_s}));
+
+	// Repeating eviction when nothing eligible remains is a silent no-op.
+	QVERIFY(model.evictOutside(1, 1).isEmpty());
+	QCOMPARE(aboutSpy.count(), 1);
+	QCOMPARE(evictedSpy.count(), 1);
+	QCOMPARE(idsSpy.count(), 1);
+
+	// An unended (streaming) message outside the keep window is never evicted.
+	model.setMessage(assistant(u"a3"_s, {text(u"streaming"_s)}, false));
+	QVERIFY(model.evictOutside(1, 1).isEmpty());
+	QCOMPARE(aboutSpy.count(), 1);
+	QCOMPARE(evictedSpy.count(), 1);
+	QCOMPARE(idsSpy.count(), 1);
+	QCOMPARE(model.rowCountForSeq(3ULL), 2);
+
+	// Materializing across [placeholder (0), already-materialized (1), placeholder (2)] tracks `first` incrementally.
+	model.materializeRange(0, {user(u"m_0"_s, u"first"_s), user(u"u1"_s, u"go"_s), multi});
+	QCOMPARE(model.firstRowForSeq(0ULL), 0);
+	QCOMPARE(model.rowCountForSeq(0ULL), 2);
+	QCOMPARE(model.firstRowForSeq(1ULL), 2);
+	QCOMPARE(model.rowCountForSeq(1ULL), 2);
+	QCOMPARE(model.firstRowForSeq(2ULL), 4);
+	QCOMPARE(model.rowCountForSeq(2ULL), 5);
+	QCOMPARE(model.firstRowForSeq(3ULL), 9);
+	QCOMPARE(model.index(model.firstRowForSeq(0ULL)).data(ConversationModel::ContentRole).toString(), u"first"_s);
+	QCOMPARE(model.index(model.firstRowForSeq(1ULL)).data(ConversationModel::ContentRole).toString(), u"go"_s);
+	QCOMPARE(model.index(model.firstRowForSeq(2ULL) + 2).data(ConversationModel::KindRole).toString(), u"code"_s);
+	QCOMPARE(model.seqForRow(8), 2);
 }
 
 QTEST_GUILESS_MAIN(TestConversationModel)

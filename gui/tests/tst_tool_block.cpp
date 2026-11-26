@@ -16,6 +16,7 @@
 #include <QtTest>
 #include <cmath>
 #include <memory>
+#include <utility>
 
 using namespace Qt::StringLiterals;
 using refgui::proto::ToolState;
@@ -42,6 +43,40 @@ QQuickItem* findLoader(QQuickItem* parent)
 } // namespace
 
 
+class StubSession : public QObject
+{
+	Q_OBJECT
+
+public:
+	explicit StubSession(ConversationModel& model, QObject* parent = nullptr)
+		: QObject(parent)
+		, m_model(model)
+	{
+	}
+
+	Q_INVOKABLE int seqForRow(int row) const { return m_model.seqForRow(row); }
+	Q_INVOKABLE int firstRowForSeq(int seq) const
+	{
+		return seq < 0 ? -1 : m_model.firstRowForSeq(static_cast<quint64>(seq));
+	}
+	Q_INVOKABLE int rowCountForSeq(int seq) const
+	{
+		return seq < 0 ? 0 : m_model.rowCountForSeq(static_cast<quint64>(seq));
+	}
+	Q_INVOKABLE void setVisibleSeqRange(int startSeq, int endSeq)
+	{
+		visibleRanges.append({startSeq, endSeq});
+	}
+	Q_INVOKABLE void setColumnWidth(double width) { m_model.setColumnWidth(width); }
+	Q_INVOKABLE void setFollowing(bool value) { following = value; }
+
+	QList<std::pair<int, int>> visibleRanges;
+	bool following = true;
+
+private:
+	ConversationModel& m_model;
+};
+
 class TestToolBlock : public QObject
 {
 	Q_OBJECT
@@ -54,6 +89,10 @@ private slots:
 	void wheelReversalTurnsAroundAtOnce();
 	void touchpadCoastInertiaAndBounds();
 	void touchpadReverseUpdateStopsCoast();
+	void wheelGlideSurvivesContentShift();
+	void reportVisibleRangeHandlesInterRowGaps();
+	void materializePreservesMultiBlockRowAnchor();
+	void evictPreservesRowAnchor();
 };
 
 void TestToolBlock::initTestCase()
@@ -539,6 +578,338 @@ void TestToolBlock::touchpadReverseUpdateStopsCoast()
 	QVERIFY(!view->property("coasting").toBool());
 	QCOMPARE(view->property("coastVelocity").toReal(), 0.0);
 
+	view->setProperty("model", QVariant::fromValue<QObject*>(nullptr));
+}
+
+void TestToolBlock::wheelGlideSurvivesContentShift()
+{
+	QQmlEngine engine;
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+
+	QList<refgui::proto::Message> messages;
+	for(int i = 0; i < 30; ++i)
+	{
+		messages.append(refgui::test::user(u"u%1"_s.arg(i), u"Question %1 with enough text to fill the view."_s.arg(i)));
+		messages.append(refgui::test::assistant(u"a%1"_s.arg(i), {refgui::test::text(u"Answer %1\nSecond line\nThird line"_s.arg(i))}));
+	}
+
+	ConversationModel model;
+	model.reset(messages);
+
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/ChatView.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+
+	QQuickWindow window;
+	window.resize(WindowWidth, WindowHeight);
+	window.show();
+	QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* view = qobject_cast<QQuickItem*>(created.get());
+	QVERIFY(view);
+	view->setParentItem(window.contentItem());
+	view->setWidth(WindowWidth);
+	view->setHeight(WindowHeight);
+	view->setProperty("model", QVariant::fromValue<QObject*>(&model));
+
+	QTRY_VERIFY(view->property("maxContentY").toReal() > view->property("minContentY").toReal() + 1200.0);
+	const qreal minY = view->property("minContentY").toReal();
+	const qreal maxY = view->property("maxContentY").toReal();
+	const qreal startY = std::floor(minY + (maxY - minY) * 0.75);
+	QVERIFY(QMetaObject::invokeMethod(view, "scrollTo", Q_ARG(QVariant, startY), Q_ARG(QVariant, false)));
+	QCOMPARE(view->property("contentY").toReal(), startY);
+
+	const QPointF localCenter(WindowWidth / 2.0, WindowHeight / 2.0);
+	const QPointF globalCenter = window.mapToGlobal(localCenter);
+	for(int i = 0; i < 3; ++i)
+	{
+		QWheelEvent ev(localCenter, globalCenter, QPoint(), QPoint(0, 120),
+		               Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+		QCoreApplication::sendEvent(&window, &ev);
+	}
+	QTest::qWait(20);
+	QVERIFY(view->property("wheeling").toBool());
+	const qreal remainingBeforeShift = view->property("wheelRemaining").toReal();
+	QVERIFY(remainingBeforeShift < -50.0);
+
+	// Simulate ListView originY/delegate-recycling shifting contentY past the old absolute target.
+	const qreal shiftedY = view->property("contentY").toReal() - 200.0;
+	QVERIFY(shiftedY > minY + 100.0);
+	view->setProperty("contentY", shiftedY);
+	const qreal targetAfterShift = view->property("wheelTarget").toReal();
+	QVERIFY(targetAfterShift < shiftedY);
+	QVERIFY(std::abs(targetAfterShift - (shiftedY + remainingBeforeShift)) < 2.0);
+
+	QTRY_VERIFY(!view->property("wheeling").toBool());
+	const qreal finalY = view->property("contentY").toReal();
+	QVERIFY(finalY < shiftedY);
+	QVERIFY(std::abs(finalY - targetAfterShift) < 2.0);
+
+	view->setProperty("model", QVariant::fromValue<QObject*>(nullptr));
+}
+
+void TestToolBlock::reportVisibleRangeHandlesInterRowGaps()
+{
+	QQmlEngine engine;
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+
+	QList<refgui::proto::Message> messages;
+	for(int i = 0; i < 20; ++i)
+	{
+		messages.append(refgui::test::user(u"u%1"_s.arg(i), u"Prompt %1"_s.arg(i)));
+		messages.append(refgui::test::assistant(u"a%1"_s.arg(i), {refgui::test::text(u"Reply %1\nSecond line"_s.arg(i))}));
+	}
+	const int lastSeq = static_cast<int>(messages.size()) - 1;
+
+	ConversationModel model;
+	model.reset(messages);
+	StubSession stub(model);
+
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/ChatView.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+
+	QQuickWindow window;
+	window.resize(WindowWidth, WindowHeight);
+	window.show();
+	QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* view = qobject_cast<QQuickItem*>(created.get());
+	QVERIFY(view);
+	view->setParentItem(window.contentItem());
+	view->setWidth(WindowWidth);
+	view->setHeight(WindowHeight);
+	view->setProperty("model", QVariant::fromValue<QObject*>(&model));
+	view->setProperty("session", QVariant::fromValue<QObject*>(&stub));
+
+	QTRY_VERIFY(view->property("maxContentY").toReal() > view->property("minContentY").toReal() + 600.0);
+	const qreal midY = std::round((view->property("minContentY").toReal() + view->property("maxContentY").toReal()) / 2.0);
+	QVERIFY(QMetaObject::invokeMethod(view, "scrollTo", Q_ARG(QVariant, midY), Q_ARG(QVariant, false)));
+	QVERIFY(QMetaObject::invokeMethod(view, "forceLayout"));
+
+	const int midRow = model.rowCount() / 2;
+	QQuickItem* midItem = nullptr;
+	QTRY_VERIFY([&] {
+		QMetaObject::invokeMethod(view, "itemAtIndex", Q_RETURN_ARG(QQuickItem*, midItem), Q_ARG(int, midRow));
+		return midItem != nullptr && midItem->height() > 0;
+	}());
+
+	// Place contentY squarely inside the 14px blockSpacing gap below midItem.
+	const qreal gapY = midItem->y() + midItem->height() + 7.0;
+	view->setProperty("contentY", gapY);
+	QVERIFY(QMetaObject::invokeMethod(view, "forceLayout"));
+	int indexAtGap = -1;
+	QVERIFY(QMetaObject::invokeMethod(view, "indexAt", Q_RETURN_ARG(int, indexAtGap), Q_ARG(qreal, WindowWidth / 2.0), Q_ARG(qreal, gapY)));
+	QCOMPARE(indexAtGap, -1);
+
+	view->setProperty("lastReportedStart", -1);
+	view->setProperty("lastReportedEnd", -1);
+	stub.visibleRanges.clear();
+	QVERIFY(QMetaObject::invokeMethod(view, "reportVisibleRange"));
+	QVERIFY(!stub.visibleRanges.isEmpty());
+	const auto [startSeq, endSeq] = stub.visibleRanges.last();
+	QVERIFY(startSeq > 0);
+	QVERIFY(endSeq < lastSeq);
+	QVERIFY(startSeq <= endSeq);
+
+	view->setProperty("session", QVariant::fromValue<QObject*>(nullptr));
+	view->setProperty("model", QVariant::fromValue<QObject*>(nullptr));
+}
+
+void TestToolBlock::materializePreservesMultiBlockRowAnchor()
+{
+	QQmlEngine engine;
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+
+	constexpr int PlaceholderCount = 10;
+	QList<refgui::proto::MessageLayoutMeta> metas;
+	metas.reserve(PlaceholderCount);
+	for(int i = 0; i < PlaceholderCount; ++i)
+	{
+		metas.append(refgui::proto::MessageLayoutMeta{
+			.seq = static_cast<quint64>(i),
+			.id = u"m_%1"_s.arg(i),
+			.role = (i % 2 == 0) ? refgui::proto::Role::User : refgui::proto::Role::Assistant,
+			.sourceKind = u"human"_s,
+			.parts = {refgui::proto::PartLayoutMeta{.kind = u"text"_s, .chars = 40, .lines = 1}},
+		});
+	}
+	QList<refgui::proto::Message> tail;
+	tail.append(refgui::test::user(u"m_10"_s, u"Show code"_s));
+	tail.append(refgui::test::assistant(
+		u"m_11"_s,
+		{refgui::test::reasoning(u"Thinking line 1\nThinking line 2\nThinking line 3"_s),
+		 refgui::test::text(u"First paragraph.\n\n```cpp\nint a = 1;\nint b = 2;\nint c = 3;\nint d = 4;\n```\n\nTrailing paragraph."_s)}));
+	for(int i = 12; i < 20; ++i)
+	{
+		const QString id = u"m_%1"_s.arg(i);
+		tail.append(i % 2 == 0 ? refgui::test::user(id, u"Followup %1"_s.arg(i))
+		                       : refgui::test::assistant(id, {refgui::test::text(u"Reply %1\nLine 2\nLine 3"_s.arg(i))}));
+	}
+
+	ConversationModel model;
+	model.reset(tail, static_cast<quint64>(PlaceholderCount + tail.size()), PlaceholderCount, metas);
+	StubSession stub(model);
+
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/ChatView.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+
+	QQuickWindow window;
+	window.resize(WindowWidth, WindowHeight);
+	window.show();
+	QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* view = qobject_cast<QQuickItem*>(created.get());
+	QVERIFY(view);
+	view->setParentItem(window.contentItem());
+	view->setWidth(WindowWidth);
+	view->setHeight(WindowHeight);
+	view->setProperty("model", QVariant::fromValue<QObject*>(&model));
+	view->setProperty("session", QVariant::fromValue<QObject*>(&stub));
+
+	QTRY_VERIFY(view->property("maxContentY").toReal() > view->property("minContentY").toReal() + 400.0);
+	// Target block offset 2 (code block) of seq 11.
+	constexpr int AnchorSeq = 11;
+	constexpr int RowOffset = 2;
+	const int anchorRowBefore = model.firstRowForSeq(AnchorSeq) + RowOffset;
+	QCOMPARE(model.index(anchorRowBefore).data(ConversationModel::KindRole).toString(), u"code"_s);
+
+	view->setProperty("following", false);
+	QVERIFY(QMetaObject::invokeMethod(view, "positionViewAtIndex", Q_ARG(int, anchorRowBefore), Q_ARG(int, 0)));
+	QQuickItem* anchorItemBefore = nullptr;
+	QTRY_VERIFY([&] {
+		QMetaObject::invokeMethod(view, "itemAtIndex", Q_RETURN_ARG(QQuickItem*, anchorItemBefore), Q_ARG(int, anchorRowBefore));
+		return anchorItemBefore != nullptr && anchorItemBefore->height() > 20.0;
+	}());
+	constexpr qreal IntraOffset = 12.0;
+	const qreal yBefore = anchorItemBefore->y() + IntraOffset;
+	QVERIFY(QMetaObject::invokeMethod(view, "scrollTo", Q_ARG(QVariant, yBefore), Q_ARG(QVariant, false)));
+	QVERIFY(!view->property("following").toBool());
+	QVERIFY(std::abs(view->property("contentY").toReal() - yBefore) < 1.5);
+
+	QVERIFY(QMetaObject::invokeMethod(view, "prepareMaterialize"));
+	QCOMPARE(view->property("anchorSeq").toInt(), AnchorSeq);
+	QCOMPARE(view->property("anchorRowOffset").toInt(), RowOffset);
+
+	QList<refgui::proto::Message> batch;
+	batch.reserve(PlaceholderCount);
+	for(int i = 0; i < PlaceholderCount; ++i)
+	{
+		const QString id = u"m_%1"_s.arg(i);
+		batch.append(i % 2 == 0 ? refgui::test::user(id, u"User %1\nLine 2\nLine 3\nLine 4"_s.arg(i))
+		                        : refgui::test::assistant(id, {refgui::test::text(u"Assistant %1\n\n```txt\na\nb\nc\n```"_s.arg(i))}));
+	}
+	model.materializeRange(0, batch);
+	QVERIFY(QMetaObject::invokeMethod(view, "finishMaterialize"));
+	QTRY_VERIFY(!view->property("materializing").toBool());
+
+	const int anchorRowAfter = model.firstRowForSeq(AnchorSeq) + RowOffset;
+	QVERIFY(anchorRowAfter > anchorRowBefore);
+	QQuickItem* anchorItemAfter = nullptr;
+	QTRY_VERIFY([&] {
+		QMetaObject::invokeMethod(view, "itemAtIndex", Q_RETURN_ARG(QQuickItem*, anchorItemAfter), Q_ARG(int, anchorRowAfter));
+		return anchorItemAfter != nullptr;
+	}());
+	const qreal actualY = view->property("contentY").toReal();
+	QVERIFY(std::abs(actualY - (anchorItemAfter->y() + IntraOffset)) < 1.5);
+	QVariant topRowVar;
+	QVERIFY(QMetaObject::invokeMethod(view, "rowNearY", Q_RETURN_ARG(QVariant, topRowVar), Q_ARG(QVariant, actualY + 2.0), Q_ARG(QVariant, 1)));
+	QCOMPARE(topRowVar.toInt(), anchorRowAfter);
+
+	view->setProperty("session", QVariant::fromValue<QObject*>(nullptr));
+	view->setProperty("model", QVariant::fromValue<QObject*>(nullptr));
+}
+
+void TestToolBlock::evictPreservesRowAnchor()
+{
+	QQmlEngine engine;
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+
+	constexpr int TotalMessages = 28;
+	QList<refgui::proto::Message> messages;
+	messages.reserve(TotalMessages);
+	for(int i = 0; i < TotalMessages; ++i)
+	{
+		const QString id = u"m_%1"_s.arg(i);
+		if(i % 2 == 0)
+		{
+			messages.append(refgui::test::user(id, u"Prompt %1"_s.arg(i)));
+		}
+		else
+		{
+			messages.append(refgui::test::assistant(
+				id,
+				{refgui::test::reasoning(u"Reasoning %1"_s.arg(i)),
+				 refgui::test::text(u"Body %1.\n\n```cpp\nint v = %1;\nint w = v + 1;\n```\n\nDone."_s.arg(i))}));
+		}
+	}
+
+	ConversationModel model;
+	model.setMessageWindowSize(10);
+	model.reset(messages);
+	StubSession stub(model);
+
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/ChatView.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+
+	QQuickWindow window;
+	window.resize(WindowWidth, WindowHeight);
+	window.show();
+	QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* view = qobject_cast<QQuickItem*>(created.get());
+	QVERIFY(view);
+	view->setParentItem(window.contentItem());
+	view->setWidth(WindowWidth);
+	view->setHeight(WindowHeight);
+	view->setProperty("model", QVariant::fromValue<QObject*>(&model));
+	view->setProperty("session", QVariant::fromValue<QObject*>(&stub));
+
+	QTRY_VERIFY(view->property("maxContentY").toReal() > view->property("minContentY").toReal() + 800.0);
+	constexpr int AnchorSeq = 19;
+	constexpr int RowOffset = 2;
+	const int anchorRowBefore = model.firstRowForSeq(AnchorSeq) + RowOffset;
+	QCOMPARE(model.index(anchorRowBefore).data(ConversationModel::KindRole).toString(), u"code"_s);
+
+	view->setProperty("following", false);
+	QVERIFY(QMetaObject::invokeMethod(view, "positionViewAtIndex", Q_ARG(int, anchorRowBefore), Q_ARG(int, 0)));
+	QQuickItem* anchorItemBefore = nullptr;
+	QTRY_VERIFY([&] {
+		QMetaObject::invokeMethod(view, "itemAtIndex", Q_RETURN_ARG(QQuickItem*, anchorItemBefore), Q_ARG(int, anchorRowBefore));
+		return anchorItemBefore != nullptr && anchorItemBefore->height() > 20.0;
+	}());
+	constexpr qreal IntraOffset = 10.0;
+	const qreal yBefore = anchorItemBefore->y() + IntraOffset;
+	QVERIFY(QMetaObject::invokeMethod(view, "scrollTo", Q_ARG(QVariant, yBefore), Q_ARG(QVariant, false)));
+	QVERIFY(!view->property("following").toBool());
+	QVERIFY(std::abs(view->property("contentY").toReal() - yBefore) < 1.5);
+
+	QVERIFY(QMetaObject::invokeMethod(view, "prepareEvict"));
+	const QStringList evicted = model.evictOutside(18, 22);
+	QVERIFY(!evicted.isEmpty());
+	QVERIFY(QMetaObject::invokeMethod(view, "finishEvict"));
+	QTRY_VERIFY(!view->property("evicting").toBool());
+
+	const int anchorRowAfter = model.firstRowForSeq(AnchorSeq) + RowOffset;
+	QVERIFY(anchorRowAfter < anchorRowBefore);
+	QQuickItem* anchorItemAfter = nullptr;
+	QTRY_VERIFY([&] {
+		QMetaObject::invokeMethod(view, "itemAtIndex", Q_RETURN_ARG(QQuickItem*, anchorItemAfter), Q_ARG(int, anchorRowAfter));
+		return anchorItemAfter != nullptr;
+	}());
+	const qreal actualY = view->property("contentY").toReal();
+	QVERIFY(std::abs(actualY - (anchorItemAfter->y() + IntraOffset)) < 1.5);
+	QVariant topRowVar;
+	QVERIFY(QMetaObject::invokeMethod(view, "rowNearY", Q_RETURN_ARG(QVariant, topRowVar), Q_ARG(QVariant, actualY + 2.0), Q_ARG(QVariant, 1)));
+	QCOMPARE(topRowVar.toInt(), anchorRowAfter);
+
+	view->setProperty("session", QVariant::fromValue<QObject*>(nullptr));
 	view->setProperty("model", QVariant::fromValue<QObject*>(nullptr));
 }
 QTEST_MAIN(TestToolBlock)

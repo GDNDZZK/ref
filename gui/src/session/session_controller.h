@@ -132,6 +132,8 @@ signals:
 	void loadingOlderChanged();
 	void aboutToMaterialize();
 	void materialized();
+	void aboutToEvict();
+	void evicted();
 	void messagesEvicted(const QStringList& messageIds);
 	void rangeErrorChanged();
 	// The backend reported a problem with the session (an Error event).

@@ -43,6 +43,8 @@ ChatSession::ChatSession(Backend& backend, const refgui::workspace::BackendConfi
 	connect(this, &ChatSession::draftRestored, &m_composer, &refgui::composer::ComposerModel::restoreDraft);
 	connect(&m_controller, &refgui::session::SessionController::aboutToMaterialize, this, &ChatSession::aboutToMaterialize);
 	connect(&m_controller, &refgui::session::SessionController::materialized, this, &ChatSession::materialized);
+	connect(&m_controller, &refgui::session::SessionController::aboutToEvict, this, &ChatSession::aboutToEvict);
+	connect(&m_controller, &refgui::session::SessionController::evicted, this, &ChatSession::evicted);
 	connect(&m_controller, &refgui::session::SessionController::messagesEvicted, this, &ChatSession::messagesEvicted);
 	connect(&m_controller, &refgui::session::SessionController::rangeErrorChanged, this, [this] {
 		const QString& err = m_controller.rangeError();
@@ -642,6 +644,15 @@ int ChatSession::firstRowForSeq(int seq) const
 		return -1;
 	}
 	return m_controller.model().firstRowForSeq(static_cast<quint64>(seq));
+}
+
+int ChatSession::rowCountForSeq(int seq) const
+{
+	if(seq < 0)
+	{
+		return 0;
+	}
+	return m_controller.model().rowCountForSeq(static_cast<quint64>(seq));
 }
 
 int ChatSession::seqForRow(int row) const
