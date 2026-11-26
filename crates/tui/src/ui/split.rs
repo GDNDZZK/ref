@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ref_proto::SessionInfo;
 
 use super::dialog::draw_rounded_border;
@@ -197,7 +197,7 @@ pub fn draw_frame(
     focused: bool,
     tick: u64,
     agents: &[ref_proto::AgentInfo],
-    root: Option<(&str, &str)>,
+    root: Option<(&str, Color)>,
 ) -> Rect {
     if r.width < 4 || r.height < 3 {
         return Rect::default();
@@ -210,7 +210,7 @@ pub fn draw_frame(
             ref_proto::SessionStatus::WaitingPermission | ref_proto::SessionStatus::WaitingQuestion
         );
     let has_error = v.info.last_error.is_some() || v.error.is_some();
-    let root_color = root.map(|(root_id, _)| theme::root_task_color(root_id));
+    let root_color = root.map(|(_, color)| color);
     let bc = if focused {
         theme::PRIMARY
     } else if needs_attention {
@@ -247,12 +247,12 @@ pub fn draw_frame(
         theme::bold(theme::TEXT)
     };
     put(&v.info.name, name_style, &mut x);
-    if let Some((root_id, rname)) = root {
+    if let Some((rname, rcolor)) = root {
         let chip = format!(
             " ⟲ {}",
             text::truncate(&text::one_line(rname), ROOT_CHIP_NAME_MAX)
         );
-        put(&chip, theme::fg(theme::root_task_color(root_id)), &mut x);
+        put(&chip, theme::fg(rcolor), &mut x);
     }
     put(text::SEPARATOR, theme::muted(), &mut x);
     put(&v.info.agent, theme::fg(ac), &mut x);

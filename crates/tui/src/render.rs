@@ -1008,6 +1008,12 @@ fn draw_watch_mode(
         ];
         draw_center(buf, body, &lines);
     }
+    let root_ids: Vec<String> = app
+        .live
+        .iter()
+        .filter_map(|s| split::root_task(s, &app.live, &app.history_list).map(|(id, _)| id))
+        .collect();
+    let root_colors = theme::assign_root_colors(root_ids.iter().map(String::as_str));
     for (sid, r) in app.watch.tiles.clone() {
         let focused = app.watch.focus.as_deref() == Some(sid.as_str()) && app.dialog.is_none();
         let Some(mut v) = app.views.remove(&sid) else {
@@ -1015,15 +1021,14 @@ fn draw_watch_mode(
             if let Some(info) = app.live.iter().find(|s| s.id == sid).cloned() {
                 let tmp = SessionView::new(info, false);
                 let root = split::root_task(&tmp.info, &app.live, &app.history_list);
-                let inner = split::draw_frame(
-                    buf,
-                    r,
-                    &tmp,
-                    focused,
-                    tick,
-                    app.agents(),
-                    root.as_ref().map(|(id, name)| (id.as_str(), name.as_str())),
-                );
+                let root_arg = root.as_ref().map(|(id, name)| {
+                    let color = root_colors
+                        .get(id)
+                        .copied()
+                        .unwrap_or_else(|| theme::root_task_color(id));
+                    (name.as_str(), color)
+                });
+                let inner = split::draw_frame(buf, r, &tmp, focused, tick, app.agents(), root_arg);
                 draw_center(
                     buf,
                     inner,
@@ -1033,15 +1038,14 @@ fn draw_watch_mode(
             continue;
         };
         let root = split::root_task(&v.info, &app.live, &app.history_list);
-        let inner = split::draw_frame(
-            buf,
-            r,
-            &v,
-            focused,
-            tick,
-            app.agents(),
-            root.as_ref().map(|(id, name)| (id.as_str(), name.as_str())),
-        );
+        let root_arg = root.as_ref().map(|(id, name)| {
+            let color = root_colors
+                .get(id)
+                .copied()
+                .unwrap_or_else(|| theme::root_task_color(id));
+            (name.as_str(), color)
+        });
+        let inner = split::draw_frame(buf, r, &v, focused, tick, app.agents(), root_arg);
         if inner.width > 2 && inner.height > 0 {
             let content = Rect::new(inner.x + 1, inner.y, inner.width - 2, inner.height);
             let e = env(app, now, tick);

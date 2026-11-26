@@ -1105,6 +1105,15 @@ impl StashDialog {
             self.member_scroll = self.member_sel + 1 - list_h;
         }
         let now = ref_proto::now_ms();
+        let creator_colors = theme::assign_root_colors(groups.iter().flat_map(|grp| {
+            grp.members.iter().map(|m| {
+                m.info
+                    .parent
+                    .as_deref()
+                    .filter(|p| !p.is_empty())
+                    .unwrap_or(m.info.id.as_str())
+            })
+        }));
         for (row_i, (mi, m)) in g
             .members
             .iter()
@@ -1133,15 +1142,30 @@ impl StashDialog {
                 fade(theme::MUTED)
             };
             buf.set_style(Rect::new(r.x, y, r.width, 1), Style::new().bg(rbg));
+            let creator_key = m
+                .info
+                .parent
+                .as_deref()
+                .filter(|p| !p.is_empty())
+                .unwrap_or(m.info.id.as_str());
+            let creator_tint = creator_colors
+                .get(creator_key)
+                .copied()
+                .unwrap_or_else(|| theme::root_task_color(creator_key));
+            let bar_fg = if selected && active {
+                theme::PANEL
+            } else {
+                fade(creator_tint)
+            };
             let title = if m.info.title.trim().is_empty() {
                 m.info.name.clone()
             } else {
                 format!("{} · {}", m.info.name, text::one_line(&m.info.title))
             };
-            let left = vec![Span::styled(
-                format!(" {title}"),
-                Style::new().fg(fg).bg(rbg),
-            )];
+            let left = vec![
+                Span::styled("▍", Style::new().fg(bar_fg).bg(rbg)),
+                Span::styled(format!(" {title}"), Style::new().fg(fg).bg(rbg)),
+            ];
             let right = vec![Span::styled(
                 format!("{} ", text::fmt_ago(m.info.updated_at, now)),
                 Style::new().fg(muted).bg(rbg),

@@ -8447,3 +8447,186 @@ fn welcome_logo_rows_align_vertically() {
         assert_eq!(cols, vec![cols[0]; 3], "width {w} logo misaligned:\n{s}");
     }
 }
+
+#[test]
+fn theme_assign_root_colors_handles_collisions_balance_empty_and_single() {
+    use crate::ui::theme;
+    use std::collections::HashSet;
+
+    // Construction `prefix + cc` has identical `hash % 8` for all ASCII `c` because 31*31 ≡ 1 and 31*c+c = 32*c ≡ 0 (mod 8).
+    let colliding_8 = [
+        "ses_col_aa",
+        "ses_col_bb",
+        "ses_col_cc",
+        "ses_col_dd",
+        "ses_col_ee",
+        "ses_col_ff",
+        "ses_col_gg",
+        "ses_col_hh",
+    ];
+    for id in &colliding_8 {
+        assert_eq!(
+            theme::root_task_color(id),
+            theme::root_task_color("ses_col_aa")
+        );
+    }
+    let assigned_8 = theme::assign_root_colors(colliding_8.iter().copied());
+    assert_eq!(assigned_8.len(), 8);
+    let distinct: HashSet<_> = assigned_8.values().copied().collect();
+    assert_eq!(distinct.len(), 8);
+
+    let many = [
+        "ses_col_aa",
+        "ses_col_bb",
+        "ses_col_cc",
+        "ses_col_dd",
+        "ses_col_ee",
+        "ses_col_ff",
+        "ses_col_gg",
+        "ses_col_hh",
+        "ses_col_ii",
+        "ses_col_jj",
+    ];
+    let assigned_many = theme::assign_root_colors(many.iter().copied());
+    assert_eq!(assigned_many.len(), 10);
+    let counts: Vec<usize> = theme::ROOT_TASK_PALETTE
+        .iter()
+        .map(|c| assigned_many.values().filter(|v| *v == c).count())
+        .collect();
+    let max_c = *counts.iter().max().unwrap();
+    let min_c = *counts.iter().min().unwrap();
+    assert!(max_c - min_c <= 1, "unbalanced slots: {counts:?}");
+
+    let deduped = theme::assign_root_colors(["", "ses_col_aa", "ses_col_aa", "", "ses_col_bb"]);
+    assert_eq!(deduped.len(), 2);
+    assert!(!deduped.contains_key(""));
+    assert_ne!(deduped["ses_col_aa"], deduped["ses_col_bb"]);
+
+    let single = theme::assign_root_colors(["ses_single"]);
+    assert_eq!(
+        single.get("ses_single").copied(),
+        Some(theme::root_task_color("ses_single"))
+    );
+}
+
+#[test]
+fn split_view_colliding_roots_render_distinct_border_and_chip_colors() {
+    use crate::ui::theme;
+    assert_eq!(
+        theme::root_task_color("ses_col_aa"),
+        theme::root_task_color("ses_col_bb")
+    );
+    let mut app = test_app(false);
+    app.mode = Mode::Watch;
+    let mut r1 = bg_session("ses_col_aa", "root-one", SessionStatus::Idle, 0);
+    r1.live = false;
+    let mut r2 = bg_session("ses_col_bb", "root-two", SessionStatus::Idle, 0);
+    r2.live = false;
+    app.history_list = vec![r1, r2];
+
+    let mut c1 = bg_session("ses_c1", "child-one", SessionStatus::Idle, 0);
+    c1.parent = Some("ses_col_aa".into());
+    c1.created_at = 1;
+    let mut c2 = bg_session("ses_c2", "child-two", SessionStatus::Idle, 0);
+    c2.parent = Some("ses_col_bb".into());
+    c2.created_at = 2;
+    app.views
+        .insert("ses_c1".into(), SessionView::new(c1.clone(), false));
+    app.views
+        .insert("ses_c2".into(), SessionView::new(c2.clone(), false));
+    app.live = vec![c1, c2];
+    app.watch.focus = None;
+
+    let (term, s) = render(&mut app, 140, 36);
+    assert!(s.contains("child-one ⟲ root-one"), "{s}");
+    assert!(s.contains("child-two ⟲ root-two"), "{s}");
+    let buf = term.backend().buffer();
+    let rc1 = tile_rect(&app, "ses_c1");
+    let rc2 = tile_rect(&app, "ses_c2");
+    let b1 = buf[(rc1.x, rc1.y)].fg;
+    let b2 = buf[(rc2.x, rc2.y)].fg;
+    assert_ne!(b1, b2);
+    let chip_fg = |r: ratatui::layout::Rect| {
+        (r.x..r.x + r.width)
+            .find(|&x| buf[(x, r.y)].symbol() == "⟲")
+            .map(|x| buf[(x, r.y)].fg)
+            .expect("⟲ chip present")
+    };
+    let chip1 = chip_fg(rc1);
+    let chip2 = chip_fg(rc2);
+    assert_eq!(chip1, b1);
+    assert_eq!(chip2, b2);
+    assert_ne!(chip1, chip2);
+}
+
+#[test]
+fn stash_dialog_member_accent_bars_resolve_creator_collisions() {
+    use crate::ui::dialog::Dialog;
+    use crate::ui::theme;
+    assert_eq!(
+        theme::root_task_color("ses_col_aa"),
+        theme::root_task_color("ses_col_bb")
+    );
+    let mut app = test_app(false);
+    let mut m1 = bg_session("ses_m1", "worker-1", SessionStatus::Idle, 0);
+    m1.parent = Some("ses_col_aa".into());
+    let mut m2 = bg_session("ses_m2", "worker-2", SessionStatus::Idle, 0);
+    m2.parent = Some("ses_col_bb".into());
+    let mut m3 = bg_session("ses_m3", "worker-3", SessionStatus::Idle, 0);
+    m3.parent = Some("ses_col_aa".into());
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::GroupsChanged {
+        groups: vec![StashGroup {
+            id: "grp_1".into(),
+            name: "work".into(),
+            locked: false,
+            created_at: 10,
+            updated_at: 20,
+            members: vec![
+                StashMember {
+                    session_id: "ses_m1".into(),
+                    position: 0,
+                    info: m1,
+                },
+                StashMember {
+                    session_id: "ses_m2".into(),
+                    position: 1,
+                    info: m2,
+                },
+                StashMember {
+                    session_id: "ses_m3".into(),
+                    position: 2,
+                    info: m3,
+                },
+            ],
+        }],
+    }));
+    app.run_command("stashed", "");
+    if let Some(Dialog::Stash(d)) = app.dialog.as_mut() {
+        d.opened = std::time::Instant::now() - std::time::Duration::from_secs(1);
+    }
+    let (term, s) = render(&mut app, 110, 30);
+    assert!(
+        s.contains("worker-1") && s.contains("worker-2") && s.contains("worker-3"),
+        "{s}"
+    );
+    let members_rect = match app.dialog.as_ref() {
+        Some(Dialog::Stash(d)) => d.members_rect,
+        _ => panic!("expected stash dialog"),
+    };
+    let buf = term.backend().buffer();
+    let x = members_rect.x;
+    let (y0, y1, y2) = (members_rect.y + 1, members_rect.y + 2, members_rect.y + 3);
+    assert_eq!(buf[(x, y0)].symbol(), "▍");
+    assert_eq!(buf[(x, y1)].symbol(), "▍");
+    assert_eq!(buf[(x, y2)].symbol(), "▍");
+    let (c0, c1, c2) = (buf[(x, y0)].fg, buf[(x, y1)].fg, buf[(x, y2)].fg);
+    assert_ne!(c0, c1);
+    assert_eq!(c0, c2);
+
+    press(&mut app, KeyCode::Tab);
+    let (term_active, _) = render(&mut app, 110, 30);
+    let buf_active = term_active.backend().buffer();
+    assert_eq!(buf_active[(x, y0)].fg, theme::PANEL);
+    assert_eq!(buf_active[(x, y1)].fg, c1);
+    assert_eq!(buf_active[(x, y2)].fg, c2);
+}

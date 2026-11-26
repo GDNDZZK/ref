@@ -1,5 +1,7 @@
 //! opencode dark palette. Background is never painted except for panels.
 
+use std::collections::HashMap;
+
 use ratatui::style::{Color, Modifier, Style};
 
 pub const fn rgb(hex: u32) -> Color {
@@ -127,14 +129,44 @@ pub fn agent_color(agents: &[ref_proto::AgentInfo], name: &str) -> Color {
     AGENT_PALETTE[i % AGENT_PALETTE.len()]
 }
 
-/// Deterministic root-task accent colour from `ROOT_TASK_PALETTE`.
-pub fn root_task_color(root_id: &str) -> Color {
-    let h = root_id.bytes().fold(0usize, |a, b| {
+fn root_task_hash(root_id: &str) -> usize {
+    root_id.bytes().fold(0usize, |a, b| {
         a.wrapping_mul(NAME_HASH_MULTIPLIER)
             .wrapping_add(b as usize)
-    });
-    ROOT_TASK_PALETTE[h % ROOT_TASK_PALETTE.len()]
+    })
 }
+
+/// Deterministic root-task accent colour from `ROOT_TASK_PALETTE`.
+pub fn root_task_color(root_id: &str) -> Color {
+    ROOT_TASK_PALETTE[root_task_hash(root_id) % ROOT_TASK_PALETTE.len()]
+}
+
+/// Conflict-free deterministic tint colour assignment for concurrent root/parent sessions.
+pub fn assign_root_colors<'a>(
+    root_ids: impl IntoIterator<Item = &'a str>,
+) -> HashMap<String, Color> {
+    let mut ids: Vec<&'a str> = root_ids.into_iter().filter(|id| !id.is_empty()).collect();
+    ids.sort_unstable();
+    ids.dedup();
+
+    let len = ROOT_TASK_PALETTE.len();
+    let mut used = [0usize; ROOT_TASK_PALETTE.len()];
+    let mut assigned = HashMap::with_capacity(ids.len());
+
+    for id in ids {
+        let preferred = root_task_hash(id) % len;
+        let min_used = *used.iter().min().unwrap_or(&0);
+        let slot = (0..len)
+            .map(|offset| (preferred + offset) % len)
+            .find(|&s| used[s] == min_used)
+            .unwrap_or(preferred);
+        used[slot] += 1;
+        assigned.insert(id.to_string(), ROOT_TASK_PALETTE[slot]);
+    }
+
+    assigned
+}
+
 /// Linear blend of two RGB colours (t = 0 → a, 1 → b).
 pub fn blend(a: Color, b: Color, t: f32) -> Color {
     match (a, b) {
