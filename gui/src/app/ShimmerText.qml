@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Effects
 import RefGui
 
 // Text with an angled multi-stop highlight sweep across the glyphs while work continues.
@@ -19,9 +18,7 @@ Item {
 	readonly property real spanWidthRatio: 1.4
 	readonly property real midStopRatio: 0.28
 	readonly property real midColorWeight: 0.3
-	readonly property real rotatedHeightMultiplier: 1.5
 	readonly property bool active: running && visible && width > 0 && height > 0 && label !== ""
-	readonly property bool useGpuEffect: GraphicsInfo.api !== GraphicsInfo.Software && GraphicsInfo.api !== GraphicsInfo.Null
 	readonly property real pixelScale: Math.max(1, (Screen.devicePixelRatio || 1) * UiScale.factor)
 	property real phase: 0
 
@@ -56,16 +53,17 @@ Item {
 		return style + weight + px + "px " + family
 	}
 
-	function requestFallbackPaint() {
-		if (active && !useGpuEffect)
+	function requestCanvasPaint() {
+		if (active)
 			canvas.requestPaint()
 	}
 
-	onLabelChanged: requestFallbackPaint()
-	onColorChanged: requestFallbackPaint()
-	onHighlightChanged: requestFallbackPaint()
-	onActiveChanged: requestFallbackPaint()
-	onPixelScaleChanged: requestFallbackPaint()
+	onLabelChanged: requestCanvasPaint()
+	onColorChanged: requestCanvasPaint()
+	onHighlightChanged: requestCanvasPaint()
+	onActiveChanged: requestCanvasPaint()
+	onPixelScaleChanged: requestCanvasPaint()
+	onPhaseChanged: requestCanvasPaint()
 
 	Text {
 		id: baseText
@@ -73,7 +71,8 @@ Item {
 		textFormat: Text.PlainText
 		text: shimmer.label
 		color: shimmer.color
-		visible: !shimmer.active || shimmer.useGpuEffect
+		visible: !shimmer.active
+		onFontChanged: shimmer.requestCanvasPaint()
 	}
 
 	FontMetrics {
@@ -85,81 +84,7 @@ Item {
 		running: shimmer.active
 		onTriggered: {
 			shimmer.phase = (shimmer.phase + frameTime * Format.msPerSecond / shimmer.shimmerPeriod) % 1
-			if (!shimmer.useGpuEffect)
-				canvas.requestPaint()
 		}
-	}
-
-	Item {
-		id: brightSource
-		visible: false
-		width: Math.max(1, Math.ceil(shimmer.width * UiScale.factor))
-		height: Math.max(1, Math.ceil(shimmer.height * UiScale.factor))
-
-		Text {
-			transformOrigin: Item.TopLeft
-			scale: UiScale.factor
-			width: shimmer.width
-			height: shimmer.height
-			textFormat: Text.PlainText
-			text: shimmer.label
-			font: baseText.font
-			color: shimmer.highlight
-		}
-	}
-
-	Item {
-		id: maskContent
-		visible: false
-		width: brightSource.width
-		height: brightSource.height
-
-		Rectangle {
-			readonly property real span: Math.max(shimmer.width * shimmer.spanWidthRatio, shimmer.minSweepSpan)
-			readonly property real travel: shimmer.width + span
-			readonly property real centerX: (-span * 0.5 + shimmer.phase * travel) * UiScale.factor
-
-			x: centerX - width / 2
-			y: (parent.height - height) / 2
-			width: span * UiScale.factor
-			height: Math.hypot(parent.width, parent.height) * shimmer.rotatedHeightMultiplier
-			rotation: shimmer.sweepAngleDeg
-			antialiasing: true
-			gradient: Gradient {
-				orientation: Gradient.Horizontal
-				GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0) }
-				GradientStop { position: shimmer.midStopRatio; color: Qt.rgba(1, 1, 1, shimmer.midColorWeight) }
-				GradientStop { position: 0.5; color: Qt.rgba(1, 1, 1, 1) }
-				GradientStop { position: 1 - shimmer.midStopRatio; color: Qt.rgba(1, 1, 1, shimmer.midColorWeight) }
-				GradientStop { position: 1.0; color: Qt.rgba(1, 1, 1, 0) }
-			}
-		}
-	}
-
-	// ShaderEffectSource is always a texture provider from creation (unlike toggling layer.enabled on an Item,
-	// which leaves MultiEffect bound to a dummy texture), 0x0 skips drawing the proxy quad while still updating
-	// the offscreen texture, and sourceItem: null skips layer allocation on software backends.
-	ShaderEffectSource {
-		id: maskSource
-		width: 0
-		height: 0
-		live: shimmer.active && shimmer.useGpuEffect
-		smooth: true
-		sourceItem: shimmer.useGpuEffect ? maskContent : null
-	}
-
-	MultiEffect {
-		visible: shimmer.active && shimmer.useGpuEffect
-		width: brightSource.width
-		height: brightSource.height
-		transformOrigin: Item.TopLeft
-		scale: 1 / UiScale.factor
-		source: brightSource
-		maskEnabled: true
-		maskSource: maskSource
-		maskThresholdMin: 0.5
-		maskSpreadAtMin: 1.0
-		autoPaddingEnabled: false
 	}
 
 	Canvas {
@@ -168,10 +93,10 @@ Item {
 		height: Math.max(1, Math.ceil(shimmer.height * shimmer.pixelScale))
 		transformOrigin: Item.TopLeft
 		scale: 1 / shimmer.pixelScale
-		visible: shimmer.active && !shimmer.useGpuEffect
+		visible: shimmer.active
 
-		onWidthChanged: shimmer.requestFallbackPaint()
-		onHeightChanged: shimmer.requestFallbackPaint()
+		onWidthChanged: shimmer.requestCanvasPaint()
+		onHeightChanged: shimmer.requestCanvasPaint()
 
 		onPaint: {
 			const ctx = getContext("2d")

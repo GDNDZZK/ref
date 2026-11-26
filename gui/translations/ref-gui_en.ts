@@ -37,17 +37,6 @@
     </message>
 </context>
 <context>
-    <name>FloatingBallWindow</name>
-    <message numerus="yes">
-        <location filename="../src/app/FloatingBallWindow.qml" line="490"/>
-        <source>%n running session(s)</source>
-        <translation>
-            <numerusform>%n running session</numerusform>
-            <numerusform>%n running sessions</numerusform>
-        </translation>
-    </message>
-</context>
-<context>
     <name>GrepBody</name>
     <message numerus="yes">
         <location filename="../src/app/GrepBody.qml" line="63"/>

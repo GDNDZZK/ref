@@ -600,7 +600,7 @@ private slots:
 	void splitViewSidebarToggleBlursFadesAndFreezesLayoutWidth();
 	void backendDialogSwitchAndStatusPillActionWorkWithoutWarnings();
 	void stashButtonDialogAndSplitFilterCapsuleWorkWithoutWarnings();
-	void floatingBallModeTransitionsBetweenBallHoverCardAndMiniPanelWithoutWarnings();
+	void floatingBallModeExpandsAndCollapsesInSingleWindowWithoutWarnings();
 	void cleanupTestCase();
 };
 
@@ -4233,9 +4233,16 @@ void TestMainWindow::stashButtonDialogAndSplitFilterCapsuleWorkWithoutWarnings()
 	f.workspace->toggleSplit();
 	QTRY_VERIFY(!f.workspace->isSplitView());
 
-	// Sidebar stash button left-click stashes all running sessions; second left-click opens StashDialog.
+	// Sidebar stash button is positioned to the left of New session and folder buttons;
+	// left-click stashes all running sessions and second left-click opens StashDialog.
 	QQuickItem* stashBtn = findItem(window->contentItem(), [](QQuickItem* item) { return item->objectName() == u"sidebarStashButton"_s; });
-	QVERIFY(stashBtn);
+	QQuickItem* newSessionBtn = findItem(window->contentItem(), [](QQuickItem* item) { return item->objectName() == u"sidebarNewSessionButton"_s; });
+	QQuickItem* folderBtn = findItem(window->contentItem(), [](QQuickItem* item) { return item->property("iconName").toString() == u"folder-open"_s; });
+	QVERIFY(stashBtn && newSessionBtn && folderBtn);
+	QVERIFY(stashBtn->x() < newSessionBtn->x());
+	QVERIFY(newSessionBtn->x() < folderBtn->x());
+	QVERIFY(stashBtn->x() + stashBtn->width() <= newSessionBtn->x());
+	QVERIFY(newSessionBtn->x() + newSessionBtn->width() <= folderBtn->x());
 	const QPoint stashCenter = stashBtn->mapToScene(QPointF(stashBtn->width() / 2.0, stashBtn->height() / 2.0)).toPoint();
 	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, stashCenter);
 	QTRY_COMPARE(f.workspace->stash()->groupCount(), 1);
@@ -4254,7 +4261,7 @@ void TestMainWindow::stashButtonDialogAndSplitFilterCapsuleWorkWithoutWarnings()
 	QVERIFY2(warningSpy.isEmpty(), "Stash UI or split filter capsule emitted QML warnings");
 }
 
-void TestMainWindow::floatingBallModeTransitionsBetweenBallHoverCardAndMiniPanelWithoutWarnings()
+void TestMainWindow::floatingBallModeExpandsAndCollapsesInSingleWindowWithoutWarnings()
 {
 	MainFixture f;
 
@@ -4294,46 +4301,87 @@ void TestMainWindow::floatingBallModeTransitionsBetweenBallHoverCardAndMiniPanel
 	QTRY_VERIFY(!window->isVisible());
 
 	QQuickWindow* ballWin = nullptr;
-	QQuickWindow* hoverWin = nullptr;
-	QQuickWindow* panelWin = nullptr;
 	QQuickItem* ballRoot = nullptr;
+	QQuickItem* panelRoot = nullptr;
 	QTRY_VERIFY([&] {
 		ballWin = window->findChild<QQuickWindow*>(u"floatingBallWindow"_s);
-		hoverWin = window->findChild<QQuickWindow*>(u"floatingHoverCard"_s);
-		panelWin = window->findChild<QQuickWindow*>(u"floatingPanelWindow"_s);
 		ballRoot = ballWin ? findItem(ballWin->contentItem(), [](QQuickItem* item) { return item->objectName() == u"floatingBallRoot"_s; }) : nullptr;
-		return ballWin != nullptr && hoverWin != nullptr && panelWin != nullptr
-		       && ballWin->isVisible()
+		panelRoot = ballWin ? findItem(ballWin->contentItem(), [](QQuickItem* item) { return item->objectName() == u"floatingPanelRoot"_s; }) : nullptr;
+		return ballWin != nullptr && ballWin->isVisible()
 		       && ballRoot != nullptr && ballRoot->isVisible()
+		       && panelRoot != nullptr && !panelRoot->isVisible()
 		       && qRound(ballRoot->width()) == 56 && qRound(ballRoot->height()) == 56;
 	}());
+	QCOMPARE(window->findChild<QQuickWindow*>(u"floatingHoverCard"_s), nullptr);
+	QCOMPARE(window->findChild<QQuickWindow*>(u"floatingPanelWindow"_s), nullptr);
+	QVERIFY(ballWin->flags().testFlag(Qt::WindowStaysOnTopHint));
 	QCOMPARE(ballWin->width(), 56);
 	QCOMPARE(ballWin->height(), 56);
 	QVERIFY(QTest::qWaitForWindowExposed(ballWin));
 	ballWin->requestActivate();
 	QCoreApplication::processEvents();
+	const QPoint initialBallPos = ballWin->position();
 
-	// Hover ball to show super-mini card, then click ball to open mini panel.
+	// Hover ball: stays 56x56 with no separate hover window.
 	QTest::mouseMove(ballWin, QPoint(28, 28));
-	QTRY_VERIFY(hoverWin->isVisible());
+	QTest::qWait(180);
+	QCOMPARE(window->findChild<QQuickWindow*>(u"floatingHoverCard"_s), nullptr);
+	QCOMPARE(ballWin->width(), 56);
+	QCOMPARE(ballWin->height(), 56);
+	QVERIFY(ballRoot->isVisible());
+	QVERIFY(!panelRoot->isVisible());
+
+	// Click ball: same window expands to 380x520 mini panel.
 	QTest::mouseClick(ballWin, Qt::LeftButton, Qt::NoModifier, QPoint(28, 28), 20);
-	QTRY_VERIFY(panelWin->isVisible());
-	QTRY_VERIFY(!ballWin->isVisible());
-	QTRY_VERIFY(!hoverWin->isVisible());
-	QVERIFY(QTest::qWaitForWindowExposed(panelWin));
-	panelWin->requestActivate();
+	QTRY_VERIFY([&] {
+		return ballWin->isVisible()
+		       && ballWin->width() == 380 && ballWin->height() == 520
+		       && panelRoot->isVisible() && !ballRoot->isVisible();
+	}());
+	QCOMPARE(window->findChild<QQuickWindow*>(u"floatingBallWindow"_s), ballWin);
+	QVERIFY(QTest::qWaitForWindowExposed(ballWin));
+	ballWin->requestActivate();
 	QCoreApplication::processEvents();
 
-	// Return to full window from panel button.
+	// Click collapse button: same window collapses back to 56x56 ball.
+	QQuickItem* collapseBtn = nullptr;
+	QTRY_VERIFY([&] {
+		collapseBtn = findItem(ballWin->contentItem(), [](QQuickItem* item) { return item->objectName() == u"floatingCollapseButton"_s; });
+		return collapseBtn != nullptr && collapseBtn->isVisible();
+	}());
+	const QPoint collapseCenter = collapseBtn->mapToScene(QPointF(collapseBtn->width() / 2.0, collapseBtn->height() / 2.0)).toPoint();
+	QTest::mouseMove(ballWin, collapseCenter);
+	QTest::mouseClick(ballWin, Qt::LeftButton, Qt::NoModifier, collapseCenter, 20);
+	QTRY_VERIFY([&] {
+		return ballWin->isVisible()
+		       && ballWin->width() == 56 && ballWin->height() == 56
+		       && ballRoot->isVisible() && !panelRoot->isVisible();
+	}());
+	QCOMPARE(window->findChild<QQuickWindow*>(u"floatingBallWindow"_s), ballWin);
+	if(!QGuiApplication::platformName().startsWith(u"wayland"_s))
+	{
+		QCOMPARE(ballWin->position(), initialBallPos);
+	}
+
+	// Click ball again -> expands to 380x520, then return to full window.
+	QTest::mouseMove(ballWin, QPoint(28, 28));
+	QTest::mouseClick(ballWin, Qt::LeftButton, Qt::NoModifier, QPoint(28, 28), 20);
+	QTRY_VERIFY([&] {
+		return ballWin->isVisible()
+		       && ballWin->width() == 380 && ballWin->height() == 520
+		       && panelRoot->isVisible() && !ballRoot->isVisible();
+	}());
+
 	QQuickItem* returnBtn = nullptr;
 	QTRY_VERIFY([&] {
-		returnBtn = findItem(panelWin->contentItem(), [](QQuickItem* item) { return item->objectName() == u"floatingReturnButton"_s; });
+		returnBtn = findItem(ballWin->contentItem(), [](QQuickItem* item) { return item->objectName() == u"floatingReturnButton"_s; });
 		return returnBtn != nullptr && returnBtn->isVisible();
 	}());
 	const QPoint returnCenter = returnBtn->mapToScene(QPointF(returnBtn->width() / 2.0, returnBtn->height() / 2.0)).toPoint();
-	QTest::mouseMove(panelWin, returnCenter);
-	QTest::mouseClick(panelWin, Qt::LeftButton, Qt::NoModifier, returnCenter, 20);
+	QTest::mouseMove(ballWin, returnCenter);
+	QTest::mouseClick(ballWin, Qt::LeftButton, Qt::NoModifier, returnCenter, 20);
 	QTRY_VERIFY(window->isVisible());
+	QTRY_VERIFY(!ballWin->isVisible());
 	QCoreApplication::processEvents();
 	QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 

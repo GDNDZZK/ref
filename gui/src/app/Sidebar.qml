@@ -342,54 +342,9 @@ Rectangle {
 			height: sidebar.newRowHeight
 
 			Item {
-				id: newButton
-				x: Theme.sidebarPadding
-				anchors.verticalCenter: parent.verticalCenter
-				width: parent.width - 2 * Theme.sidebarPadding - stashButton.width - folderButton.width - 16
-				height: 36
-
-				Rectangle {
-					anchors.fill: parent
-					radius: 18
-					color: newHover.hovered ? Theme.surfaceHover : Theme.surface
-					border.color: Theme.border
-					scale: newTap.pressed ? 0.96 : 1
-
-					Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
-					Behavior on scale { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
-
-					Row {
-						anchors.centerIn: parent
-						spacing: 8
-
-						Icon {
-							anchors.verticalCenter: parent.verticalCenter
-							name: "chat-plus"
-							size: 16
-							color: Theme.text
-						}
-						Text {
-							textFormat: Text.PlainText
-							anchors.verticalCenter: parent.verticalCenter
-							text: qsTr("New session")
-							color: Theme.text
-							font.pixelSize: Theme.captionFontSize
-						}
-					}
-				}
-				HoverHandler {
-					id: newHover
-					cursorShape: Qt.PointingHandCursor
-				}
-				TapHandler {
-					id: newTap
-					onTapped: Commands.run(CommandId.newSession)
-				}
-			}
-			Item {
 				id: stashButton
 				objectName: "sidebarStashButton"
-				anchors { right: folderButton.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
+				anchors { left: parent.left; leftMargin: Theme.sidebarPadding; verticalCenter: parent.verticalCenter }
 				width: 36
 				height: 36
 				enabled: Workspace.connectionState === "connected"
@@ -461,6 +416,50 @@ Rectangle {
 						Workspace.stash.stashAll()
 					else
 						Workspace.openDialog(DialogId.stash)
+				}
+			}
+			Item {
+				id: newButton
+				objectName: "sidebarNewSessionButton"
+				anchors { left: stashButton.right; leftMargin: 8; right: folderButton.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
+				height: 36
+
+				Rectangle {
+					anchors.fill: parent
+					radius: 18
+					color: newHover.hovered ? Theme.surfaceHover : Theme.surface
+					border.color: Theme.border
+					scale: newTap.pressed ? 0.96 : 1
+
+					Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+					Behavior on scale { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+
+					Row {
+						anchors.centerIn: parent
+						spacing: 8
+
+						Icon {
+							anchors.verticalCenter: parent.verticalCenter
+							name: "chat-plus"
+							size: 16
+							color: Theme.text
+						}
+						Text {
+							textFormat: Text.PlainText
+							anchors.verticalCenter: parent.verticalCenter
+							text: qsTr("New session")
+							color: Theme.text
+							font.pixelSize: Theme.captionFontSize
+						}
+					}
+				}
+				HoverHandler {
+					id: newHover
+					cursorShape: Qt.PointingHandCursor
+				}
+				TapHandler {
+					id: newTap
+					onTapped: Commands.run(CommandId.newSession)
 				}
 			}
 			IconButton {

@@ -2,19 +2,18 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import RefGui
 
-// Floating ball mode with 3 states:
+// Floating ball mode in a single always-on-top window with two views:
 // 1) Compact 56x56 circular floating ball with status dot and running session count
-// 2) Hover super-mini summary card (120ms enter / 220ms exit delay, up to 4 active/attention sessions)
-// 3) Mini chat panel (~380x520) with session switcher, return buttons, and busy-guarded close
+// 2) Mini chat panel (~380x520) with session switcher, return buttons, and busy-guarded close
 Item {
 	id: root
 
-	readonly property bool panelActive: ballWindow.active || hoverWindow.active || panelWindow.active
+	readonly property bool panelActive: floatingWindow.active
 	readonly property bool supportsWindowPosition: !Qt.platform.pluginName.startsWith("wayland")
 	property bool panelExpanded: false
-	property bool hoverCardShown: false
 	property bool positionRestored: false
 	property bool syncingPosition: false
+	property bool settlingGeometry: false
 	property string screenName: ""
 	property int ballX: 0
 	property int ballY: 0
@@ -29,14 +28,7 @@ Item {
 	readonly property int ballCountBottomMargin: 5
 	readonly property int ballDotMargin: 6
 	readonly property int dragThreshold: 4
-	readonly property int hoverCloseMs: 220
-	readonly property int maxHoverRows: 4
-	readonly property int hoverCardWidth: 264
-	readonly property int minHoverCardHeight: 76
-	readonly property int hoverPaddingX: 12
-	readonly property int hoverPaddingY: 10
-	readonly property int hoverRowHeight: 32
-	readonly property int hoverRowSpacing: 6
+	readonly property int moveSyncGuardMs: 150
 	readonly property int panelWidth: 380
 	readonly property int panelHeight: 520
 	readonly property int panelHeaderHeight: 44
@@ -55,21 +47,6 @@ Item {
 		return Workspace.current
 	}
 
-	function subtitleForRow(row) {
-		const act = String(row.activity ?? Activity.idle)
-		if (act === Activity.waitingQuestion)
-			return qsTr("Waiting for your answer")
-		if (row.hasPermission === true)
-			return qsTr("Needs permission")
-		if (row.hasError === true)
-			return qsTr("Failed")
-		if (act === Activity.retrying)
-			return qsTr("Retrying")
-		if (act === Activity.compacting)
-			return qsTr("Compacting")
-		return String(row.dirName ?? "")
-	}
-
 	readonly property var aggregateInfo: {
 		void Workspace.sessions.count
 		void root.liveRevision
@@ -77,37 +54,16 @@ Item {
 		let hasPermission = false
 		let hasError = false
 		let working = false
-		const attentionOrWorking = []
-		const idleRows = []
 		for (let i = 0; i < count; ++i) {
 			const row = Workspace.sessions.rowAt(i)
-			const perm = row.hasPermission === true
-			const err = row.hasError === true
-			const act = String(row.activity ?? Activity.idle)
-			const rowWorking = Activity.isWorking(act)
-			if (perm)
+			if (row.hasPermission === true)
 				hasPermission = true
-			if (err)
+			if (row.hasError === true)
 				hasError = true
-			if (rowWorking)
+			const act = String(row.activity ?? Activity.idle)
+			if (Activity.isWorking(act))
 				working = true
-			const priority = perm ? 0 : (err ? 1 : (rowWorking ? 2 : 3))
-			const item = {
-				sessionId: String(row.sessionId ?? ""),
-				displayTitle: String(row.displayTitle ?? ""),
-				subtitle: subtitleForRow(row),
-				activity: act,
-				hasError: err,
-				hasPermission: perm,
-				priority: priority
-			}
-			if (priority < 3)
-				attentionOrWorking.push(item)
-			else
-				idleRows.push(item)
 		}
-		attentionOrWorking.sort((a, b) => a.priority - b.priority)
-		const previewSessions = (attentionOrWorking.length > 0 ? attentionOrWorking : idleRows).slice(0, root.maxHoverRows)
 		let activity = Activity.idle
 		if (hasPermission)
 			activity = Activity.waitingPermission
@@ -118,21 +74,46 @@ Item {
 			hasPermission: hasPermission,
 			hasError: hasError,
 			working: working,
-			activity: activity,
-			previewSessions: previewSessions
+			activity: activity
 		}
 	}
 
-	function applyBallCoordinates(nextX, nextY, nextScreen) {
+	function syncWindowGeometry() {
 		syncingPosition = true
+		settlingGeometry = true
+		moveSyncGuardTimer.restart()
+		if (!panelExpanded) {
+			floatingWindow.width = ballSize
+			floatingWindow.height = ballSize
+			if (supportsWindowPosition) {
+				floatingWindow.x = ballX
+				floatingWindow.y = ballY
+			}
+		} else {
+			const placed = Workspace.floatingBallHelper.computePanelGeometry(
+				ballX,
+				ballY,
+				ballSize,
+				ballSize,
+				panelWidth,
+				panelHeight,
+				screenName
+			)
+			if (supportsWindowPosition) {
+				floatingWindow.x = placed.x
+				floatingWindow.y = placed.y
+			}
+			floatingWindow.width = supportsWindowPosition ? placed.width : panelWidth
+			floatingWindow.height = supportsWindowPosition ? placed.height : panelHeight
+		}
+		syncingPosition = false
+	}
+
+	function applyBallCoordinates(nextX, nextY, nextScreen) {
 		ballX = nextX
 		ballY = nextY
 		screenName = nextScreen
-		if (supportsWindowPosition) {
-			ballWindow.x = nextX
-			ballWindow.y = nextY
-		}
-		syncingPosition = false
+		syncWindowGeometry()
 	}
 
 	function resolvePosition() {
@@ -154,12 +135,12 @@ Item {
 		applyBallCoordinates(clamped.x, clamped.y, clamped.screenName)
 	}
 
-	function handleBallMoved() {
-		if (!supportsWindowPosition || syncingPosition || !positionRestored || !ballWindow.visible)
+	function handleWindowMoved() {
+		if (!supportsWindowPosition || syncingPosition || settlingGeometry || !positionRestored || !floatingWindow.visible || panelExpanded)
 			return
-		const nextX = ballWindow.x
-		const nextY = ballWindow.y
-		const nextScreen = ballWindow.screen ? ballWindow.screen.name : screenName
+		const nextX = floatingWindow.x
+		const nextY = floatingWindow.y
+		const nextScreen = floatingWindow.screen ? floatingWindow.screen.name : screenName
 		if (nextX === ballX && nextY === ballY && nextScreen === screenName)
 			return
 		ballX = nextX
@@ -184,9 +165,6 @@ Item {
 	}
 
 	function openSessionInPanel(sessionId) {
-		hoverOpenTimer.stop()
-		hoverCloseTimer.stop()
-		hoverCardShown = false
 		confirmCloseShown = false
 		if (sessionId !== "") {
 			selectedSessionId = sessionId
@@ -214,11 +192,27 @@ Item {
 		Qt.quit()
 	}
 
+	onPanelExpandedChanged: {
+		syncWindowGeometry()
+		if (floatingWindow.visible) {
+			floatingWindow.raise()
+			if (panelExpanded)
+				floatingWindow.requestActivate()
+		}
+	}
+
 	Component.onCompleted: {
 		resolvePosition()
 		positionRestored = true
 		if (Workspace.currentId !== "")
 			selectedSessionId = Workspace.currentId
+	}
+
+	Timer {
+		id: moveSyncGuardTimer
+		interval: root.moveSyncGuardMs
+		repeat: false
+		onTriggered: root.settlingGeometry = false
 	}
 
 	Connections {
@@ -236,12 +230,11 @@ Item {
 				root.positionRestored = true
 				if (Workspace.currentId !== "")
 					root.selectedSessionId = Workspace.currentId
+				root.syncWindowGeometry()
 			} else {
-				hoverOpenTimer.stop()
-				hoverCloseTimer.stop()
-				root.hoverCardShown = false
 				root.confirmCloseShown = false
 				root.panelExpanded = false
+				root.syncWindowGeometry()
 			}
 		}
 	}
@@ -258,70 +251,70 @@ Item {
 		target: Workspace.floatingBallHelper
 		function onScreenGeometryChanged() {
 			root.clampBallPosition()
+			root.syncWindowGeometry()
 		}
 	}
 
-	Timer {
-		id: hoverOpenTimer
-		interval: Motion.quick // 120ms
-		onTriggered: root.hoverCardShown = true
-	}
-
-	Timer {
-		id: hoverCloseTimer
-		interval: root.hoverCloseMs
-		onTriggered: root.hoverCardShown = false
-	}
-
-	// 1) Compact 56x56 floating ball window.
-	// Wayland note: compositors own global coordinates and startSystemMove(); x/y persistence and
-	// inward screen-edge anchoring apply where the platform exposes global window geometry and
-	// gracefully degrade to compositor placement on Wayland.
+	// Single always-on-top window hosting both the compact ball and expanded mini panel.
+	// Wayland note: compositors govern stacking and global coordinates; startSystemMove()
+	// and x/y persistence gracefully degrade to compositor placement on Wayland.
 	Window {
-		id: ballWindow
+		id: floatingWindow
 		objectName: "floatingBallWindow"
 		// Independent of Main window, which is hidden while floating mode is active.
 		transientParent: null
-		visible: Workspace.floatingMode && !root.panelExpanded
+		visible: Workspace.floatingMode
 		width: root.ballSize
 		height: root.ballSize
 		color: "transparent"
-		flags: Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
+		flags: Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | (Qt.platform.os === "windows" ? Qt.Tool : 0)
 
-		onXChanged: root.handleBallMoved()
-		onYChanged: root.handleBallMoved()
-		onScreenChanged: root.handleBallMoved()
+		onVisibleChanged: {
+			if (visible) {
+				root.syncWindowGeometry()
+				floatingWindow.raise()
+			}
+		}
+		onXChanged: root.handleWindowMoved()
+		onYChanged: root.handleWindowMoved()
+		onScreenChanged: root.handleWindowMoved()
 		onClosing: close => {
 			if (Workspace.smoke)
 				return
 			if (Workspace.anySessionWorking() || Workspace.configEditor.dirty) {
 				close.accepted = false
-				root.expandPanel()
+				if (!root.panelExpanded)
+					root.expandPanel()
 				root.confirmCloseShown = true
 			}
 		}
 
 		Shortcut {
 			sequence: "Ctrl+Shift+F"
-			enabled: ballWindow.visible
+			enabled: floatingWindow.visible
 			onActivated: Commands.run(CommandId.floating)
 		}
 
+		// 1) Compact 56x56 circular floating ball.
 		Item {
 			id: ballRoot
 			objectName: "floatingBallRoot"
 			anchors.fill: parent
+			visible: !root.panelExpanded
 
 			Rectangle {
 				id: ballFace
 				anchors.fill: parent
 				radius: width / 2
 				color: ballHover.hovered ? Theme.surfaceHover : Theme.surface
-				border.color: root.aggregateInfo.hasPermission ? Theme.warningBorder : (root.aggregateInfo.hasError ? Theme.danger : Theme.border)
+				border.color: root.aggregateInfo.hasPermission
+					? Theme.warningBorder
+					: (root.aggregateInfo.hasError ? Theme.danger : (ballHover.hovered ? Theme.textMuted : Theme.border))
 				border.width: root.aggregateInfo.hasPermission || root.aggregateInfo.hasError ? 2 : 1
 				scale: ballMouse.pressed && !ballDrag.active ? 0.94 : 1
 
 				Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+				Behavior on border.color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 				Behavior on scale { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 
 				Image {
@@ -358,16 +351,6 @@ Item {
 			HoverHandler {
 				id: ballHover
 				cursorShape: ballDrag.active ? Qt.ClosedHandCursor : Qt.PointingHandCursor
-				onHoveredChanged: {
-					if (hovered) {
-						hoverCloseTimer.stop()
-						if (!ballDrag.active)
-							hoverOpenTimer.restart()
-					} else {
-						hoverOpenTimer.stop()
-						hoverCloseTimer.restart()
-					}
-				}
 			}
 
 			DragHandler {
@@ -377,10 +360,9 @@ Item {
 				grabPermissions: PointerHandler.CanTakeOverFromAnything
 				onActiveChanged: {
 					if (active) {
-						hoverOpenTimer.stop()
-						hoverCloseTimer.stop()
-						root.hoverCardShown = false
-						ballWindow.startSystemMove()
+						moveSyncGuardTimer.stop()
+						root.settlingGeometry = false
+						floatingWindow.startSystemMove()
 					}
 				}
 			}
@@ -419,192 +401,13 @@ Item {
 				}
 			}
 		}
-	}
 
-	// 2) Hover super-mini status card showing up to 4 active/attention sessions.
-	Window {
-		id: hoverWindow
-		objectName: "floatingHoverCard"
-		// Independent of Main window, which is hidden while floating mode is active.
-		transientParent: null
-		readonly property var placed: Workspace.floatingBallHelper.computePanelGeometry(
-			root.ballX,
-			root.ballY,
-			root.ballSize,
-			root.ballSize,
-			root.hoverCardWidth,
-			Math.max(root.minHoverCardHeight, hoverContent.implicitHeight + root.hoverPaddingY * 2),
-			root.screenName
-		)
-
-		visible: Workspace.floatingMode && !root.panelExpanded && root.hoverCardShown
-		x: placed.x
-		y: placed.y
-		width: placed.width
-		height: placed.height
-		color: "transparent"
-		flags: Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
-
-		onClosing: close => {
-			close.accepted = false
-			root.hoverCardShown = false
-		}
-
+		// 2) Mini chat panel (~380x520) anchored inward from the ball's screen corner.
 		Rectangle {
+			id: panelRoot
+			objectName: "floatingPanelRoot"
 			anchors.fill: parent
-			radius: Theme.radius
-			color: Theme.surface
-			border.color: root.aggregateInfo.hasPermission ? Theme.warningBorder : Theme.border
-
-			HoverHandler {
-				onHoveredChanged: {
-					if (hovered)
-						hoverCloseTimer.stop()
-					else
-						hoverCloseTimer.restart()
-				}
-			}
-
-			Column {
-				id: hoverContent
-				x: root.hoverPaddingX
-				y: root.hoverPaddingY
-				width: parent.width - 2 * root.hoverPaddingX
-				spacing: 4
-
-				Row {
-					width: parent.width
-					spacing: root.hoverRowSpacing
-
-					SessionDot {
-						anchors.verticalCenter: parent.verticalCenter
-						activity: root.aggregateInfo.activity
-						hasError: root.aggregateInfo.hasError
-						visible: root.aggregateInfo.count > 0
-					}
-
-					Text {
-						textFormat: Text.PlainText
-						width: parent.width - 14
-						text: root.aggregateInfo.count > 0
-							? qsTr("%n running session(s)", "", root.aggregateInfo.count)
-							: qsTr("No running sessions")
-						color: Theme.text
-						font { pixelSize: Theme.smallFontSize; bold: true }
-						elide: Text.ElideRight
-					}
-				}
-
-				Repeater {
-					model: root.aggregateInfo.previewSessions
-
-					delegate: Rectangle {
-						id: hoverSessionRow
-						required property var modelData
-						width: hoverContent.width
-						height: root.hoverRowHeight
-						radius: Theme.radiusSmall
-						color: rowHover.hovered ? Theme.surfaceHover : "transparent"
-
-						Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
-
-						Row {
-							anchors { left: parent.left; right: parent.right; leftMargin: 6; rightMargin: 6; verticalCenter: parent.verticalCenter }
-							spacing: root.hoverRowSpacing
-
-							SessionDot {
-								anchors.verticalCenter: parent.verticalCenter
-								activity: hoverSessionRow.modelData.activity
-								hasError: hoverSessionRow.modelData.hasError
-							}
-
-							Column {
-								width: Math.max(0, parent.width - 14)
-								anchors.verticalCenter: parent.verticalCenter
-								spacing: 1
-
-								Text {
-									textFormat: Text.PlainText
-									width: parent.width
-									text: hoverSessionRow.modelData.displayTitle
-									color: Theme.text
-									font.pixelSize: Theme.smallFontSize
-									elide: Text.ElideRight
-								}
-
-								Text {
-									textFormat: Text.PlainText
-									visible: hoverSessionRow.modelData.subtitle !== ""
-									width: parent.width
-									text: hoverSessionRow.modelData.subtitle
-									color: hoverSessionRow.modelData.hasPermission ? Theme.warningText : (hoverSessionRow.modelData.hasError ? Theme.dangerText : Theme.textMuted)
-									font.pixelSize: Theme.microFontSize
-									elide: Text.ElideRight
-								}
-							}
-						}
-
-						HoverHandler { id: rowHover; cursorShape: Qt.PointingHandCursor }
-						TapHandler { onTapped: root.openSessionInPanel(hoverSessionRow.modelData.sessionId) }
-					}
-				}
-
-				Text {
-					textFormat: Text.PlainText
-					visible: Workspace.connectionText !== "" || root.aggregateInfo.count === 0
-					width: parent.width
-					text: Workspace.connectionText !== ""
-						? Workspace.connectionText
-						: qsTr("Click ball to open panel")
-					color: Theme.textMuted
-					font.pixelSize: Theme.microFontSize
-					elide: Text.ElideRight
-				}
-			}
-		}
-	}
-
-	// 3) Mini chat panel (~380x520) anchored inward from the ball's screen corner.
-	Window {
-		id: panelWindow
-		objectName: "floatingPanelWindow"
-		// Independent of Main window, which is hidden while floating mode is active.
-		transientParent: null
-		readonly property var placed: Workspace.floatingBallHelper.computePanelGeometry(
-			root.ballX,
-			root.ballY,
-			root.ballSize,
-			root.ballSize,
-			root.panelWidth,
-			root.panelHeight,
-			root.screenName
-		)
-
-		visible: Workspace.floatingMode && root.panelExpanded
-		x: placed.x
-		y: placed.y
-		width: placed.width
-		height: placed.height
-		color: "transparent"
-		flags: Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
-
-		onClosing: close => {
-			if (Workspace.smoke)
-				return
-			if (Workspace.anySessionWorking() || Workspace.configEditor.dirty) {
-				root.confirmCloseShown = true
-				close.accepted = false
-			}
-		}
-
-		Shortcut {
-			sequence: "Ctrl+Shift+F"
-			enabled: panelWindow.visible
-			onActivated: Commands.run(CommandId.floating)
-		}
-
-		Rectangle {
-			anchors.fill: parent
+			visible: root.panelExpanded
 			radius: Theme.radiusLarge
 			color: Theme.background
 			border.color: Theme.border
@@ -627,7 +430,7 @@ Item {
 				DragHandler {
 					target: null
 					dragThreshold: root.dragThreshold
-					onActiveChanged: if (active) panelWindow.startSystemMove()
+					onActiveChanged: if (active) floatingWindow.startSystemMove()
 				}
 
 				Rectangle {
@@ -806,7 +609,7 @@ Item {
 					sourceComponent: SessionPane {
 						session: root.activeSession
 						compact: true
-						keysEnabled: panelWindow.active
+						keysEnabled: floatingWindow.active
 						composerShown: true
 					}
 				}

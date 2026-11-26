@@ -2320,106 +2320,64 @@ $ARGUMENTS</translation>
 <context>
     <name>FloatingBallWindow</name>
     <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="61"/>
-        <source>Waiting for your answer</source>
-        <translation>等待你的回答</translation>
-    </message>
-    <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="63"/>
-        <source>Needs permission</source>
-        <translation>需要授权</translation>
-    </message>
-    <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="65"/>
-        <source>Failed</source>
-        <translation>失败</translation>
-    </message>
-    <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="67"/>
-        <source>Retrying</source>
-        <translation>重试中</translation>
-    </message>
-    <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="69"/>
-        <source>Compacting</source>
-        <translation>压缩中</translation>
-    </message>
-    <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="403"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="385"/>
         <source>Open mini panel</source>
         <translation>打开迷你面板</translation>
     </message>
     <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="404"/>
-        <location filename="../src/app/FloatingBallWindow.qml" line="734"/>
-        <location filename="../src/app/FloatingBallWindow.qml" line="735"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="386"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="537"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="538"/>
         <source>Return to full window</source>
         <translation>返回完整窗口</translation>
     </message>
     <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="405"/>
-        <location filename="../src/app/FloatingBallWindow.qml" line="714"/>
-        <location filename="../src/app/FloatingBallWindow.qml" line="715"/>
-        <location filename="../src/app/FloatingBallWindow.qml" line="830"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="387"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="517"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="518"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="633"/>
         <source>New session</source>
         <translation>新建会话</translation>
     </message>
-    <message numerus="yes">
-        <location filename="../src/app/FloatingBallWindow.qml" line="490"/>
-        <source>%n running session(s)</source>
-        <translation>
-            <numerusform>%n 个运行中会话</numerusform>
-        </translation>
-    </message>
     <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="491"/>
-        <source>No running sessions</source>
-        <translation>没有运行中的会话</translation>
-    </message>
-    <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="558"/>
-        <source>Click ball to open panel</source>
-        <translation>点击悬浮球打开面板</translation>
-    </message>
-    <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="661"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="464"/>
         <source>Select session</source>
         <translation>选择会话</translation>
     </message>
     <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="661"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="464"/>
         <source>No session</source>
         <translation>无会话</translation>
     </message>
     <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="724"/>
-        <location filename="../src/app/FloatingBallWindow.qml" line="725"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="527"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="528"/>
         <source>Collapse to ball</source>
         <translation>收起为悬浮球</translation>
     </message>
     <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="744"/>
-        <location filename="../src/app/FloatingBallWindow.qml" line="745"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="547"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="548"/>
         <source>Close</source>
         <translation>关闭</translation>
     </message>
     <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="773"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="576"/>
         <source>Work is still running. Quit anyway?</source>
         <translation>仍有任务在运行。确定要退出吗？</translation>
     </message>
     <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="786"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="589"/>
         <source>Cancel</source>
         <translation>取消</translation>
     </message>
     <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="794"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="597"/>
         <source>Quit</source>
         <translation>退出</translation>
     </message>
     <message>
-        <location filename="../src/app/FloatingBallWindow.qml" line="822"/>
+        <location filename="../src/app/FloatingBallWindow.qml" line="625"/>
         <source>No session open</source>
         <translation>未打开会话</translation>
     </message>
