@@ -307,26 +307,15 @@ function variantOptionsFor(name: string): SelectOption[] {
           :can-reset="getAt(agentObj(meta.name), ['variant']) !== undefined"
           @reset="patchAgent(meta.name, ['variant'], undefined)"
         >
-          <div class="variant-field">
-            <SelectField
-              v-if="variantOptionsFor(meta.name).length > 0"
-              :model-value="getStringAt(agentObj(meta.name), ['variant']) ?? ''"
-              :options="variantOptionsFor(meta.name)"
-              :placeholder="t('config.editor.agents.variantDefaultPlaceholder')"
-              :label="t('config.editor.agents.variant')"
-              monospace
-              @update:model-value="patchAgentString(meta.name, ['variant'], $event)"
-            />
-            <input
-              :value="getStringAt(agentObj(meta.name), ['variant']) ?? ''"
-              type="text"
-              class="text-input mono"
-              spellcheck="false"
-              :placeholder="t('config.editor.agents.variantCustomPlaceholder')"
-              :aria-label="t('config.editor.agents.variant')"
-              @input="patchAgentString(meta.name, ['variant'], ($event.target as HTMLInputElement).value)"
-            />
-          </div>
+          <SelectField
+            :model-value="getStringAt(agentObj(meta.name), ['variant']) ?? ''"
+            :options="variantOptionsFor(meta.name)"
+            :placeholder="t('config.editor.agents.variantDefaultPlaceholder')"
+            :label="t('config.editor.agents.variant')"
+            editable
+            monospace
+            @update:model-value="patchAgentString(meta.name, ['variant'], $event)"
+          />
         </FormRow>
 
         <FormRow :label="t('config.editor.agents.color')">
@@ -542,26 +531,15 @@ function variantOptionsFor(name: string): SelectOption[] {
           :can-reset="getAt(agentObj(name), ['variant']) !== undefined"
           @reset="patchAgent(name, ['variant'], undefined)"
         >
-          <div class="variant-field">
-            <SelectField
-              v-if="variantOptionsFor(name).length > 0"
-              :model-value="getStringAt(agentObj(name), ['variant']) ?? ''"
-              :options="variantOptionsFor(name)"
-              :placeholder="t('config.editor.agents.variantDefaultPlaceholder')"
-              :label="t('config.editor.agents.variant')"
-              monospace
-              @update:model-value="patchAgentString(name, ['variant'], $event)"
-            />
-            <input
-              :value="getStringAt(agentObj(name), ['variant']) ?? ''"
-              type="text"
-              class="text-input mono"
-              spellcheck="false"
-              :placeholder="t('config.editor.agents.variantCustomPlaceholder')"
-              :aria-label="t('config.editor.agents.variant')"
-              @input="patchAgentString(name, ['variant'], ($event.target as HTMLInputElement).value)"
-            />
-          </div>
+          <SelectField
+            :model-value="getStringAt(agentObj(name), ['variant']) ?? ''"
+            :options="variantOptionsFor(name)"
+            :placeholder="t('config.editor.agents.variantDefaultPlaceholder')"
+            :label="t('config.editor.agents.variant')"
+            editable
+            monospace
+            @update:model-value="patchAgentString(name, ['variant'], $event)"
+          />
         </FormRow>
 
         <FormRow :label="t('config.editor.agents.color')">
@@ -809,12 +787,6 @@ function variantOptionsFor(name: string): SelectOption[] {
   gap: 8px;
 }
 
-.variant-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 100%;
-}
 .text-input {
   width: 100%;
   height: var(--field-height);

@@ -1,10 +1,11 @@
-import { mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { mount, type VueWrapper } from '@vue/test-utils'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createAppI18n } from '../../i18n/index.ts'
 import {
   ColorSwatchPicker,
   FormRow,
   KeyValueEditor,
+  ModelField,
   NumberField,
   PermissionRulesEditor,
   SecretField,
@@ -13,6 +14,12 @@ import {
   TextAreaField,
 } from './index.ts'
 
+const mounted: VueWrapper[] = []
+
+afterEach(() => {
+  mounted.splice(0).forEach((wrapper) => wrapper.unmount())
+  document.body.innerHTML = ''
+})
 function i18nGlobal(locale = 'en') {
   return { plugins: [createAppI18n([locale])] }
 }
@@ -75,6 +82,142 @@ describe('SelectField', () => {
 
     await select.setValue('openai/gpt-5')
     expect(model).toBe('openai/gpt-5')
+  })
+
+  it('supports editable combobox filtering, keyboard navigation, Escape propagation stop, and custom input', async () => {
+    let model = 'anthropic/claude-sonnet-4-5'
+    const wrapper = mount(SelectField, {
+      props: {
+        modelValue: model,
+        editable: true,
+        monospace: true,
+        options: [
+          { value: 'anthropic/claude-sonnet-4-5', label: 'Claude Sonnet 4.5 (anthropic/claude-sonnet-4-5)' },
+          { value: 'openai/gpt-5', label: 'GPT-5 (openai/gpt-5)' },
+          { value: 'google/gemini-2.5', label: 'Gemini 2.5 (google/gemini-2.5)', disabled: true },
+          { value: 'xai/grok-4', label: 'Grok 4 (xai/grok-4)' },
+        ],
+        placeholder: 'provider/model',
+        label: 'Default model',
+        'onUpdate:modelValue': (next: string) => {
+          model = next
+          void wrapper.setProps({ modelValue: next })
+        },
+      },
+      attachTo: document.body,
+      global: i18nGlobal(),
+    })
+    mounted.push(wrapper)
+
+    expect(wrapper.find('select').exists()).toBe(false)
+    const input = wrapper.get('input[role="combobox"]')
+    const toggle = wrapper.get('button.toggle')
+    expect(input.classes()).toContain('mono')
+    expect(input.attributes('aria-expanded')).toBe('false')
+    expect(document.body.querySelector('[role="listbox"]')).toBeNull()
+
+    // Clicking chevron toggle shows ALL options even when input holds a committed value.
+    await toggle.trigger('click')
+    expect(input.attributes('aria-expanded')).toBe('true')
+    const listbox = document.body.querySelector('[role="listbox"]')
+    expect(listbox).not.toBeNull()
+    expect(listbox!.querySelectorAll('[role="option"]')).toHaveLength(4)
+
+    // Escape closes dropdown and stops propagation so parent dialog listeners do not fire.
+    const parentEsc = vi.fn()
+    document.body.addEventListener('keydown', parentEsc)
+    await input.trigger('keydown', { key: 'Escape' })
+    document.body.removeEventListener('keydown', parentEsc)
+    expect(document.body.querySelector('[role="listbox"]')).toBeNull()
+    expect(input.attributes('aria-expanded')).toBe('false')
+    expect(parentEsc).not.toHaveBeenCalled()
+
+    // Typing filters options by label + value and updates modelValue immediately.
+    await input.setValue('gpt')
+    expect(model).toBe('gpt')
+    const filteredOptions = document.body.querySelectorAll('[role="option"]')
+    expect(filteredOptions).toHaveLength(1)
+    expect(filteredOptions[0]!.textContent?.trim()).toBe('GPT-5 (openai/gpt-5)')
+
+    // Clearing input shows all options again.
+    await input.setValue('')
+    expect(model).toBe('')
+    expect(document.body.querySelectorAll('[role="option"]')).toHaveLength(4)
+
+    // ArrowDown / ArrowUp cycle highlight skipping disabled items, and Enter picks the highlighted option.
+    await input.trigger('keydown', { key: 'Escape' })
+    expect(document.body.querySelector('[role="listbox"]')).toBeNull()
+
+    await input.trigger('keydown', { key: 'ArrowDown' }) // opens & highlights index 0 (Claude)
+    expect(document.body.querySelector('[role="listbox"]')).not.toBeNull()
+    await input.trigger('keydown', { key: 'ArrowDown' }) // index 1 (GPT-5)
+    await input.trigger('keydown', { key: 'ArrowDown' }) // skips disabled index 2 -> index 3 (Grok 4)
+    await input.trigger('keydown', { key: 'ArrowUp' }) // skips disabled index 2 -> index 1 (GPT-5)
+    await input.trigger('keydown', { key: 'Enter' })
+    expect(model).toBe('openai/gpt-5')
+    expect(document.body.querySelector('[role="listbox"]')).toBeNull()
+    expect((input.element as HTMLInputElement).value).toBe('openai/gpt-5')
+
+    // Typing a custom non-matching value updates modelValue and leaves listbox closed.
+    await input.setValue('custom/local-model')
+    expect(model).toBe('custom/local-model')
+    expect(document.body.querySelector('[role="listbox"]')).toBeNull()
+
+    // Clicking an option selects it and closes the dropdown; clicking outside also closes.
+    await toggle.trigger('click')
+    expect(document.body.querySelector('[role="listbox"]')).not.toBeNull()
+    document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+    await wrapper.vm.$nextTick()
+    expect(document.body.querySelector('[role="listbox"]')).toBeNull()
+
+    await toggle.trigger('click')
+    const firstOption = document.body.querySelectorAll('[role="option"]')[0] as HTMLElement
+    firstOption.click()
+    await wrapper.vm.$nextTick()
+    expect(model).toBe('anthropic/claude-sonnet-4-5')
+    expect(document.body.querySelector('[role="listbox"]')).toBeNull()
+  })
+})
+
+describe('ModelField', () => {
+  it('renders a single editable monospace combobox and omits toggle when options are empty', async () => {
+    let model = ''
+    const wrapper = mount(ModelField, {
+      props: {
+        modelValue: model,
+        options: [
+          { value: 'anthropic/claude-sonnet-4-5', label: 'Claude Sonnet 4.5 (anthropic/claude-sonnet-4-5)' },
+          { value: 'openai/gpt-5', label: 'GPT-5 (openai/gpt-5)' },
+        ],
+        label: 'Default model',
+        'onUpdate:modelValue': (next: string) => {
+          model = next
+          void wrapper.setProps({ modelValue: next })
+        },
+      },
+      attachTo: document.body,
+      global: i18nGlobal(),
+    })
+    mounted.push(wrapper)
+
+    expect(wrapper.find('select').exists()).toBe(false)
+    expect(wrapper.findAll('input')).toHaveLength(1)
+    const input = wrapper.get('input[role="combobox"]')
+    expect(input.classes()).toContain('mono')
+    expect(wrapper.find('button.toggle').exists()).toBe(true)
+
+    await wrapper.get('button.toggle').trigger('click')
+    const options = document.body.querySelectorAll('[role="option"]')
+    expect(options).toHaveLength(2)
+    ;(options[1] as HTMLElement).click()
+    await wrapper.vm.$nextTick()
+    expect(model).toBe('openai/gpt-5')
+
+    await input.setValue('ollama/qwen3')
+    expect(model).toBe('ollama/qwen3')
+
+    await wrapper.setProps({ options: [] })
+    expect(wrapper.find('button.toggle').exists()).toBe(false)
   })
 })
 

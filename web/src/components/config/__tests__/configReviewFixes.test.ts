@@ -733,7 +733,7 @@ describe('Agents Default variant dropdown from configured and server model varia
     expect(configuredVariantOptions({}, 'invalid-model-ref', serverModels)).toEqual([])
   })
 
-  it('renders SelectField + custom input + Reset for built-in and custom agents and syncs changes cleanly', async () => {
+  it('renders single editable SelectField combobox + Reset for built-in and custom agents and syncs changes cleanly', async () => {
     let doc: JsonObject = {
       model: 'anthropic/claude-sonnet-4-5',
       provider: {
@@ -753,50 +753,71 @@ describe('Agents Default variant dropdown from configured and server model varia
           void wrapper.setProps({ doc: next })
         },
       },
+      attachTo: document.body,
       global: i18nGlobal(),
     })
 
-    const cards = wrapper.findAll('.card')
-    const buildCard = cards[0]!
-    const reviewerCard = cards[cards.length - 1]!
-    await buildCard.get('.expand-btn').trigger('click')
-    await reviewerCard.get('.expand-btn').trigger('click')
+    try {
+      const cards = wrapper.findAll('.card')
+      const buildCard = cards[0]!
+      const reviewerCard = cards[cards.length - 1]!
+      await buildCard.get('.expand-btn').trigger('click')
+      await reviewerCard.get('.expand-btn').trigger('click')
 
-    // Built-in `build` inherits top-level `anthropic/claude-sonnet-4-5` -> variants from serverModels.
-    const buildVariantSelect = buildCard.get('select[aria-label="Default variant"]')
-    expect(buildVariantSelect.findAll('option').map((o) => o.attributes('value'))).toEqual([
-      '',
-      'medium',
-      'high',
-      'max',
-    ])
-    await buildVariantSelect.setValue('high')
-    expect((doc.agent as JsonObject).build).toEqual({ variant: 'high' })
-    expect((buildCard.get('input[aria-label="Default variant"]').element as HTMLInputElement).value).toBe(
-      'high',
-    )
+      // Built-in `build` inherits top-level `anthropic/claude-sonnet-4-5` -> variants from serverModels.
+      const buildVariantRow = buildCard
+        .findAll('.form-row')
+        .find((row) => row.text().includes('Default variant'))!
+      expect(buildVariantRow.find('select').exists()).toBe(false)
+      expect(buildVariantRow.findAll('input')).toHaveLength(1)
 
-    // Reset button clears variant override on built-in agent and prunes empty agent entry.
-    const buildVariantRow = buildCard
-      .findAll('.form-row')
-      .find((row) => row.text().includes('Default variant'))!
-    await buildVariantRow.get('.text-button').trigger('click')
-    expect((doc.agent as JsonObject).build).toBeUndefined()
-    expect(buildVariantRow.find('.text-button').exists()).toBe(false)
+      const buildVariantInput = buildVariantRow.get('input[role="combobox"][aria-label="Default variant"]')
+      await buildVariantRow.get('button.toggle').trigger('click')
+      const buildListbox = document.body.querySelector('[role="listbox"][aria-label="Default variant"]')
+      expect(buildListbox).not.toBeNull()
+      expect(
+        [...buildListbox!.querySelectorAll('[role="option"]')].map((o) => o.textContent?.trim()),
+      ).toEqual(['medium', 'high', 'max'])
 
-    // Custom `reviewer` uses its own model override `openai/gpt-5` -> variants from doc, plus custom entry & reset.
-    const reviewerVariantSelect = reviewerCard.get('select[aria-label="Default variant"]')
-    expect(reviewerVariantSelect.findAll('option').map((o) => o.attributes('value'))).toEqual([
-      '',
-      'minimal',
-      'reasoning',
-    ])
-    await reviewerCard.get('input[aria-label="Default variant"]').setValue('ultra')
-    expect(((doc.agent as JsonObject).reviewer as JsonObject).variant).toBe('ultra')
-    const reviewerVariantRow = reviewerCard
-      .findAll('.form-row')
-      .find((row) => row.text().includes('Default variant'))!
-    await reviewerVariantRow.get('.text-button').trigger('click')
-    expect(((doc.agent as JsonObject).reviewer as JsonObject).variant).toBeUndefined()
+      ;(buildListbox!.querySelectorAll('[role="option"]')[1] as HTMLElement).click()
+      await wrapper.vm.$nextTick()
+      expect((doc.agent as JsonObject).build).toEqual({ variant: 'high' })
+      expect((buildVariantInput.element as HTMLInputElement).value).toBe('high')
+      expect(document.body.querySelector('[role="listbox"]')).toBeNull()
+
+      // Reset button clears variant override on built-in agent and prunes empty agent entry.
+      await buildVariantRow.get('.text-button').trigger('click')
+      expect((doc.agent as JsonObject).build).toBeUndefined()
+      expect(buildVariantRow.find('.text-button').exists()).toBe(false)
+      expect((buildVariantInput.element as HTMLInputElement).value).toBe('')
+
+      // Custom `reviewer` uses its own model override `openai/gpt-5` -> variants from doc, plus custom entry & reset.
+      const reviewerVariantRow = reviewerCard
+        .findAll('.form-row')
+        .find((row) => row.text().includes('Default variant'))!
+      expect(reviewerVariantRow.find('select').exists()).toBe(false)
+      expect(reviewerVariantRow.findAll('input')).toHaveLength(1)
+
+      await reviewerVariantRow.get('button.toggle').trigger('click')
+      const reviewerListbox = document.body.querySelector('[role="listbox"][aria-label="Default variant"]')
+      expect(reviewerListbox).not.toBeNull()
+      expect(
+        [...reviewerListbox!.querySelectorAll('[role="option"]')].map((o) => o.textContent?.trim()),
+      ).toEqual(['minimal', 'reasoning'])
+
+      const reviewerVariantInput = reviewerVariantRow.get(
+        'input[role="combobox"][aria-label="Default variant"]',
+      )
+      await reviewerVariantInput.setValue('ultra')
+      expect(((doc.agent as JsonObject).reviewer as JsonObject).variant).toBe('ultra')
+      expect(document.body.querySelector('[role="listbox"]')).toBeNull()
+
+      await reviewerVariantRow.get('.text-button').trigger('click')
+      expect(((doc.agent as JsonObject).reviewer as JsonObject).variant).toBeUndefined()
+      expect((reviewerVariantInput.element as HTMLInputElement).value).toBe('')
+    } finally {
+      wrapper.unmount()
+      document.body.innerHTML = ''
+    }
   })
 })
