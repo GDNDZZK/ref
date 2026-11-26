@@ -760,7 +760,7 @@ void Workspace::openSession(const QString& sessionId)
 	}
 	if(m_split)
 	{
-		if(m_tiles.indexOf(sessionId) >= 0)
+		if(!m_floatingMode && m_tiles.indexOf(sessionId) >= 0)
 		{
 			if(!m_zoomed.isEmpty() && m_zoomed != sessionId)
 			{

@@ -3,11 +3,12 @@ import QtQuick
 import QtQuick.Controls
 import RefGui
 
-// A small pop-up menu. `entries` is a list of {text, danger}; `triggered(index)` tells the choice.
+// A small pop-up menu. `entries` is a list of {text, danger, checked}; `triggered(index)` tells the choice.
 Popup {
 	id: menu
 
 	property var entries: []
+	readonly property bool hasChecked: Array.isArray(entries) && entries.some(e => Boolean(e && e.checked === true))
 	readonly property int textInset: 14
 	readonly property int menuPadding: 4
 	readonly property real uiScale: UiScale.factor
@@ -73,14 +74,15 @@ Popup {
 
 						required property var modelData
 						required property int index
+						readonly property bool isChecked: Boolean(entry.modelData && entry.modelData.checked === true)
 
-						width: Math.max(150, label.implicitWidth + 2 * menu.textInset)
+						width: Math.max(150, label.implicitWidth + 2 * menu.textInset + (menu.hasChecked ? 24 : 0))
 						height: 32
 
 						Rectangle {
 							anchors.fill: parent
 							radius: Theme.radiusSmall + 2
-							color: entryMouse.containsMouse ? Theme.surfaceHover : "transparent"
+							color: entryMouse.containsMouse ? Theme.surfaceHover : (entry.isChecked ? Qt.alpha(Theme.accent, 0.12) : "transparent")
 
 							Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 						}
@@ -89,8 +91,15 @@ Popup {
 							id: label
 							anchors { left: parent.left; leftMargin: menu.textInset; verticalCenter: parent.verticalCenter }
 							text: entry.modelData.text
-							color: entry.modelData.danger ? Theme.dangerText : Theme.text
-							font.pixelSize: Theme.secondaryFontSize
+							color: entry.modelData && entry.modelData.danger ? Theme.dangerText : (entry.isChecked ? Theme.accentText : Theme.text)
+							font { pixelSize: Theme.secondaryFontSize; bold: entry.isChecked }
+						}
+						Icon {
+							anchors { right: parent.right; rightMargin: menu.textInset; verticalCenter: parent.verticalCenter }
+							name: "check"
+							size: 16
+							color: Theme.accentText
+							visible: entry.isChecked
 						}
 						MouseArea {
 							id: entryMouse

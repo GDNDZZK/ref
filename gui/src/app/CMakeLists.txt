@@ -54,6 +54,9 @@ qt_add_translations(ref-gui
 find_package(KF6SyntaxHighlighting REQUIRED)
 
 target_link_libraries(ref-gui PRIVATE refgui_workspace refgui_session refgui_composer refgui_notify refgui_cli refgui_icons Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2)
+if(WIN32)
+	target_link_libraries(ref-gui PRIVATE user32)
+endif()
 target_compile_definitions(ref-gui PRIVATE REF_GUI_VERSION="${PROJECT_VERSION}")
 refgui_configure_target(ref-gui)
 

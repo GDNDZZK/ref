@@ -29,6 +29,7 @@ Item {
 	property bool dragging: false
 	property real dragCardY: 0
 	property bool settlingDrag: false
+	property bool allowClose: true
 
 	signal dragActiveChanged(string sessionId, bool active)
 	signal reorderRequested(string sessionId, int toIndex)
@@ -45,7 +46,7 @@ Item {
 	readonly property bool hovered: hover.hovered
 	readonly property bool showHoverActions: hover.hovered && !row.anyDragging && !row.renaming
 	readonly property bool showPinButton: row.pinned || row.showHoverActions
-	readonly property bool showCloseButton: row.showHoverActions
+	readonly property bool showCloseButton: row.allowClose && row.showHoverActions
 	readonly property bool canDetach: isCurrent && !Workspace.splitView
 	readonly property int renameEntry: 0 // index in the context menu
 	// What the line under the title says.
@@ -196,7 +197,7 @@ Item {
 			width: {
 				if (row.showCloseButton)
 					return 46
-				if (row.pinned)
+				if (row.pinned && !row.showHoverActions)
 					return statusRow.width > 0 ? 22 + 4 + statusRow.width : 22
 				return 22
 			}
@@ -205,7 +206,7 @@ Item {
 				id: statusRow
 				anchors { right: row.pinned ? pinButton.left : parent.right; rightMargin: row.pinned ? 4 : 0; verticalCenter: parent.verticalCenter }
 				spacing: 4
-				opacity: row.showCloseButton ? 0 : 1
+				opacity: row.showHoverActions ? 0 : 1
 
 				Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 
@@ -263,8 +264,8 @@ Item {
 				iconName: "close"
 				iconSize: 16
 				opacity: row.showCloseButton ? 1 : 0
-				visible: opacity > 0
-				enabled: !row.anyDragging && !row.renaming
+				visible: row.allowClose && opacity > 0
+				enabled: row.allowClose && !row.anyDragging && !row.renaming
 				Accessible.name: qsTr("Close session")
 				onClicked: Workspace.requestCloseSession(row.sessionId)
 
@@ -480,8 +481,10 @@ Item {
 			]
 			if (row.canDetach)
 				items.push({text: qsTr("Move to background"), action: "detach"})
-			items.push({text: qsTr("Filter spawned history"), action: "filterSpawned"})
-			items.push({text: qsTr("Close"), danger: true, action: "close"})
+			if (row.allowClose) {
+				items.push({text: qsTr("Filter spawned history"), action: "filterSpawned"})
+				items.push({text: qsTr("Close"), danger: true, action: "close"})
+			}
 			return items
 		}
 		onTriggered: index => {
@@ -494,7 +497,7 @@ Item {
 				Workspace.detachCurrent()
 			else if (action === "filterSpawned")
 				Workspace.filterHistoryByCreator(row.sessionId)
-			else
+			else if (action === "close")
 				Workspace.requestCloseSession(row.sessionId)
 		}
 	}

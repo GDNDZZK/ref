@@ -1,9 +1,10 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import QtQuick.Controls
 import RefGui
 
 // Floating ball mode in a single always-on-top window with two views:
-// 1) Compact 56x56 circular floating ball with status dot and running session count
+// 1) Compact 56x56 circular floating ball with status dot and working/total session count
 // 2) Mini chat panel (~380x520) with session switcher, return buttons, and busy-guarded close
 Item {
 	id: root
@@ -14,39 +15,72 @@ Item {
 	property bool positionRestored: false
 	property bool syncingPosition: false
 	property bool settlingGeometry: false
+	property bool resizingPanel: false
 	property string screenName: ""
 	property int ballX: 0
 	property int ballY: 0
 	property int liveRevision: 0
 	property bool confirmCloseShown: false
+	property string draggingSessionId: ""
+	readonly property bool reorderingRunning: draggingSessionId !== ""
+	property real attentionScale: 1.0
 
-	readonly property int ballSize: 56
-	readonly property int ballIconSize: 24
-	readonly property int ballIconSourceSize: 48
-	readonly property int ballIconCountOffset: -4
-	readonly property int ballCountBottomMargin: 5
-	readonly property int ballDotMargin: 6
+	readonly property int ballSize: Workspace.settings.floatingBallSize
+	readonly property int ballIconSize: Math.max(16, Math.round(ballSize * 24 / 56))
+	readonly property int ballIconSourceSize: ballIconSize * 2
+	readonly property int ballIconCountOffset: -Math.max(3, Math.round(ballSize * 4 / 56))
+	readonly property int ballCountBottomMargin: Math.max(3, Math.round(ballSize * 5 / 56))
+	readonly property int ballDotMargin: Math.max(4, Math.round(ballSize * 6 / 56))
 	readonly property int dragThreshold: 4
 	readonly property int moveSyncGuardMs: 150
-	readonly property int panelWidth: 380
-	readonly property int panelHeight: 520
+	readonly property int panelWidth: Workspace.settings.floatingPanelWidth
+	readonly property int panelHeight: Workspace.settings.floatingPanelHeight
 	readonly property int panelHeaderHeight: 44
 	readonly property int switcherPillHeight: 28
 	readonly property int headerButtonSize: 28
 	readonly property int confirmBarHeight: 44
 	readonly property int headerIconReserve: 26
 	readonly property int switcherMenuGap: 4
-	readonly property int sessionRowHeight: 48
+	readonly property int runningRowSpacing: 2
 
 	readonly property ChatSession activeSession: Workspace.current
+	onActiveSessionChanged: {
+		if (activeSession !== null)
+			confirmCloseShown = false
+	}
+	onBallSizeChanged: {
+		if (floatingWindow.visible && !resizingPanel)
+			syncWindowGeometry()
+	}
+	onPanelWidthChanged: {
+		if (floatingWindow.visible && !resizingPanel)
+			syncWindowGeometry()
+	}
+	onPanelHeightChanged: {
+		if (floatingWindow.visible && !resizingPanel)
+			syncWindowGeometry()
+	}
 
 	readonly property var aggregateInfo: {
+		if (!Workspace.floatingMode) {
+			return {
+				count: 0,
+				workingCount: 0,
+				hasPermission: false,
+				hasQuestion: false,
+				needsAttention: false,
+				hasError: false,
+				working: false,
+				activity: Activity.idle
+			}
+		}
 		void Workspace.sessions.count
 		void root.liveRevision
 		const count = Workspace.sessions.count
+		let workingCount = 0
 		let hasPermission = false
+		let hasQuestion = false
 		let hasError = false
-		let working = false
 		for (let i = 0; i < count; ++i) {
 			const row = Workspace.sessions.rowAt(i)
 			if (row.hasPermission === true)
@@ -54,27 +88,43 @@ Item {
 			if (row.hasError === true)
 				hasError = true
 			const act = String(row.activity ?? Activity.idle)
+			if (act === Activity.waitingQuestion)
+				hasQuestion = true
 			if (Activity.isWorking(act))
-				working = true
+				++workingCount
 		}
-		let activity = Activity.idle
-		if (hasPermission)
-			activity = Activity.waitingPermission
-		else if (working)
-			activity = Activity.running
+		const working = workingCount > 0
+		const needsAttention = hasPermission || hasQuestion
+		const activity = hasPermission
+			? Activity.waitingPermission
+			: (hasQuestion ? Activity.waitingQuestion : (working ? Activity.running : Activity.idle))
 		return {
 			count: count,
+			workingCount: workingCount,
 			hasPermission: hasPermission,
+			hasQuestion: hasQuestion,
+			needsAttention: needsAttention,
 			hasError: hasError,
 			working: working,
 			activity: activity
 		}
 	}
 
+	readonly property bool ballAttentionActive: Workspace.floatingMode && !root.panelExpanded && root.aggregateInfo.needsAttention
+
+	function enforceTopMost() {
+		if (floatingWindow.visible)
+			Workspace.floatingBallHelper.ensureAlwaysOnTop(floatingWindow)
+	}
+
 	function syncWindowGeometry() {
 		syncingPosition = true
 		settlingGeometry = true
 		moveSyncGuardTimer.restart()
+		floatingWindow.minimumWidth = 0
+		floatingWindow.maximumWidth = 16777215
+		floatingWindow.minimumHeight = 0
+		floatingWindow.maximumHeight = 16777215
 		if (!panelExpanded) {
 			floatingWindow.width = ballSize
 			floatingWindow.height = ballSize
@@ -99,7 +149,12 @@ Item {
 			floatingWindow.width = supportsWindowPosition ? placed.width : panelWidth
 			floatingWindow.height = supportsWindowPosition ? placed.height : panelHeight
 		}
+		floatingWindow.minimumWidth = floatingWindow.width
+		floatingWindow.maximumWidth = floatingWindow.width
+		floatingWindow.minimumHeight = floatingWindow.height
+		floatingWindow.maximumHeight = floatingWindow.height
 		syncingPosition = false
+		Qt.callLater(enforceTopMost)
 	}
 
 	function applyBallCoordinates(nextX, nextY, nextScreen) {
@@ -129,7 +184,7 @@ Item {
 	}
 
 	function handleWindowMoved() {
-		if (!supportsWindowPosition || syncingPosition || settlingGeometry || !positionRestored || !floatingWindow.visible || panelExpanded)
+		if (!supportsWindowPosition || syncingPosition || settlingGeometry || resizingPanel || !positionRestored || !floatingWindow.visible || panelExpanded || ballDrag.active || panelDrag.active)
 			return
 		const nextX = floatingWindow.x
 		const nextY = floatingWindow.y
@@ -141,6 +196,7 @@ Item {
 		screenName = nextScreen
 		Workspace.settings.setFloatingBallPosition(screenName, ballX, ballY)
 	}
+
 	function openSessionInPanel(sessionId) {
 		confirmCloseShown = false
 		if (sessionId !== "")
@@ -149,12 +205,38 @@ Item {
 	}
 
 	function expandPanel() {
+		ballMenuWindow.visible = false
 		confirmCloseShown = false
 		panelExpanded = true
 	}
+
 	function collapseToBall() {
+		ballMenuWindow.visible = false
 		confirmCloseShown = false
 		panelExpanded = false
+	}
+
+	function openBallMenu(localX, localY) {
+		const menuW = Math.max(ballMenuWindow.minMenuWidth, Math.ceil(ballMenuInner.width * ballMenuWindow.uiScale))
+		const menuH = Math.max(1, Math.ceil(ballMenuInner.height * ballMenuWindow.uiScale))
+		ballMenuWindow.width = menuW
+		ballMenuWindow.height = menuH
+		if (supportsWindowPosition) {
+			const placed = Workspace.floatingBallHelper.clampWindowRect(
+				ballX + Math.round(localX),
+				ballY + Math.round(localY),
+				menuW,
+				menuH,
+				screenName
+			)
+			ballMenuWindow.x = placed.x
+			ballMenuWindow.y = placed.y
+		}
+		ballMenuWindow.visible = true
+		ballMenuContent.forceActiveFocus()
+		ballMenuWindow.raise()
+		ballMenuWindow.requestActivate()
+		Qt.callLater(() => Workspace.floatingBallHelper.ensureAlwaysOnTop(ballMenuWindow))
 	}
 
 	function requestQuitFromPanel() {
@@ -166,11 +248,14 @@ Item {
 	}
 
 	onPanelExpandedChanged: {
+		resizingPanel = false
+		syncingPosition = false
 		syncWindowGeometry()
 		if (floatingWindow.visible) {
 			floatingWindow.raise()
 			if (panelExpanded)
 				floatingWindow.requestActivate()
+			Qt.callLater(enforceTopMost)
 		}
 	}
 
@@ -194,7 +279,11 @@ Item {
 				root.positionRestored = true
 				root.syncWindowGeometry()
 			} else {
+				ballMenuWindow.visible = false
+				root.draggingSessionId = ""
 				root.confirmCloseShown = false
+				root.resizingPanel = false
+				root.syncingPosition = false
 				root.panelExpanded = false
 				root.syncWindowGeometry()
 			}
@@ -228,6 +317,10 @@ Item {
 		visible: Workspace.floatingMode
 		width: root.ballSize
 		height: root.ballSize
+		minimumWidth: root.ballSize
+		maximumWidth: root.ballSize
+		minimumHeight: root.ballSize
+		maximumHeight: root.ballSize
 		color: "transparent"
 		flags: Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | (Qt.platform.os === "windows" ? Qt.Tool : 0)
 
@@ -235,6 +328,17 @@ Item {
 			if (visible) {
 				root.syncWindowGeometry()
 				floatingWindow.raise()
+				Qt.callLater(root.enforceTopMost)
+			}
+		}
+		onActiveChanged: {
+			if (!active && visible)
+				Qt.callLater(root.enforceTopMost)
+		}
+		onVisibilityChanged: {
+			if (visibility === Window.Maximized || visibility === Window.FullScreen) {
+				visibility = Window.Windowed
+				Qt.callLater(root.syncWindowGeometry)
 			}
 		}
 		onXChanged: root.handleWindowMoved()
@@ -264,20 +368,80 @@ Item {
 			anchors.fill: parent
 			visible: !root.panelExpanded
 
+			SequentialAnimation {
+				id: attentionNudgeAnim
+				loops: Animation.Infinite
+				running: root.ballAttentionActive && !ballHover.hovered && !ballMouse.pressed && !ballDrag.active
+				onRunningChanged: {
+					if (!running)
+						root.attentionScale = 1.0
+				}
+				NumberAnimation { target: root; property: "attentionScale"; to: 1.06; duration: 140; easing.type: Easing.OutQuad }
+				NumberAnimation { target: root; property: "attentionScale"; to: 0.98; duration: 140; easing.type: Easing.InOutQuad }
+				NumberAnimation { target: root; property: "attentionScale"; to: 1.04; duration: 120; easing.type: Easing.InOutQuad }
+				NumberAnimation { target: root; property: "attentionScale"; to: 1.0; duration: 160; easing.type: Easing.OutQuad }
+				PauseAnimation { duration: 1400 }
+			}
+
 			Rectangle {
 				id: ballFace
 				anchors.fill: parent
 				radius: width / 2
-				color: ballHover.hovered ? Theme.surfaceHover : Theme.surface
-				border.color: root.aggregateInfo.hasPermission
-					? Theme.warningBorder
+				color: root.aggregateInfo.needsAttention
+					? (ballHover.hovered ? Theme.surfaceHover : Theme.warningSurface)
+					: (ballHover.hovered ? Theme.surfaceHover : Theme.surface)
+				border.color: root.aggregateInfo.needsAttention
+					? Theme.warning
 					: (root.aggregateInfo.hasError ? Theme.danger : (ballHover.hovered ? Theme.textMuted : Theme.border))
-				border.width: root.aggregateInfo.hasPermission || root.aggregateInfo.hasError ? 2 : 1
-				scale: ballMouse.pressed && !ballDrag.active ? 0.94 : 1
+				border.width: root.aggregateInfo.needsAttention || root.aggregateInfo.hasError ? 2 : 1
+				scale: ballMouse.pressed && !ballDrag.active ? 0.94 : root.attentionScale
 
 				Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 				Behavior on border.color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
-				Behavior on scale { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+				Behavior on scale {
+					enabled: !attentionNudgeAnim.running
+					NumberAnimation { duration: Motion.quick; easing.type: Motion.ease }
+				}
+
+				Rectangle {
+					id: attentionSonar
+					objectName: "floatingBallAttentionSonar"
+					anchors.fill: parent
+					radius: width / 2
+					color: "transparent"
+					border.width: 2
+					border.color: Theme.warning
+					scale: 0.62
+					opacity: 0
+					visible: root.ballAttentionActive
+
+					ParallelAnimation {
+						loops: Animation.Infinite
+						running: root.ballAttentionActive
+						onRunningChanged: {
+							if (!running) {
+								attentionSonar.scale = 0.62
+								attentionSonar.opacity = 0
+							}
+						}
+						NumberAnimation {
+							target: attentionSonar
+							property: "scale"
+							from: 0.62
+							to: 1.0
+							duration: 1400
+							easing.type: Easing.OutCubic
+						}
+						NumberAnimation {
+							target: attentionSonar
+							property: "opacity"
+							from: 0.65
+							to: 0
+							duration: 1400
+							easing.type: Easing.OutCubic
+						}
+					}
+				}
 
 				Image {
 					anchors.centerIn: parent
@@ -291,14 +455,28 @@ Item {
 					Accessible.name: "ref"
 				}
 
-				// Embedded running session count.
-				Text {
-					textFormat: Text.PlainText
+				// Embedded running session count (working/total).
+				Row {
+					objectName: "floatingBallCountRow"
 					visible: root.aggregateInfo.count > 0
 					anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: root.ballCountBottomMargin }
-					text: String(root.aggregateInfo.count)
-					color: Theme.textMuted
-					font { pixelSize: Theme.microFontSize; bold: true }
+					spacing: 0
+
+					Text {
+						textFormat: Text.PlainText
+						text: String(root.aggregateInfo.workingCount)
+						color: root.aggregateInfo.needsAttention
+							? Theme.warningText
+							: (root.aggregateInfo.workingCount > 0 ? Theme.accentText : Theme.textMuted)
+						font { pixelSize: Theme.microFontSize; bold: true }
+					}
+
+					Text {
+						textFormat: Text.PlainText
+						text: "/" + root.aggregateInfo.count
+						color: Theme.textMuted
+						font { pixelSize: Theme.microFontSize; bold: true }
+					}
 				}
 
 				// Breathing status dot badge.
@@ -320,12 +498,45 @@ Item {
 				target: null
 				dragThreshold: root.dragThreshold
 				grabPermissions: PointerHandler.CanTakeOverFromAnything
+
+				property point dragStartGlobal: Qt.point(0, 0)
+				property point dragStartWinPos: Qt.point(0, 0)
+
 				onActiveChanged: {
 					if (active) {
 						moveSyncGuardTimer.stop()
 						root.settlingGeometry = false
-						floatingWindow.startSystemMove()
+						if (!root.supportsWindowPosition) {
+							floatingWindow.startSystemMove()
+						} else {
+							dragStartGlobal = Workspace.floatingBallHelper.cursorPos()
+							dragStartWinPos = Qt.point(floatingWindow.x, floatingWindow.y)
+						}
+					} else {
+						if (root.supportsWindowPosition) {
+							root.ballX = floatingWindow.x
+							root.ballY = floatingWindow.y
+							if (floatingWindow.screen)
+								root.screenName = floatingWindow.screen.name
+							Workspace.settings.setFloatingBallPosition(root.screenName, root.ballX, root.ballY)
+						}
+						Qt.callLater(root.enforceTopMost)
 					}
+				}
+				onCentroidChanged: {
+					if (!active || !root.supportsWindowPosition)
+						return
+					const cur = Workspace.floatingBallHelper.cursorPos()
+					const nextX = Math.round(dragStartWinPos.x + (cur.x - dragStartGlobal.x))
+					const nextY = Math.round(dragStartWinPos.y + (cur.y - dragStartGlobal.y))
+					const placed = Workspace.floatingBallHelper.clampWindowRect(nextX, nextY, root.ballSize, root.ballSize, "")
+					root.syncingPosition = true
+					floatingWindow.x = placed.x
+					floatingWindow.y = placed.y
+					root.ballX = placed.x
+					root.ballY = placed.y
+					root.screenName = placed.screenName
+					root.syncingPosition = false
 				}
 			}
 
@@ -335,31 +546,9 @@ Item {
 				acceptedButtons: Qt.LeftButton | Qt.RightButton
 				onClicked: mouse => {
 					if (mouse.button === Qt.RightButton)
-						ballMenu.openAt(Qt.point(mouse.x, mouse.y))
+						root.openBallMenu(mouse.x, mouse.y)
 					else
 						root.expandPanel()
-				}
-			}
-
-			ContextMenu {
-				id: ballMenu
-				entries: [
-					{text: qsTr("Open mini panel"), action: "expand"},
-					{text: qsTr("Return to full window"), action: "restore"},
-					{text: qsTr("New session"), action: "new"}
-				]
-				onTriggered: index => {
-					const entry = ballMenu.entries[index]
-					if (!entry)
-						return
-					if (entry.action === "expand") {
-						root.expandPanel()
-					} else if (entry.action === "restore") {
-						Workspace.setFloatingMode(false)
-					} else if (entry.action === "new") {
-						Workspace.newSession()
-						root.expandPanel()
-					}
 				}
 			}
 		}
@@ -390,9 +579,58 @@ Item {
 				}
 
 				DragHandler {
+					id: panelDrag
 					target: null
 					dragThreshold: root.dragThreshold
-					onActiveChanged: if (active) floatingWindow.startSystemMove()
+
+					property point dragStartGlobal: Qt.point(0, 0)
+					property point dragStartWinPos: Qt.point(0, 0)
+					property int startBallOffsetX: 0
+					property int startBallOffsetY: 0
+
+					onActiveChanged: {
+						if (active) {
+							moveSyncGuardTimer.stop()
+							root.settlingGeometry = false
+							if (!root.supportsWindowPosition) {
+								floatingWindow.startSystemMove()
+							} else {
+								dragStartGlobal = Workspace.floatingBallHelper.cursorPos()
+								dragStartWinPos = Qt.point(floatingWindow.x, floatingWindow.y)
+								startBallOffsetX = root.ballX - floatingWindow.x
+								startBallOffsetY = root.ballY - floatingWindow.y
+							}
+						} else {
+							if (root.supportsWindowPosition) {
+								const targetScreen = floatingWindow.screen ? floatingWindow.screen.name : root.screenName
+								const clampedBall = Workspace.floatingBallHelper.clampWindowRect(
+									floatingWindow.x + startBallOffsetX,
+									floatingWindow.y + startBallOffsetY,
+									root.ballSize,
+									root.ballSize,
+									targetScreen
+								)
+								root.ballX = clampedBall.x
+								root.ballY = clampedBall.y
+								root.screenName = clampedBall.screenName
+								Workspace.settings.setFloatingBallPosition(root.screenName, root.ballX, root.ballY)
+							}
+							Qt.callLater(root.enforceTopMost)
+						}
+					}
+					onCentroidChanged: {
+						if (!active || !root.supportsWindowPosition)
+							return
+						const cur = Workspace.floatingBallHelper.cursorPos()
+						const nextX = Math.round(dragStartWinPos.x + (cur.x - dragStartGlobal.x))
+						const nextY = Math.round(dragStartWinPos.y + (cur.y - dragStartGlobal.y))
+						const placed = Workspace.floatingBallHelper.clampWindowRect(nextX, nextY, floatingWindow.width, floatingWindow.height, "")
+						root.syncingPosition = true
+						floatingWindow.x = placed.x
+						floatingWindow.y = placed.y
+						root.screenName = placed.screenName
+						root.syncingPosition = false
+					}
 				}
 
 				IconButton {
@@ -447,6 +685,7 @@ Item {
 							font.pixelSize: Theme.smallFontSize
 							elide: Text.ElideRight
 						}
+
 						Chevron {
 							anchors.verticalCenter: parent.verticalCenter
 							width: 12
@@ -465,8 +704,11 @@ Item {
 								const row = Workspace.sessions.rowAt(i)
 								const sid = String(row.sessionId ?? "")
 								const title = String(row.displayTitle ?? sid)
-								entries.push({text: title, sessionId: sid})
-							}
+								entries.push({
+									text: title,
+									sessionId: sid,
+									checked: root.activeSession !== null && sid === root.activeSession.sessionId
+								})
 							if (entries.length === 0)
 								return
 							switcherMenu.entries = entries
@@ -502,8 +744,8 @@ Item {
 					IconButton {
 						objectName: "floatingCollapseButton"
 						buttonSize: root.headerButtonSize
-						iconName: "minus"
-						iconSize: 16
+						iconName: "float"
+						iconSize: 20
 						tooltipText: qsTr("Collapse to ball")
 						Accessible.name: qsTr("Collapse to ball")
 						onClicked: root.collapseToBall()
@@ -590,7 +832,7 @@ Item {
 						session: root.activeSession
 						compact: true
 						keysEnabled: floatingWindow.active
-						composerShown: true
+						composerShown: floatingWindow.active
 					}
 				}
 
@@ -601,87 +843,27 @@ Item {
 					clip: true
 					topMargin: 8
 					bottomMargin: 8
-					spacing: 4
+					spacing: root.runningRowSpacing
+					boundsBehavior: Flickable.StopAtBounds
+					interactive: !root.reorderingRunning
 					visible: root.activeSession === null && Workspace.sessions.count > 0
 					model: Workspace.sessions
 
-					delegate: Rectangle {
-						id: sessionRow
+					delegate: SessionRow {
 						objectName: "floatingSessionRow"
-
-						required property string sessionId
-						required property string displayTitle
-						required property string dirName
-						required property string activity
-						required property bool hasError
-						required property bool hasPermission
-
-						property string rowSessionId: sessionId
-						readonly property bool failed: Activity.isFailed(activity, hasError)
-						readonly property bool retrying: activity === Activity.retrying
-						readonly property string subtitleText: {
-							if (activity === Activity.waitingQuestion)
-								return qsTr("Waiting for your answer")
-							if (hasPermission)
-								return qsTr("Needs permission")
-							if (failed)
-								return qsTr("Failed")
-							if (retrying)
-								return qsTr("Retrying")
-							if (activity === Activity.compacting)
-								return qsTr("Compacting")
-							return dirName
+						allowClose: false
+						anyDragging: root.reorderingRunning
+						pinnedCount: Workspace.sessions.pinnedCount
+						onDragActiveChanged: (sessionId, active) => {
+							if (active)
+								root.draggingSessionId = sessionId
+							else if (root.draggingSessionId === sessionId)
+								root.draggingSessionId = ""
 						}
-
-						x: 8
-						width: sessionListView.width - 16
-						height: root.sessionRowHeight
-						radius: Theme.radius
-						color: rowHover.hovered ? Theme.surfaceHover : "transparent"
-
-						Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
-
-						SessionDot {
-							id: rowDot
-							anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
-							activity: sessionRow.activity
-							hasError: sessionRow.hasError
-						}
-
-						Column {
-							anchors { left: rowDot.right; leftMargin: 10; right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter }
-							spacing: 2
-
-							Text {
-								textFormat: Text.PlainText
-								width: parent.width
-								text: sessionRow.displayTitle
-								color: Theme.text
-								font { pixelSize: Theme.smallFontSize; bold: true }
-								elide: Text.ElideRight
-							}
-
-							Text {
-								textFormat: Text.PlainText
-								width: parent.width
-								text: sessionRow.subtitleText
-								color: (sessionRow.hasPermission || sessionRow.retrying)
-									? Theme.warningText
-									: (sessionRow.failed ? Theme.dangerText : Theme.textMuted)
-								font.pixelSize: Theme.microFontSize
-								elide: Text.ElideRight
-							}
-						}
-
-						HoverHandler {
-							id: rowHover
-							cursorShape: Qt.PointingHandCursor
-						}
-
-						TapHandler {
-							onTapped: root.openSessionInPanel(sessionRow.sessionId)
-						}
+						onReorderRequested: (sessionId, toIndex) => Workspace.moveRunningSession(sessionId, toIndex)
 					}
+
+					ScrollBar.vertical: ThemedScrollBar {}
 				}
 
 				Column {
@@ -703,6 +885,300 @@ Item {
 						text: qsTr("New session")
 						enabled: Workspace.connectionState === "connected"
 						onClicked: Workspace.newSession()
+					}
+				}
+			}
+
+			// 8-direction edge/corner drag-to-resize overlay for the expanded mini panel.
+			Item {
+				id: panelResizeOverlay
+				objectName: "floatingPanelResizeOverlay"
+				anchors.fill: parent
+				z: 10
+				visible: root.panelExpanded && root.supportsWindowPosition
+				enabled: visible
+
+				readonly property int topThickness: 4
+				readonly property int edgeThickness: 6
+				readonly property int cornerSize: 10
+
+				component ResizeHandle: MouseArea {
+					id: handle
+
+					required property int edges
+
+					property point startCursor: Qt.point(0, 0)
+					property rect startRect: Qt.rect(0, 0, 0, 0)
+
+					function finishResize() {
+						if (!root.resizingPanel)
+							return
+						floatingWindow.minimumWidth = floatingWindow.width
+						floatingWindow.maximumWidth = floatingWindow.width
+						floatingWindow.minimumHeight = floatingWindow.height
+						floatingWindow.maximumHeight = floatingWindow.height
+						root.syncingPosition = false
+						Workspace.settings.setFloatingPanelSize(floatingWindow.width, floatingWindow.height)
+						root.resizingPanel = false
+						Qt.callLater(root.enforceTopMost)
+					}
+
+					acceptedButtons: Qt.LeftButton
+					preventStealing: true
+
+					onPressed: mouse => {
+						if (mouse.button !== Qt.LeftButton || !root.panelExpanded || !root.supportsWindowPosition)
+							return
+						mouse.accepted = true
+						moveSyncGuardTimer.stop()
+						root.settlingGeometry = false
+						root.resizingPanel = true
+						root.syncingPosition = true
+						startCursor = Workspace.floatingBallHelper.cursorPos()
+						startRect = Qt.rect(floatingWindow.x, floatingWindow.y, floatingWindow.width, floatingWindow.height)
+						floatingWindow.minimumWidth = 0
+						floatingWindow.maximumWidth = 16777215
+						floatingWindow.minimumHeight = 0
+						floatingWindow.maximumHeight = 16777215
+					}
+					onPositionChanged: {
+						if (!pressed || !root.resizingPanel)
+							return
+						const cur = Workspace.floatingBallHelper.cursorPos()
+						const dx = cur.x - startCursor.x
+						const dy = cur.y - startCursor.y
+						const minW = Workspace.settings.minFloatingPanelWidth
+						const maxW = Workspace.settings.maxFloatingPanelWidth
+						const minH = Workspace.settings.minFloatingPanelHeight
+						const maxH = Workspace.settings.maxFloatingPanelHeight
+						const startRight = startRect.x + startRect.width
+						const startBottom = startRect.y + startRect.height
+
+						let nextX = startRect.x
+						let nextW = startRect.width
+						if ((edges & Qt.LeftEdge) !== 0) {
+							nextW = Math.max(minW, Math.min(maxW, Math.round(startRect.width - dx)))
+							nextX = startRight - nextW
+						} else if ((edges & Qt.RightEdge) !== 0) {
+							nextW = Math.max(minW, Math.min(maxW, Math.round(startRect.width + dx)))
+						}
+
+						let nextY = startRect.y
+						let nextH = startRect.height
+						if ((edges & Qt.TopEdge) !== 0) {
+							nextH = Math.max(minH, Math.min(maxH, Math.round(startRect.height - dy)))
+							nextY = startBottom - nextH
+						} else if ((edges & Qt.BottomEdge) !== 0) {
+							nextH = Math.max(minH, Math.min(maxH, Math.round(startRect.height + dy)))
+						}
+
+						const placed = Workspace.floatingBallHelper.clampWindowRect(nextX, nextY, nextW, nextH, root.screenName)
+						const effMinW = Math.min(minW, placed.width)
+						const effMinH = Math.min(minH, placed.height)
+
+						let finalX = placed.x
+						let finalW = placed.width
+						if ((edges & Qt.LeftEdge) !== 0) {
+							finalW = Math.max(effMinW, Math.min(placed.width, startRight - placed.x))
+							finalX = Math.max(placed.x, startRight - finalW)
+						} else if ((edges & Qt.RightEdge) !== 0) {
+							const screenRight = placed.x + placed.width
+							finalW = Math.max(effMinW, Math.min(nextW, screenRight - nextX))
+							finalX = Math.min(nextX, screenRight - finalW)
+						}
+
+						let finalY = placed.y
+						let finalH = placed.height
+						if ((edges & Qt.TopEdge) !== 0) {
+							finalH = Math.max(effMinH, Math.min(placed.height, startBottom - placed.y))
+							finalY = Math.max(placed.y, startBottom - finalH)
+						} else if ((edges & Qt.BottomEdge) !== 0) {
+							const screenBottom = placed.y + placed.height
+							finalH = Math.max(effMinH, Math.min(nextH, screenBottom - nextY))
+							finalY = Math.min(nextY, screenBottom - finalH)
+						}
+
+						floatingWindow.x = finalX
+						floatingWindow.y = finalY
+						floatingWindow.width = finalW
+						floatingWindow.height = finalH
+						root.screenName = placed.screenName
+					}
+					onReleased: finishResize()
+					onCanceled: finishResize()
+				}
+
+				ResizeHandle {
+					edges: Qt.TopEdge
+					x: panelResizeOverlay.cornerSize
+					y: 0
+					width: Math.max(0, parent.width - 2 * panelResizeOverlay.cornerSize)
+					height: panelResizeOverlay.topThickness
+					cursorShape: Qt.SizeVerCursor
+				}
+				ResizeHandle {
+					edges: Qt.BottomEdge
+					x: panelResizeOverlay.cornerSize
+					y: parent.height - panelResizeOverlay.edgeThickness
+					width: Math.max(0, parent.width - 2 * panelResizeOverlay.cornerSize)
+					height: panelResizeOverlay.edgeThickness
+					cursorShape: Qt.SizeVerCursor
+				}
+				ResizeHandle {
+					edges: Qt.LeftEdge
+					x: 0
+					y: panelResizeOverlay.cornerSize
+					width: panelResizeOverlay.edgeThickness
+					height: Math.max(0, parent.height - 2 * panelResizeOverlay.cornerSize)
+					cursorShape: Qt.SizeHorCursor
+				}
+				ResizeHandle {
+					edges: Qt.RightEdge
+					x: parent.width - panelResizeOverlay.edgeThickness
+					y: panelResizeOverlay.cornerSize
+					width: panelResizeOverlay.edgeThickness
+					height: Math.max(0, parent.height - 2 * panelResizeOverlay.cornerSize)
+					cursorShape: Qt.SizeHorCursor
+				}
+				ResizeHandle {
+					edges: Qt.TopEdge | Qt.LeftEdge
+					x: 0
+					y: 0
+					width: panelResizeOverlay.cornerSize
+					height: panelResizeOverlay.cornerSize
+					cursorShape: Qt.SizeFDiagCursor
+				}
+				ResizeHandle {
+					edges: Qt.TopEdge | Qt.RightEdge
+					x: parent.width - panelResizeOverlay.cornerSize
+					y: 0
+					width: panelResizeOverlay.cornerSize
+					height: panelResizeOverlay.cornerSize
+					cursorShape: Qt.SizeBDiagCursor
+				}
+				ResizeHandle {
+					edges: Qt.BottomEdge | Qt.LeftEdge
+					x: 0
+					y: parent.height - panelResizeOverlay.cornerSize
+					width: panelResizeOverlay.cornerSize
+					height: panelResizeOverlay.cornerSize
+					cursorShape: Qt.SizeBDiagCursor
+				}
+				ResizeHandle {
+					edges: Qt.BottomEdge | Qt.RightEdge
+					x: parent.width - panelResizeOverlay.cornerSize
+					y: parent.height - panelResizeOverlay.cornerSize
+					width: panelResizeOverlay.cornerSize
+					height: panelResizeOverlay.cornerSize
+					cursorShape: Qt.SizeFDiagCursor
+				}
+			}
+		}
+	}
+
+	// Top-level right-click context menu for the 56x56 floating ball so it is never clipped to 56x56.
+	Window {
+		id: ballMenuWindow
+		objectName: "floatingBallContextMenu"
+		transientParent: floatingWindow
+		visible: false
+		width: 160
+		height: 108
+		color: "transparent"
+		flags: Qt.Popup | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+
+		readonly property int textInset: 14
+		readonly property int menuPadding: 4
+		readonly property int minMenuWidth: 156
+		readonly property real uiScale: UiScale.factor
+		readonly property var entries: [
+			{text: qsTr("Open mini panel"), action: "expand"},
+			{text: qsTr("Return to full window"), action: "restore"},
+			{text: qsTr("New session"), action: "new"}
+		]
+
+		onActiveChanged: {
+			if (!active)
+				visible = false
+		}
+
+		Item {
+			id: ballMenuContent
+			anchors.fill: parent
+			focus: true
+			Keys.onEscapePressed: event => {
+				ballMenuWindow.visible = false
+				event.accepted = true
+			}
+
+			Item {
+				id: ballMenuInner
+				width: Math.max(ballMenuWindow.minMenuWidth, ballMenuList.implicitWidth + 2 * ballMenuWindow.menuPadding)
+				height: ballMenuList.implicitHeight + 2 * ballMenuWindow.menuPadding
+				transformOrigin: Item.TopLeft
+				scale: ballMenuWindow.uiScale
+
+				Rectangle {
+					anchors.fill: parent
+					radius: Theme.radius
+					color: Theme.surface
+					border.color: Theme.border
+				}
+
+				Column {
+					id: ballMenuList
+					x: ballMenuWindow.menuPadding
+					y: ballMenuWindow.menuPadding
+					spacing: 2
+
+					Repeater {
+						model: ballMenuWindow.entries
+
+						Item {
+							id: entry
+
+							required property var modelData
+							required property int index
+
+							width: Math.max(150, label.implicitWidth + 2 * ballMenuWindow.textInset)
+							height: 32
+
+							Rectangle {
+								anchors.fill: parent
+								radius: Theme.radiusSmall + 2
+								color: entryMouse.containsMouse ? Theme.surfaceHover : "transparent"
+
+								Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+							}
+
+							Text {
+								id: label
+								textFormat: Text.PlainText
+								anchors { left: parent.left; leftMargin: ballMenuWindow.textInset; verticalCenter: parent.verticalCenter }
+								text: entry.modelData.text
+								color: entry.modelData.danger === true ? Theme.dangerText : Theme.text
+								font.pixelSize: Theme.secondaryFontSize
+							}
+
+							MouseArea {
+								id: entryMouse
+								anchors.fill: parent
+								hoverEnabled: true
+								cursorShape: Qt.PointingHandCursor
+								onClicked: {
+									ballMenuWindow.visible = false
+									const action = entry.modelData.action
+									if (action === "expand") {
+										root.expandPanel()
+									} else if (action === "restore") {
+										Workspace.setFloatingMode(false)
+									} else if (action === "new") {
+										Workspace.newSession()
+										root.expandPanel()
+									}
+								}
+							}
+						}
 					}
 				}
 			}

@@ -1,8 +1,19 @@
 #include "app/floating_ball_helper.h"
 
+#include <QCursor>
 #include <QGuiApplication>
 #include <QScreen>
+#include <QWindow>
 
+#ifdef Q_OS_WIN
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 #include <algorithm>
 
 using namespace Qt::StringLiterals;
@@ -292,4 +303,43 @@ QVariantMap FloatingBallHelper::clampWindowRect(int x, int y, int width, int hei
 		{u"height"_s, clamped.height()},
 		{u"screenName"_s, pickScreenName(clamped, screens, screenName)},
 	};
+}
+
+QPoint FloatingBallHelper::cursorPos() const
+{
+	return QCursor::pos();
+}
+
+void FloatingBallHelper::ensureAlwaysOnTop(QWindow* window) const
+{
+	if(window == nullptr)
+	{
+		return;
+	}
+#ifdef Q_OS_WIN
+	if(QGuiApplication::platformName() == u"windows"_s)
+	{
+		if(window->isVisible())
+		{
+			const auto hwnd = reinterpret_cast<HWND>(window->winId());
+			if(hwnd != nullptr)
+			{
+				UINT flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+				constexpr LONG_PTR snapMask = static_cast<LONG_PTR>(WS_MAXIMIZEBOX | WS_THICKFRAME);
+				const LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+				if((style & snapMask) != 0)
+				{
+					SetWindowLongPtrW(hwnd, GWL_STYLE, style & ~snapMask);
+					flags |= SWP_FRAMECHANGED;
+				}
+				SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
+			}
+		}
+		return;
+	}
+#endif
+	if(!window->flags().testFlag(Qt::WindowStaysOnTopHint))
+	{
+		window->setFlag(Qt::WindowStaysOnTopHint, true);
+	}
 }

@@ -9,6 +9,7 @@ ModalDialog {
 	readonly property int zoomControlHeight: 28
 	readonly property int zoomInputWidth: 68
 	readonly property int messageWindowInputWidth: 76
+	readonly property int panelSizeInputWidth: 64
 	readonly property int zoomInputLeftMargin: 6
 	readonly property int zoomInputSuffixGap: 2
 	readonly property int zoomInputRightMargin: 8
@@ -391,6 +392,368 @@ ModalDialog {
 						text: "+"
 						color: Theme.text
 						font { pixelSize: Theme.fontSize; bold: true }
+					}
+				}
+			}
+		}
+		Rectangle { x: Theme.dialogPadding; width: parent.width - 2 * Theme.dialogPadding; height: 1; color: Theme.border }
+
+		Item {
+			objectName: "floatingBallSizeRow"
+			width: parent.width
+			height: 54
+
+			Column {
+				anchors { left: parent.left; leftMargin: Theme.dialogPadding; right: floatingBallSizeControls.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+				spacing: 2
+
+				Text {
+					textFormat: Text.PlainText
+					width: parent.width
+					text: qsTr("Floating ball size")
+					color: Theme.text
+					font.pixelSize: Theme.fontSize
+					elide: Text.ElideRight
+				}
+
+				Text {
+					textFormat: Text.PlainText
+					width: parent.width
+					text: qsTr("Diameter in pixels (%1–%2)").arg(Workspace.settings.minFloatingBallSize).arg(Workspace.settings.maxFloatingBallSize)
+					color: Theme.textMuted
+					font.pixelSize: Theme.smallFontSize
+					elide: Text.ElideRight
+				}
+			}
+
+			Row {
+				id: floatingBallSizeControls
+				anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
+				spacing: 8
+
+				TextButton {
+					objectName: "floatingBallSizeResetButton"
+					anchors.verticalCenter: parent.verticalCenter
+					visible: Workspace.settings.floatingBallSize !== Workspace.settings.defaultFloatingBallSize
+					text: qsTr("Reset")
+					onClicked: Workspace.settings.floatingBallSize = Workspace.settings.defaultFloatingBallSize
+				}
+				CircleButton {
+					objectName: "floatingBallSizeOutButton"
+					anchors.verticalCenter: parent.verticalCenter
+					implicitWidth: dialog.zoomControlHeight
+					implicitHeight: dialog.zoomControlHeight
+					enabled: Workspace.settings.floatingBallSize > Workspace.settings.minFloatingBallSize
+					opacity: enabled ? 1 : Theme.disabledOpacity
+					Accessible.name: qsTr("Floating ball size") + " (−)"
+					onClicked: Workspace.settings.floatingBallSize = Math.max(Workspace.settings.minFloatingBallSize, Workspace.settings.floatingBallSize - Workspace.settings.floatingBallSizeStep)
+
+					Text {
+						textFormat: Text.PlainText
+						anchors.centerIn: parent
+						text: "−"
+						color: Theme.text
+						font { pixelSize: Theme.fontSize; bold: true }
+					}
+				}
+				Rectangle {
+					id: floatingBallSizeBox
+					anchors.verticalCenter: parent.verticalCenter
+					width: dialog.zoomInputWidth
+					height: dialog.zoomControlHeight
+					radius: Theme.radiusSmall
+					color: Theme.background
+					border.color: floatingBallSizeInput.activeFocus ? Theme.accentText : Theme.border
+
+					Behavior on border.color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+
+					function formattedSize() {
+						return String(Workspace.settings.floatingBallSize)
+					}
+
+					function commit() {
+						const raw = floatingBallSizeInput.text.trim()
+						if (raw === "" || !/^\d+$/.test(raw)) {
+							floatingBallSizeInput.text = formattedSize()
+							return
+						}
+						const parsed = Number(raw)
+						if (!Number.isSafeInteger(parsed)) {
+							floatingBallSizeInput.text = formattedSize()
+							return
+						}
+						Workspace.settings.floatingBallSize = parsed
+						floatingBallSizeInput.text = formattedSize()
+					}
+
+					Connections {
+						target: Workspace.settings
+						function onFloatingBallChanged() {
+							floatingBallSizeInput.text = floatingBallSizeBox.formattedSize()
+						}
+					}
+
+					TextInput {
+						id: floatingBallSizeInput
+						objectName: "floatingBallSizeInput"
+						anchors { left: parent.left; leftMargin: dialog.zoomInputLeftMargin; right: ballPxSuffix.left; rightMargin: dialog.zoomInputSuffixGap; top: parent.top; bottom: parent.bottom }
+						horizontalAlignment: TextInput.AlignRight
+						verticalAlignment: TextInput.AlignVCenter
+						color: Theme.text
+						selectionColor: Theme.selection
+						selectedTextColor: Theme.text
+						font { family: Theme.monoFamily; pixelSize: Theme.secondaryFontSize }
+						clip: true
+						selectByMouse: true
+						Accessible.name: qsTr("Floating ball size")
+						Component.onCompleted: text = floatingBallSizeBox.formattedSize()
+						onAccepted: {
+							floatingBallSizeBox.commit()
+							dialog.forceActiveFocus()
+						}
+						onEditingFinished: if (text !== floatingBallSizeBox.formattedSize()) floatingBallSizeBox.commit()
+						Keys.onEscapePressed: event => {
+							text = floatingBallSizeBox.formattedSize()
+							dialog.forceActiveFocus()
+							event.accepted = true
+						}
+						Keys.onUpPressed: event => {
+							Workspace.settings.floatingBallSize = Math.min(Workspace.settings.maxFloatingBallSize, Workspace.settings.floatingBallSize + Workspace.settings.floatingBallSizeStep)
+							text = floatingBallSizeBox.formattedSize()
+							event.accepted = true
+						}
+						Keys.onDownPressed: event => {
+							Workspace.settings.floatingBallSize = Math.max(Workspace.settings.minFloatingBallSize, Workspace.settings.floatingBallSize - Workspace.settings.floatingBallSizeStep)
+							text = floatingBallSizeBox.formattedSize()
+							event.accepted = true
+						}
+					}
+
+					Text {
+						id: ballPxSuffix
+						textFormat: Text.PlainText
+						anchors { right: parent.right; rightMargin: dialog.zoomInputRightMargin; verticalCenter: parent.verticalCenter }
+						text: "px"
+						color: Theme.textMuted
+						font { family: Theme.monoFamily; pixelSize: Theme.secondaryFontSize }
+						TapHandler { onTapped: floatingBallSizeInput.forceActiveFocus() }
+					}
+				}
+				CircleButton {
+					objectName: "floatingBallSizeInButton"
+					anchors.verticalCenter: parent.verticalCenter
+					implicitWidth: dialog.zoomControlHeight
+					implicitHeight: dialog.zoomControlHeight
+					enabled: Workspace.settings.floatingBallSize < Workspace.settings.maxFloatingBallSize
+					opacity: enabled ? 1 : Theme.disabledOpacity
+					Accessible.name: qsTr("Floating ball size") + " (+)"
+					onClicked: Workspace.settings.floatingBallSize = Math.min(Workspace.settings.maxFloatingBallSize, Workspace.settings.floatingBallSize + Workspace.settings.floatingBallSizeStep)
+
+					Text {
+						textFormat: Text.PlainText
+						anchors.centerIn: parent
+						text: "+"
+						color: Theme.text
+						font { pixelSize: Theme.fontSize; bold: true }
+					}
+				}
+			}
+		}
+		Rectangle { x: Theme.dialogPadding; width: parent.width - 2 * Theme.dialogPadding; height: 1; color: Theme.border }
+
+		Item {
+			objectName: "floatingPanelSizeRow"
+			width: parent.width
+			height: 54
+
+			Column {
+				anchors { left: parent.left; leftMargin: Theme.dialogPadding; right: floatingPanelSizeControls.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+				spacing: 2
+
+				Text {
+					textFormat: Text.PlainText
+					width: parent.width
+					text: qsTr("Mini panel size")
+					color: Theme.text
+					font.pixelSize: Theme.fontSize
+					elide: Text.ElideRight
+				}
+
+				Text {
+					textFormat: Text.PlainText
+					width: parent.width
+					text: qsTr("Width × height in pixels; also resizable by dragging edges")
+					color: Theme.textMuted
+					font.pixelSize: Theme.smallFontSize
+					elide: Text.ElideRight
+				}
+			}
+
+			Row {
+				id: floatingPanelSizeControls
+				anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
+				spacing: 8
+
+				TextButton {
+					objectName: "floatingPanelSizeResetButton"
+					anchors.verticalCenter: parent.verticalCenter
+					visible: Workspace.settings.floatingPanelWidth !== Workspace.settings.defaultFloatingPanelWidth || Workspace.settings.floatingPanelHeight !== Workspace.settings.defaultFloatingPanelHeight
+					text: qsTr("Reset")
+					onClicked: Workspace.settings.setFloatingPanelSize(Workspace.settings.defaultFloatingPanelWidth, Workspace.settings.defaultFloatingPanelHeight)
+				}
+				Rectangle {
+					id: floatingPanelWidthBox
+					anchors.verticalCenter: parent.verticalCenter
+					width: dialog.panelSizeInputWidth
+					height: dialog.zoomControlHeight
+					radius: Theme.radiusSmall
+					color: Theme.background
+					border.color: floatingPanelWidthInput.activeFocus ? Theme.accentText : Theme.border
+
+					Behavior on border.color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+
+					function formattedWidth() {
+						return String(Workspace.settings.floatingPanelWidth)
+					}
+
+					function commit() {
+						const raw = floatingPanelWidthInput.text.trim()
+						if (raw === "" || !/^\d+$/.test(raw)) {
+							floatingPanelWidthInput.text = formattedWidth()
+							return
+						}
+						const parsed = Number(raw)
+						if (!Number.isSafeInteger(parsed)) {
+							floatingPanelWidthInput.text = formattedWidth()
+							return
+						}
+						Workspace.settings.floatingPanelWidth = parsed
+						floatingPanelWidthInput.text = formattedWidth()
+					}
+
+					Connections {
+						target: Workspace.settings
+						function onFloatingBallChanged() {
+							floatingPanelWidthInput.text = floatingPanelWidthBox.formattedWidth()
+						}
+					}
+
+					TapHandler { onTapped: floatingPanelWidthInput.forceActiveFocus() }
+					TextInput {
+						id: floatingPanelWidthInput
+						objectName: "floatingPanelWidthInput"
+						anchors { left: parent.left; leftMargin: dialog.zoomInputRightMargin; right: parent.right; rightMargin: dialog.zoomInputRightMargin; top: parent.top; bottom: parent.bottom }
+						horizontalAlignment: TextInput.AlignRight
+						verticalAlignment: TextInput.AlignVCenter
+						color: Theme.text
+						selectionColor: Theme.selection
+						selectedTextColor: Theme.text
+						font { family: Theme.monoFamily; pixelSize: Theme.secondaryFontSize }
+						clip: true
+						selectByMouse: true
+						Accessible.name: qsTr("Mini panel size") + " (W)"
+						Component.onCompleted: text = floatingPanelWidthBox.formattedWidth()
+						onAccepted: {
+							floatingPanelWidthBox.commit()
+							dialog.forceActiveFocus()
+						}
+						onEditingFinished: if (text !== floatingPanelWidthBox.formattedWidth()) floatingPanelWidthBox.commit()
+						Keys.onEscapePressed: event => {
+							text = floatingPanelWidthBox.formattedWidth()
+							dialog.forceActiveFocus()
+							event.accepted = true
+						}
+						Keys.onUpPressed: event => {
+							Workspace.settings.floatingPanelWidth = Math.min(Workspace.settings.maxFloatingPanelWidth, Workspace.settings.floatingPanelWidth + Workspace.settings.floatingPanelSizeStep)
+							text = floatingPanelWidthBox.formattedWidth()
+							event.accepted = true
+						}
+						Keys.onDownPressed: event => {
+							Workspace.settings.floatingPanelWidth = Math.max(Workspace.settings.minFloatingPanelWidth, Workspace.settings.floatingPanelWidth - Workspace.settings.floatingPanelSizeStep)
+							text = floatingPanelWidthBox.formattedWidth()
+							event.accepted = true
+						}
+					}
+				}
+				Text {
+					textFormat: Text.PlainText
+					anchors.verticalCenter: parent.verticalCenter
+					text: "×"
+					color: Theme.textMuted
+					font { family: Theme.monoFamily; pixelSize: Theme.secondaryFontSize }
+				}
+				Rectangle {
+					id: floatingPanelHeightBox
+					anchors.verticalCenter: parent.verticalCenter
+					width: dialog.panelSizeInputWidth
+					height: dialog.zoomControlHeight
+					radius: Theme.radiusSmall
+					color: Theme.background
+					border.color: floatingPanelHeightInput.activeFocus ? Theme.accentText : Theme.border
+
+					Behavior on border.color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+
+					function formattedHeight() {
+						return String(Workspace.settings.floatingPanelHeight)
+					}
+
+					function commit() {
+						const raw = floatingPanelHeightInput.text.trim()
+						if (raw === "" || !/^\d+$/.test(raw)) {
+							floatingPanelHeightInput.text = formattedHeight()
+							return
+						}
+						const parsed = Number(raw)
+						if (!Number.isSafeInteger(parsed)) {
+							floatingPanelHeightInput.text = formattedHeight()
+							return
+						}
+						Workspace.settings.floatingPanelHeight = parsed
+						floatingPanelHeightInput.text = formattedHeight()
+					}
+
+					Connections {
+						target: Workspace.settings
+						function onFloatingBallChanged() {
+							floatingPanelHeightInput.text = floatingPanelHeightBox.formattedHeight()
+						}
+					}
+
+					TapHandler { onTapped: floatingPanelHeightInput.forceActiveFocus() }
+					TextInput {
+						id: floatingPanelHeightInput
+						objectName: "floatingPanelHeightInput"
+						anchors { left: parent.left; leftMargin: dialog.zoomInputRightMargin; right: parent.right; rightMargin: dialog.zoomInputRightMargin; top: parent.top; bottom: parent.bottom }
+						horizontalAlignment: TextInput.AlignRight
+						verticalAlignment: TextInput.AlignVCenter
+						color: Theme.text
+						selectionColor: Theme.selection
+						selectedTextColor: Theme.text
+						font { family: Theme.monoFamily; pixelSize: Theme.secondaryFontSize }
+						clip: true
+						selectByMouse: true
+						Accessible.name: qsTr("Mini panel size") + " (H)"
+						Component.onCompleted: text = floatingPanelHeightBox.formattedHeight()
+						onAccepted: {
+							floatingPanelHeightBox.commit()
+							dialog.forceActiveFocus()
+						}
+						onEditingFinished: if (text !== floatingPanelHeightBox.formattedHeight()) floatingPanelHeightBox.commit()
+						Keys.onEscapePressed: event => {
+							text = floatingPanelHeightBox.formattedHeight()
+							dialog.forceActiveFocus()
+							event.accepted = true
+						}
+						Keys.onUpPressed: event => {
+							Workspace.settings.floatingPanelHeight = Math.min(Workspace.settings.maxFloatingPanelHeight, Workspace.settings.floatingPanelHeight + Workspace.settings.floatingPanelSizeStep)
+							text = floatingPanelHeightBox.formattedHeight()
+							event.accepted = true
+						}
+						Keys.onDownPressed: event => {
+							Workspace.settings.floatingPanelHeight = Math.max(Workspace.settings.minFloatingPanelHeight, Workspace.settings.floatingPanelHeight - Workspace.settings.floatingPanelSizeStep)
+							text = floatingPanelHeightBox.formattedHeight()
+							event.accepted = true
+						}
 					}
 				}
 			}

@@ -4472,6 +4472,7 @@ void TestMainWindow::floatingBallModeExpandsAndCollapsesInSingleWindowWithoutWar
 		collapseBtn = findItem(ballWin->contentItem(), [](QQuickItem* item) { return item->objectName() == u"floatingCollapseButton"_s; });
 		return collapseBtn != nullptr && collapseBtn->isVisible();
 	}());
+	QCOMPARE(collapseBtn->property("iconName").toString(), u"float"_s);
 	const QPoint collapseCenter = collapseBtn->mapToScene(QPointF(collapseBtn->width() / 2.0, collapseBtn->height() / 2.0)).toPoint();
 	QTest::mouseMove(ballWin, collapseCenter);
 	QTest::mouseClick(ballWin, Qt::LeftButton, Qt::NoModifier, collapseCenter, 20);
@@ -4486,6 +4487,14 @@ void TestMainWindow::floatingBallModeExpandsAndCollapsesInSingleWindowWithoutWar
 	{
 		QCOMPARE(ballWin->position(), initialBallPos);
 	}
+
+	// Custom floatingBallSize updates collapsed ball dimensions and resets cleanly.
+	f.workspace->settings()->setFloatingBallSize(72);
+	QTRY_COMPARE(ballWin->width(), 72);
+	QTRY_COMPARE(ballWin->height(), 72);
+	f.workspace->settings()->setFloatingBallSize(56);
+	QTRY_COMPARE(ballWin->width(), 56);
+	QTRY_COMPARE(ballWin->height(), 56);
 
 	// Click ball again -> expands to 380x520 without auto-attaching a background session.
 	QTest::mouseMove(ballWin, QPoint(28, 28));
@@ -4520,6 +4529,75 @@ void TestMainWindow::floatingBallModeExpandsAndCollapsesInSingleWindowWithoutWar
 	const QPoint returnCenter = returnBtn->mapToScene(QPointF(returnBtn->width() / 2.0, returnBtn->height() / 2.0)).toPoint();
 	QTest::mouseMove(ballWin, returnCenter);
 	QTest::mouseClick(ballWin, Qt::LeftButton, Qt::NoModifier, returnCenter, 20);
+	QTRY_VERIFY(window->isVisible());
+	QTRY_VERIFY(!ballWin->isVisible());
+
+	// Enter Split View, detach current so tiles remain, then enter floating mode.
+	f.workspace->toggleSplit();
+	QTRY_VERIFY(f.workspace->isSplitView());
+	f.workspace->detachCurrent();
+	QTRY_VERIFY(f.workspace->current() == nullptr);
+	f.workspace->setFloatingMode(true);
+	QTRY_VERIFY(f.workspace->isFloatingMode());
+	QTRY_VERIFY(!window->isVisible());
+	QTRY_VERIFY([&] {
+		return ballWin->isVisible()
+		       && ballWin->width() == 56 && ballWin->height() == 56
+		       && ballWin->minimumWidth() == 56 && ballWin->maximumWidth() == 56
+		       && ballWin->minimumHeight() == 56 && ballWin->maximumHeight() == 56
+		       && ballRoot->isVisible() && !panelRoot->isVisible();
+	}());
+	QVERIFY(QTest::qWaitForWindowExposed(ballWin));
+	ballWin->requestActivate();
+	QCoreApplication::processEvents();
+
+	// Right-clicking the 56x56 ball opens floatingBallContextMenu as a separate top-level window >= 150px wide.
+	QTest::mouseMove(ballWin, QPoint(28, 28));
+	QTest::mouseClick(ballWin, Qt::RightButton, Qt::NoModifier, QPoint(28, 28), 20);
+	QQuickWindow* menuWin = nullptr;
+	QTRY_VERIFY([&] {
+		menuWin = window->findChild<QQuickWindow*>(u"floatingBallContextMenu"_s);
+		return menuWin != nullptr && menuWin->isVisible() && menuWin->width() >= 150;
+	}());
+	QCOMPARE(window->findChild<QQuickWindow*>(u"floatingHoverCard"_s), nullptr);
+	QCOMPARE(window->findChild<QQuickWindow*>(u"floatingPanelWindow"_s), nullptr);
+	QVERIFY(menuWin->flags().testFlag(Qt::WindowStaysOnTopHint));
+	QVERIFY(QTest::qWaitForWindowExposed(menuWin));
+	menuWin->requestActivate();
+	QCoreApplication::processEvents();
+	QTest::keyClick(menuWin, Qt::Key_Escape);
+	QTRY_VERIFY(!menuWin->isVisible());
+
+	// Left-click ball to expand mini panel in Split View, then click a floatingSessionRow -> leaves split and opens session.
+	QTest::mouseMove(ballWin, QPoint(28, 28));
+	QTest::mouseClick(ballWin, Qt::LeftButton, Qt::NoModifier, QPoint(28, 28), 20);
+	QTRY_VERIFY([&] {
+		return ballWin->isVisible()
+		       && ballWin->width() == 380 && ballWin->height() == 520
+		       && ballWin->minimumWidth() == 380 && ballWin->maximumWidth() == 380
+		       && ballWin->minimumHeight() == 520 && ballWin->maximumHeight() == 520
+		       && panelRoot->isVisible() && !ballRoot->isVisible();
+	}());
+	QTRY_VERIFY(sessionList->isVisible());
+	QQuickItem* splitRow = nullptr;
+	QTRY_VERIFY([&] {
+		splitRow = findItem(sessionList, [](QQuickItem* item) {
+			return item->objectName() == u"floatingSessionRow"_s && item->isVisible() && item->height() > 0.0;
+		});
+		return splitRow != nullptr;
+	}());
+	const QPoint splitRowCenter = splitRow->mapToScene(QPointF(splitRow->width() / 2.0, splitRow->height() / 2.0)).toPoint();
+	QTest::mouseMove(ballWin, splitRowCenter);
+	QTest::mouseClick(ballWin, Qt::LeftButton, Qt::NoModifier, splitRowCenter, 20);
+	QTRY_VERIFY(!f.workspace->isSplitView());
+	QTRY_VERIFY(f.workspace->current() != nullptr);
+	QTRY_VERIFY(!sessionList->isVisible());
+
+	// Return to full window cleanly after leaving split via mini panel.
+	QTRY_VERIFY(returnBtn->isVisible());
+	const QPoint returnCenter2 = returnBtn->mapToScene(QPointF(returnBtn->width() / 2.0, returnBtn->height() / 2.0)).toPoint();
+	QTest::mouseMove(ballWin, returnCenter2);
+	QTest::mouseClick(ballWin, Qt::LeftButton, Qt::NoModifier, returnCenter2, 20);
 	QTRY_VERIFY(window->isVisible());
 	QTRY_VERIFY(!ballWin->isVisible());
 	QCoreApplication::processEvents();

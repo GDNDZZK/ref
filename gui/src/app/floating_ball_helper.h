@@ -9,6 +9,7 @@
 #include <QVariantMap>
 
 class QScreen;
+class QWindow;
 
 // Computes screen-clamped positions and inward expansion directions for the floating ball,
 // and watches screen hotplug / availableGeometry changes so QML can re-clamp immediately.
@@ -61,6 +62,8 @@ public:
 	                                             int panelHeight,
 	                                             const QString& screenName = {}) const;
 	Q_INVOKABLE QVariantMap clampWindowRect(int x, int y, int width, int height, const QString& screenName = {}) const;
+	Q_INVOKABLE QPoint cursorPos() const;
+	Q_INVOKABLE void ensureAlwaysOnTop(QWindow* window) const;
 
 signals:
 	void screenGeometryChanged();

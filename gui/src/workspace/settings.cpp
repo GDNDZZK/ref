@@ -55,6 +55,9 @@ const QString FloatingBallKey = u"floatingBall"_s;
 const QString ScreenNameKey = u"screenName"_s;
 const QString XKey = u"x"_s;
 const QString YKey = u"y"_s;
+const QString BallSizeKey = u"ballSize"_s;
+const QString PanelWidthKey = u"panelWidth"_s;
+const QString PanelHeightKey = u"panelHeight"_s;
 
 using NotifyKind = proto::NotifyFrame::Kind;
 
@@ -323,7 +326,29 @@ void readBackendSettings(const QJsonObject& root, QString& backendUrl, QString& 
 	}
 }
 
-void readFloatingBall(const QJsonObject& root, QString& screenName, int& x, int& y, bool& hasPos, Problems& problems)
+void readClampedInt(const QJsonObject& obj, const QString& sectionKey, const QString& key, int minVal, int maxVal, int& value, Problems& problems)
+{
+	if(!obj.contains(key))
+	{
+		return;
+	}
+	const QJsonValue raw = obj.value(key);
+	if(!raw.isDouble())
+	{
+		problems.add(u"%1: expected a size in pixels"_s.arg(fieldPath(sectionKey, key)));
+		return;
+	}
+	const double read = raw.toDouble();
+	if(!std::isfinite(read))
+	{
+		problems.add(u"%1: expected a size in pixels"_s.arg(fieldPath(sectionKey, key)));
+		return;
+	}
+	const double clamped = std::clamp(read, static_cast<double>(minVal), static_cast<double>(maxVal));
+	value = qRound(clamped);
+}
+
+void readFloatingBall(const QJsonObject& root, QString& screenName, int& x, int& y, bool& hasPos, int& ballSize, int& panelWidth, int& panelHeight, Problems& problems)
 {
 	if(!root.contains(FloatingBallKey))
 	{
@@ -355,17 +380,22 @@ void readFloatingBall(const QJsonObject& root, QString& screenName, int& x, int&
 		if(!rawX.isDouble() || !rawY.isDouble() || !std::isfinite(rawX.toDouble()) || !std::isfinite(rawY.toDouble()))
 		{
 			problems.add(u"%1: expected numeric x and y"_s.arg(FloatingBallKey));
-			return;
 		}
-		screenName = parsedScreen;
-		x = qRound(rawX.toDouble());
-		y = qRound(rawY.toDouble());
-		hasPos = true;
+		else
+		{
+			screenName = parsedScreen;
+			x = qRound(rawX.toDouble());
+			y = qRound(rawY.toDouble());
+			hasPos = true;
+		}
 	}
 	else if(!parsedScreen.isEmpty())
 	{
 		screenName = parsedScreen;
 	}
+	readClampedInt(obj, FloatingBallKey, BallSizeKey, Settings::MinFloatingBallSize, Settings::MaxFloatingBallSize, ballSize, problems);
+	readClampedInt(obj, FloatingBallKey, PanelWidthKey, Settings::MinFloatingPanelWidth, Settings::MaxFloatingPanelWidth, panelWidth, problems);
+	readClampedInt(obj, FloatingBallKey, PanelHeightKey, Settings::MinFloatingPanelHeight, Settings::MaxFloatingPanelHeight, panelHeight, problems);
 }
 
 } // namespace
@@ -613,6 +643,35 @@ void Settings::setFloatingBallPosition(const QString& screenName, int x, int y)
 	emit floatingBallChanged();
 }
 
+void Settings::setFloatingBallSize(int size)
+{
+	set(m_floatingBallSize, std::clamp(size, MinFloatingBallSize, MaxFloatingBallSize), &Settings::floatingBallChanged);
+}
+
+void Settings::setFloatingPanelWidth(int width)
+{
+	set(m_floatingPanelWidth, std::clamp(width, MinFloatingPanelWidth, MaxFloatingPanelWidth), &Settings::floatingBallChanged);
+}
+
+void Settings::setFloatingPanelHeight(int height)
+{
+	set(m_floatingPanelHeight, std::clamp(height, MinFloatingPanelHeight, MaxFloatingPanelHeight), &Settings::floatingBallChanged);
+}
+
+void Settings::setFloatingPanelSize(int width, int height)
+{
+	const int clampedWidth = std::clamp(width, MinFloatingPanelWidth, MaxFloatingPanelWidth);
+	const int clampedHeight = std::clamp(height, MinFloatingPanelHeight, MaxFloatingPanelHeight);
+	if(m_floatingPanelWidth == clampedWidth && m_floatingPanelHeight == clampedHeight)
+	{
+		return;
+	}
+	m_floatingPanelWidth = clampedWidth;
+	m_floatingPanelHeight = clampedHeight;
+	scheduleSave();
+	emit floatingBallChanged();
+}
+
 void Settings::scheduleSave()
 {
 	m_dirty = true;
@@ -676,7 +735,7 @@ void Settings::readFields(const QJsonObject& root)
 	readUiScale(root, UiScaleKey, m_uiScale, problems);
 	readMessageWindowSize(root, MessageWindowSizeKey, m_messageWindowSize, problems);
 	readBackendSettings(root, m_backendUrl, m_backendToken, problems);
-	readFloatingBall(root, m_floatingBallScreen, m_floatingBallX, m_floatingBallY, m_hasFloatingBallPosition, problems);
+	readFloatingBall(root, m_floatingBallScreen, m_floatingBallX, m_floatingBallY, m_hasFloatingBallPosition, m_floatingBallSize, m_floatingPanelWidth, m_floatingPanelHeight, problems);
 	if(problems.any())
 	{
 		m_loadProblem = tr("Some settings in %1 were ignored: %2").arg(m_path, problems.text());
@@ -732,13 +791,58 @@ QJsonObject Settings::toJson() const
 		root.remove(BackendUrlKey);
 		root.remove(BackendTokenKey);
 	}
-	if(m_hasFloatingBallPosition)
+	const bool hasCustomBallSize = m_floatingBallSize != DefaultFloatingBallSize;
+	const bool hasCustomPanelWidth = m_floatingPanelWidth != DefaultFloatingPanelWidth;
+	const bool hasCustomPanelHeight = m_floatingPanelHeight != DefaultFloatingPanelHeight;
+	if(m_hasFloatingBallPosition || hasCustomBallSize || hasCustomPanelWidth || hasCustomPanelHeight)
 	{
 		QJsonObject floatingBall = section(root, FloatingBallKey);
-		floatingBall.insert(ScreenNameKey, m_floatingBallScreen);
-		floatingBall.insert(XKey, m_floatingBallX);
-		floatingBall.insert(YKey, m_floatingBallY);
+		if(m_hasFloatingBallPosition)
+		{
+			floatingBall.insert(ScreenNameKey, m_floatingBallScreen);
+			floatingBall.insert(XKey, m_floatingBallX);
+			floatingBall.insert(YKey, m_floatingBallY);
+		}
+		if(hasCustomBallSize)
+		{
+			floatingBall.insert(BallSizeKey, m_floatingBallSize);
+		}
+		else
+		{
+			floatingBall.remove(BallSizeKey);
+		}
+		if(hasCustomPanelWidth)
+		{
+			floatingBall.insert(PanelWidthKey, m_floatingPanelWidth);
+		}
+		else
+		{
+			floatingBall.remove(PanelWidthKey);
+		}
+		if(hasCustomPanelHeight)
+		{
+			floatingBall.insert(PanelHeightKey, m_floatingPanelHeight);
+		}
+		else
+		{
+			floatingBall.remove(PanelHeightKey);
+		}
 		root.insert(FloatingBallKey, floatingBall);
+	}
+	else if(root.contains(FloatingBallKey))
+	{
+		QJsonObject floatingBall = section(root, FloatingBallKey);
+		floatingBall.remove(BallSizeKey);
+		floatingBall.remove(PanelWidthKey);
+		floatingBall.remove(PanelHeightKey);
+		if(floatingBall.isEmpty())
+		{
+			root.remove(FloatingBallKey);
+		}
+		else
+		{
+			root.insert(FloatingBallKey, floatingBall);
+		}
 	}
 	return root;
 }

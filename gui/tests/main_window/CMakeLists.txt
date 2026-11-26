@@ -44,6 +44,9 @@ refgui_add_test(tst_main_window
 		${PROJECT_SOURCE_DIR}/src/app/workspace.h
 	LIBS refgui_workspace refgui_session refgui_composer refgui_notify refgui_cli refgui_icons Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2
 )
+if(WIN32)
+	target_link_libraries(tst_main_window PRIVATE user32)
+endif()
 qt_add_qml_module(tst_main_window
 	URI RefGui
 	QML_FILES ${main_window_qml_files}

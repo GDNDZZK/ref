@@ -53,6 +53,20 @@ class Settings : public QObject
 	Q_PROPERTY(int floatingBallX READ floatingBallX NOTIFY floatingBallChanged)
 	Q_PROPERTY(int floatingBallY READ floatingBallY NOTIFY floatingBallChanged)
 	Q_PROPERTY(bool hasFloatingBallPosition READ hasFloatingBallPosition NOTIFY floatingBallChanged)
+	Q_PROPERTY(int floatingBallSize READ floatingBallSize WRITE setFloatingBallSize NOTIFY floatingBallChanged)
+	Q_PROPERTY(int defaultFloatingBallSize READ defaultFloatingBallSize CONSTANT)
+	Q_PROPERTY(int minFloatingBallSize READ minFloatingBallSize CONSTANT)
+	Q_PROPERTY(int maxFloatingBallSize READ maxFloatingBallSize CONSTANT)
+	Q_PROPERTY(int floatingBallSizeStep READ floatingBallSizeStep CONSTANT)
+	Q_PROPERTY(int floatingPanelWidth READ floatingPanelWidth WRITE setFloatingPanelWidth NOTIFY floatingBallChanged)
+	Q_PROPERTY(int defaultFloatingPanelWidth READ defaultFloatingPanelWidth CONSTANT)
+	Q_PROPERTY(int minFloatingPanelWidth READ minFloatingPanelWidth CONSTANT)
+	Q_PROPERTY(int maxFloatingPanelWidth READ maxFloatingPanelWidth CONSTANT)
+	Q_PROPERTY(int floatingPanelHeight READ floatingPanelHeight WRITE setFloatingPanelHeight NOTIFY floatingBallChanged)
+	Q_PROPERTY(int defaultFloatingPanelHeight READ defaultFloatingPanelHeight CONSTANT)
+	Q_PROPERTY(int minFloatingPanelHeight READ minFloatingPanelHeight CONSTANT)
+	Q_PROPERTY(int maxFloatingPanelHeight READ maxFloatingPanelHeight CONSTANT)
+	Q_PROPERTY(int floatingPanelSizeStep READ floatingPanelSizeStep CONSTANT)
 	Q_PROPERTY(QString loadProblem READ loadProblem CONSTANT)
 public:
 	// The values of `theme` and `language` that mean "do what the system does".
@@ -74,6 +88,17 @@ public:
 	static constexpr double UiScaleStep = 0.05;
 	static constexpr int DefaultMessageWindowSize = 1000;
 	static constexpr int MessageWindowStep = 50;
+	static constexpr int DefaultFloatingBallSize = 56;
+	static constexpr int MinFloatingBallSize = 40;
+	static constexpr int MaxFloatingBallSize = 96;
+	static constexpr int FloatingBallSizeStep = 4;
+	static constexpr int DefaultFloatingPanelWidth = 380;
+	static constexpr int MinFloatingPanelWidth = 300;
+	static constexpr int MaxFloatingPanelWidth = 720;
+	static constexpr int FloatingPanelSizeStep = 20;
+	static constexpr int DefaultFloatingPanelHeight = 520;
+	static constexpr int MinFloatingPanelHeight = 360;
+	static constexpr int MaxFloatingPanelHeight = 900;
 	// Read-only startup helper: returns normalized `uiScale`, or `DefaultUiScale` if unreadable/invalid (Settings reports errors later).
 	static double readUiScaleOnly(const QString& path);
 	// Reads `path`. A file that cannot be read keeps the defaults; see loadProblem().
@@ -116,6 +141,20 @@ public:
 	int floatingBallX() const { return m_floatingBallX; }
 	int floatingBallY() const { return m_floatingBallY; }
 	bool hasFloatingBallPosition() const { return m_hasFloatingBallPosition; }
+	int floatingBallSize() const { return m_floatingBallSize; }
+	int defaultFloatingBallSize() const { return DefaultFloatingBallSize; }
+	int minFloatingBallSize() const { return MinFloatingBallSize; }
+	int maxFloatingBallSize() const { return MaxFloatingBallSize; }
+	int floatingBallSizeStep() const { return FloatingBallSizeStep; }
+	int floatingPanelWidth() const { return m_floatingPanelWidth; }
+	int defaultFloatingPanelWidth() const { return DefaultFloatingPanelWidth; }
+	int minFloatingPanelWidth() const { return MinFloatingPanelWidth; }
+	int maxFloatingPanelWidth() const { return MaxFloatingPanelWidth; }
+	int floatingPanelHeight() const { return m_floatingPanelHeight; }
+	int defaultFloatingPanelHeight() const { return DefaultFloatingPanelHeight; }
+	int minFloatingPanelHeight() const { return MinFloatingPanelHeight; }
+	int maxFloatingPanelHeight() const { return MaxFloatingPanelHeight; }
+	int floatingPanelSizeStep() const { return FloatingPanelSizeStep; }
 
 	// Precondition for both: a known value (see the constants above).
 	void setTheme(const QString& theme);
@@ -140,6 +179,10 @@ public:
 	void setMessageWindowSize(int size);
 	Q_INVOKABLE void setBackend(const QString& url, const QString& token);
 	Q_INVOKABLE void setFloatingBallPosition(const QString& screenName, int x, int y);
+	void setFloatingBallSize(int size);
+	void setFloatingPanelWidth(int width);
+	void setFloatingPanelHeight(int height);
+	Q_INVOKABLE void setFloatingPanelSize(int width, int height);
 	// What went wrong reading the file, for the user. Empty when it was read or did not exist.
 	QString loadProblem() const { return m_loadProblem; }
 
@@ -204,6 +247,9 @@ private:
 	int m_floatingBallX = 0;
 	int m_floatingBallY = 0;
 	bool m_hasFloatingBallPosition = false;
+	int m_floatingBallSize = DefaultFloatingBallSize;
+	int m_floatingPanelWidth = DefaultFloatingPanelWidth;
+	int m_floatingPanelHeight = DefaultFloatingPanelHeight;
 	QString m_loadProblem;
 	QTimer m_saveTimer;
 	bool m_dirty = false;

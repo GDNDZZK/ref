@@ -50,6 +50,7 @@ private slots:
 	void sidebarHistoryFiltersPersistAndValidate();
 	void backendSettingsPersistValidateAndUseOwnerOnlyPermissions();
 	void floatingBallPositionPersistsAndValidates();
+	void floatingBallSizesPersistAndValidate();
 	void messageWindowSizePersistsAndValidates();
 };
 
@@ -84,6 +85,9 @@ void TestSettings::defaultsWithoutAFile()
 	QCOMPARE(settings.messageWindowStep(), Settings::MessageWindowStep);
 	QCOMPARE(Settings::DefaultMessageWindowSize, 1000);
 	QCOMPARE(Settings::MessageWindowStep, 50);
+	QCOMPARE(settings.floatingBallSize(), Settings::DefaultFloatingBallSize);
+	QCOMPARE(settings.floatingPanelWidth(), Settings::DefaultFloatingPanelWidth);
+	QCOMPARE(settings.floatingPanelHeight(), Settings::DefaultFloatingPanelHeight);
 	QVERIFY(settings.loadProblem().isEmpty());
 	QVERIFY(!QFile::exists(dir.filePath(u"gui.json"_s))); // nothing is written until something changes
 }
@@ -476,6 +480,104 @@ void TestSettings::floatingBallPositionPersistsAndValidates()
 	const Settings bad(badPath);
 	QVERIFY(!bad.hasFloatingBallPosition());
 	QVERIFY(bad.loadProblem().contains(u"floatingBall"_s));
+}
+
+void TestSettings::floatingBallSizesPersistAndValidate()
+{
+	QTemporaryDir dir;
+	const QString path = dir.filePath(u"gui.json"_s);
+	{
+		Settings settings(path);
+		QCOMPARE(settings.floatingBallSize(), Settings::DefaultFloatingBallSize);
+		QCOMPARE(settings.defaultFloatingBallSize(), Settings::DefaultFloatingBallSize);
+		QCOMPARE(settings.minFloatingBallSize(), Settings::MinFloatingBallSize);
+		QCOMPARE(settings.maxFloatingBallSize(), Settings::MaxFloatingBallSize);
+		QCOMPARE(settings.floatingBallSizeStep(), Settings::FloatingBallSizeStep);
+		QCOMPARE(settings.floatingPanelWidth(), Settings::DefaultFloatingPanelWidth);
+		QCOMPARE(settings.defaultFloatingPanelWidth(), Settings::DefaultFloatingPanelWidth);
+		QCOMPARE(settings.minFloatingPanelWidth(), Settings::MinFloatingPanelWidth);
+		QCOMPARE(settings.maxFloatingPanelWidth(), Settings::MaxFloatingPanelWidth);
+		QCOMPARE(settings.floatingPanelHeight(), Settings::DefaultFloatingPanelHeight);
+		QCOMPARE(settings.defaultFloatingPanelHeight(), Settings::DefaultFloatingPanelHeight);
+		QCOMPARE(settings.minFloatingPanelHeight(), Settings::MinFloatingPanelHeight);
+		QCOMPARE(settings.maxFloatingPanelHeight(), Settings::MaxFloatingPanelHeight);
+		QCOMPARE(settings.floatingPanelSizeStep(), Settings::FloatingPanelSizeStep);
+
+		QSignalSpy spy(&settings, &Settings::floatingBallChanged);
+		settings.setFloatingBallSize(10);
+		QCOMPARE(settings.floatingBallSize(), Settings::MinFloatingBallSize);
+		settings.setFloatingBallSize(200);
+		QCOMPARE(settings.floatingBallSize(), Settings::MaxFloatingBallSize);
+		settings.setFloatingBallSize(200); // unchanged
+		settings.setFloatingBallSize(72);
+
+		settings.setFloatingPanelWidth(100);
+		QCOMPARE(settings.floatingPanelWidth(), Settings::MinFloatingPanelWidth);
+		settings.setFloatingPanelWidth(2000);
+		QCOMPARE(settings.floatingPanelWidth(), Settings::MaxFloatingPanelWidth);
+		settings.setFloatingPanelHeight(100);
+		QCOMPARE(settings.floatingPanelHeight(), Settings::MinFloatingPanelHeight);
+		settings.setFloatingPanelHeight(2000);
+		QCOMPARE(settings.floatingPanelHeight(), Settings::MaxFloatingPanelHeight);
+
+		settings.setFloatingPanelSize(460, 640);
+		QCOMPARE(settings.floatingPanelWidth(), 460);
+		QCOMPARE(settings.floatingPanelHeight(), 640);
+		settings.setFloatingPanelSize(460, 640); // unchanged, no signal
+		QCOMPARE(spy.count(), 8);
+
+		settings.setFloatingPanelSize(50, 5000);
+		QCOMPARE(settings.floatingPanelWidth(), Settings::MinFloatingPanelWidth);
+		QCOMPARE(settings.floatingPanelHeight(), Settings::MaxFloatingPanelHeight);
+		QCOMPARE(spy.count(), 9);
+
+		settings.setFloatingPanelSize(480, 660);
+		QCOMPARE(spy.count(), 10);
+		settings.save();
+	}
+
+	const QJsonObject savedBall = readJson(path).value(u"floatingBall"_s).toObject();
+	QCOMPARE(savedBall.value(u"ballSize"_s).toInt(), 72);
+	QCOMPARE(savedBall.value(u"panelWidth"_s).toInt(), 480);
+	QCOMPARE(savedBall.value(u"panelHeight"_s).toInt(), 660);
+
+	const Settings reloaded(path);
+	QVERIFY(reloaded.loadProblem().isEmpty());
+	QVERIFY(!reloaded.hasFloatingBallPosition());
+	QCOMPARE(reloaded.floatingBallSize(), 72);
+	QCOMPARE(reloaded.floatingPanelWidth(), 480);
+	QCOMPARE(reloaded.floatingPanelHeight(), 660);
+
+	// Out-of-range numeric values are clamped on load; unknown keys survive when reset to default.
+	const QString clampedPath = dir.filePath(u"clamped_ball.json"_s);
+	writeFile(clampedPath, R"({"floatingBall":{"ballSize":12,"panelWidth":999,"panelHeight":120,"extra":"keep"}})");
+	{
+		Settings clamped(clampedPath);
+		QVERIFY(clamped.loadProblem().isEmpty());
+		QCOMPARE(clamped.floatingBallSize(), Settings::MinFloatingBallSize);
+		QCOMPARE(clamped.floatingPanelWidth(), Settings::MaxFloatingPanelWidth);
+		QCOMPARE(clamped.floatingPanelHeight(), Settings::MinFloatingPanelHeight);
+
+		clamped.setFloatingBallSize(Settings::DefaultFloatingBallSize);
+		clamped.setFloatingPanelSize(Settings::DefaultFloatingPanelWidth, Settings::DefaultFloatingPanelHeight);
+		clamped.save();
+	}
+	const QJsonObject resetBall = readJson(clampedPath).value(u"floatingBall"_s).toObject();
+	QVERIFY(!resetBall.contains(u"ballSize"_s));
+	QVERIFY(!resetBall.contains(u"panelWidth"_s));
+	QVERIFY(!resetBall.contains(u"panelHeight"_s));
+	QCOMPARE(resetBall.value(u"extra"_s).toString(), u"keep"_s);
+
+	// Non-numeric values are reported and fall back to defaults.
+	const QString badPath = dir.filePath(u"bad_ball_sizes.json"_s);
+	writeFile(badPath, R"({"floatingBall":{"ballSize":"big","panelWidth":null,"panelHeight":{}}})");
+	const Settings bad(badPath);
+	QCOMPARE(bad.floatingBallSize(), Settings::DefaultFloatingBallSize);
+	QCOMPARE(bad.floatingPanelWidth(), Settings::DefaultFloatingPanelWidth);
+	QCOMPARE(bad.floatingPanelHeight(), Settings::DefaultFloatingPanelHeight);
+	QVERIFY(bad.loadProblem().contains(u"floatingBall.ballSize"_s));
+	QVERIFY(bad.loadProblem().contains(u"floatingBall.panelWidth"_s));
+	QVERIFY(bad.loadProblem().contains(u"floatingBall.panelHeight"_s));
 }
 
 void TestSettings::messageWindowSizePersistsAndValidates()

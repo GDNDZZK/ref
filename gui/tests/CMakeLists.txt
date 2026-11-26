@@ -117,7 +117,9 @@ refgui_add_test(tst_workspace SOURCES fake_backend.h
 	${PROJECT_SOURCE_DIR}/src/app/floating_ball_helper.h
 	LIBS refgui_workspace refgui_session refgui_composer refgui_cli Qt6::Gui Qt6::Qml
 )
-
+if(WIN32)
+	target_link_libraries(tst_workspace PRIVATE user32)
+endif()
 # The translator is part of the program; the test compiles it and embeds the translations like the program does.
 refgui_add_test(tst_app_translator
 	SOURCES ${PROJECT_SOURCE_DIR}/src/app/app_translator.cpp ${PROJECT_SOURCE_DIR}/src/app/app_translator.h
@@ -151,6 +153,9 @@ refgui_add_test(tst_floating_ball_helper
 	LIBS Qt6::Gui
 )
 target_include_directories(tst_floating_ball_helper PRIVATE ${PROJECT_SOURCE_DIR}/src)
+if(WIN32)
+	target_link_libraries(tst_floating_ball_helper PRIVATE user32)
+endif()
 set_tests_properties(tst_floating_ball_helper PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 # Text from the model must not reach the network. Compiles the program's network policy.
 refgui_add_test(tst_network_policy

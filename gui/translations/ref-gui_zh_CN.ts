@@ -3560,6 +3560,31 @@ $ARGUMENTS</translation>
         <translation>0 表示不限制（全部加载）</translation>
     </message>
     <message>
+        <location filename="../src/app/SettingsDialog.qml" line="413"/>
+        <location filename="../src/app/SettingsDialog.qml" line="448"/>
+        <location filename="../src/app/SettingsDialog.qml" line="508"/>
+        <location filename="../src/app/SettingsDialog.qml" line="549"/>
+        <source>Floating ball size</source>
+        <translation>悬浮球大小</translation>
+    </message>
+    <message>
+        <location filename="../src/app/SettingsDialog.qml" line="422"/>
+        <source>Diameter in pixels (%1–%2)</source>
+        <translation>直径像素（%1–%2）</translation>
+    </message>
+    <message>
+        <location filename="../src/app/SettingsDialog.qml" line="576"/>
+        <location filename="../src/app/SettingsDialog.qml" line="654"/>
+        <location filename="../src/app/SettingsDialog.qml" line="735"/>
+        <source>Mini panel size</source>
+        <translation>小窗尺寸</translation>
+    </message>
+    <message>
+        <location filename="../src/app/SettingsDialog.qml" line="585"/>
+        <source>Width × height in pixels; also resizable by dragging edges</source>
+        <translation>宽 × 高像素，也可拖动小窗边缘调整</translation>
+    </message>
+    <message>
         <location filename="../src/app/SettingsDialog.qml" line="84"/>
         <source>Configuration</source>
         <translation>配置</translation>
