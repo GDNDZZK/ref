@@ -879,24 +879,21 @@ void TestConversationModel::configurableWindowAndNewestMissingRange()
 	QCOMPARE(model.pageSize(), ConversationModel::MaxServerPageSize);
 	QCOMPARE(model.tailKeepMessages(), 0);
 
-	// newestMissingRange chunks newest-first up to 1000 and handles disjoint gaps.
-	constexpr int Total = 2500;
-	QList<refgui::proto::MessageLayoutMeta> metas;
-	metas.reserve(Total);
-	for(int i = 0; i < Total; ++i)
-	{
-		metas.append(refgui::proto::MessageLayoutMeta{
-			.seq = static_cast<quint64>(i),
-			.id = u"m_%1"_s.arg(i),
-			.role = (i % 2 == 0) ? refgui::proto::Role::User : refgui::proto::Role::Assistant,
-			.sourceKind = u"human"_s,
-			.parts = {refgui::proto::PartLayoutMeta{.kind = u"text"_s, .chars = 40, .lines = 1}},
-		});
-	}
-	model.reset({}, Total, Total, metas);
-	QVERIFY(model.hasPlaceholders());
-	QCOMPARE(model.newestMissingRange(), (std::optional<std::pair<quint64, quint64>>{{1500, 2500}}));
-
+	auto makeMetas = [](int count) {
+		QList<refgui::proto::MessageLayoutMeta> list;
+		list.reserve(count);
+		for(int i = 0; i < count; ++i)
+		{
+			list.append(refgui::proto::MessageLayoutMeta{
+				.seq = static_cast<quint64>(i),
+				.id = u"m_%1"_s.arg(i),
+				.role = (i % 2 == 0) ? refgui::proto::Role::User : refgui::proto::Role::Assistant,
+				.sourceKind = u"human"_s,
+				.parts = {refgui::proto::PartLayoutMeta{.kind = u"text"_s, .chars = 40, .lines = 1}},
+			});
+		}
+		return list;
+	};
 	auto makeBatch = [](int start, int end) {
 		QList<refgui::proto::Message> batch;
 		batch.reserve(end - start);
@@ -907,36 +904,52 @@ void TestConversationModel::configurableWindowAndNewestMissingRange()
 		}
 		return batch;
 	};
-	model.materializeRange(1500, makeBatch(1500, 2500));
-	QCOMPARE(model.newestMissingRange(), (std::optional<std::pair<quint64, quint64>>{{500, 1500}}));
-	// Partial materialization in the middle creates two disjoint gaps: [500, 700) and [900, 1500).
-	model.materializeRange(700, makeBatch(700, 900));
-	QCOMPARE(model.newestMissingRange(), (std::optional<std::pair<quint64, quint64>>{{900, 1500}}));
-	model.materializeRange(900, makeBatch(900, 1500));
-	QCOMPARE(model.newestMissingRange(), (std::optional<std::pair<quint64, quint64>>{{0, 700}}));
-	model.materializeRange(0, makeBatch(0, 700));
-	QVERIFY(!model.hasPlaceholders());
-	QVERIFY(!model.newestMissingRange().has_value());
-	QCOMPARE(model.residentCount(), Total);
 
-	// Unlimited (0) makes evictOutside and evictOldTail no-ops even with >1000 materialized messages.
-	QVERIFY(model.evictOutside(0, 10).isEmpty());
+	// Verify model invariants under QAbstractItemModelTester with a compact window.
+	constexpr int SmallTotal = 80;
+	model.reset({}, SmallTotal, SmallTotal, makeMetas(SmallTotal));
+	QVERIFY(model.hasPlaceholders());
+	model.materializeRange(0, makeBatch(0, SmallTotal));
+	QCOMPARE(model.residentCount(), SmallTotal);
+	QVERIFY(model.evictOutside(0, 5).isEmpty());
 	QVERIFY(model.evictOldTail().isEmpty());
-	QVERIFY(model.evictOldTail(50).isEmpty());
-	QCOMPARE(model.residentCount(), Total);
+	QVERIFY(model.evictOldTail(10).isEmpty());
 
-	// Switching to a positive custom size enforces window on evictOutside and evictOldTail.
-	model.setMessageWindowSize(200);
-	const QStringList evictedOutside = model.evictOutside(1000, 1010);
+	model.setMessageWindowSize(20);
+	const QStringList evictedOutside = model.evictOutside(40, 45);
 	QVERIFY(!evictedOutside.isEmpty());
-	QVERIFY(model.residentCount() <= 200);
-	// Materialize all again and check evictOldTail keeps 200 newest.
-	model.materializeRange(0, makeBatch(0, 2500));
-	QCOMPARE(model.residentCount(), Total);
+	QVERIFY(model.residentCount() <= 20);
+	model.materializeRange(0, makeBatch(0, SmallTotal));
 	model.evictOldTail();
-	QCOMPARE(model.residentCount(), 200);
+	QCOMPARE(model.residentCount(), 20);
 	QCOMPARE(model.index(0).data(ConversationModel::KindRole).toString(), u"skeleton"_s);
-	QVERIFY(model.index(model.firstRowForSeq(Total - 200)).data(ConversationModel::KindRole).toString() != u"skeleton"_s);
+	QVERIFY(model.index(model.firstRowForSeq(SmallTotal - 20)).data(ConversationModel::KindRole).toString() != u"skeleton"_s);
+
+	// newestMissingRange chunks newest-first up to 1000 and handles disjoint gaps without
+	// O(N^2) QAbstractItemModelTester overhead across thousands of bulk row mutations.
+	ConversationModel chunkModel;
+	chunkModel.setMessageWindowSize(0);
+	constexpr int Total = 2500;
+	chunkModel.reset({}, Total, Total, makeMetas(Total));
+	QVERIFY(chunkModel.hasPlaceholders());
+	QCOMPARE(chunkModel.newestMissingRange(), (std::optional<std::pair<quint64, quint64>>{{1500, 2500}}));
+
+	chunkModel.materializeRange(1500, makeBatch(1500, 2500));
+	QCOMPARE(chunkModel.newestMissingRange(), (std::optional<std::pair<quint64, quint64>>{{500, 1500}}));
+	// Partial materialization in the middle creates two disjoint gaps: [500, 700) and [900, 1500).
+	chunkModel.materializeRange(700, makeBatch(700, 900));
+	QCOMPARE(chunkModel.newestMissingRange(), (std::optional<std::pair<quint64, quint64>>{{900, 1500}}));
+	chunkModel.materializeRange(900, makeBatch(900, 1500));
+	QCOMPARE(chunkModel.newestMissingRange(), (std::optional<std::pair<quint64, quint64>>{{0, 700}}));
+	chunkModel.materializeRange(0, makeBatch(0, 700));
+	QVERIFY(!chunkModel.hasPlaceholders());
+	QVERIFY(!chunkModel.newestMissingRange().has_value());
+	QCOMPARE(chunkModel.residentCount(), Total);
+	QVERIFY(chunkModel.evictOutside(0, 10).isEmpty());
+	QVERIFY(chunkModel.evictOldTail().isEmpty());
+	chunkModel.setMessageWindowSize(200);
+	chunkModel.evictOldTail();
+	QCOMPARE(chunkModel.residentCount(), 200);
 }
 
 QTEST_GUILESS_MAIN(TestConversationModel)
