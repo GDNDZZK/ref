@@ -548,7 +548,7 @@ async fn compact_context_injects_current_todos_with_staleness_note() {
     assert!(text.contains("Read code; fixing bug."), "{text}");
     assert!(
         text.contains(
-            "[Todo list at compaction time (may be stale or inaccurate; prefer the summary above):]\n[x] Read code\n[~] Fix bug"
+            "[Todo list at compaction time (may be stale or inaccurate; prefer the summary above):]\n\n- [x] Read code\n- [~] Fix bug"
         ),
         "{text}"
     );

@@ -20,9 +20,13 @@ fn summary_text(summary: &str, todos: &[ref_proto::Todo]) -> String {
             "[Context compacted. Summary of the conversation so far:]\n\n{summary}\n\n[Continue from here.]"
         );
     }
-    let items = crate::toolset::format_todo_items(todos);
+    let items = crate::toolset::format_todo_items(todos)
+        .lines()
+        .map(|line| format!("- {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
     format!(
-        "[Context compacted. Summary of the conversation so far:]\n\n{summary}\n\n[Todo list at compaction time (may be stale or inaccurate; prefer the summary above):]\n{items}\n\n[Continue from here.]"
+        "[Context compacted. Summary of the conversation so far:]\n\n{summary}\n\n[Todo list at compaction time (may be stale or inaccurate; prefer the summary above):]\n\n{items}\n\n[Continue from here.]"
     )
 }
 
@@ -353,7 +357,7 @@ mod tests {
         ];
         assert_eq!(
             summary_text("did Step 1", &todos),
-            "[Context compacted. Summary of the conversation so far:]\n\ndid Step 1\n\n[Todo list at compaction time (may be stale or inaccurate; prefer the summary above):]\n[x] Step 1\n[~] Step 2\n\n[Continue from here.]"
+            "[Context compacted. Summary of the conversation so far:]\n\ndid Step 1\n\n[Todo list at compaction time (may be stale or inaccurate; prefer the summary above):]\n\n- [x] Step 1\n- [~] Step 2\n\n[Continue from here.]"
         );
     }
 }

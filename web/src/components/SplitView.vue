@@ -73,6 +73,7 @@ watchEffect(() => {
 const laidOutIds = computed(() => (size.value.width > 0 ? activeTileIds.value : []))
 
 const zoomed = computed(() => activeZoomedId.value !== undefined)
+const hasTopChrome = computed(() => !zoomed.value && !layout.narrow)
 // The floating window buttons sit over the content. The header of a tile under them keeps its
 // buttons and marks out of their way, so no tile loses height (the GUI's TileGrid.topInset).
 interface Clearance {
@@ -191,7 +192,7 @@ function onBackgroundClick(event: MouseEvent): void {
   <div
     ref="area"
     class="split"
-    :class="{ zoomed, zooming }"
+    :class="{ zoomed, zooming, 'with-top-chrome': hasTopChrome }"
     @scroll.passive="scheduleMeasureClearances"
     @click="onBackgroundClick"
   >
@@ -244,6 +245,10 @@ function onBackgroundClick(event: MouseEvent): void {
 
 .split.zoomed {
   overflow-y: hidden;
+}
+
+.split.with-top-chrome {
+  margin-top: var(--sidebar-header-height);
 }
 
 .grid {

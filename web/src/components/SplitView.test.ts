@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import { createAppI18n } from '../i18n/index.ts'
 import { info } from '../model/testMessages.ts'
+import { useLayoutStore } from '../stores/layout.ts'
 import { useWorkspaceStore } from '../stores/workspace.ts'
 import SplitView from './SplitView.vue'
 
@@ -252,5 +253,36 @@ describe('SplitView', () => {
       expect(styleMatch).not.toMatch(/\bblur\s*\(/i)
       expect(styleMatch).not.toMatch(/(?:^|[;\s])(?:backdrop-)?filter\s*:/i)
     }
+  })
+
+  it('adds with-top-chrome in normal split mode and drops it when zoomed or narrow', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const workspace = useWorkspaceStore()
+    const layout = useLayoutStore()
+    workspace.onFrame({
+      kind: 'sessions',
+      sessions: [info({ id: 's2', name: 'bg', created_at: 2, attached: 0 })],
+    })
+    workspace.mode = 'split'
+
+    const wrapper = mount(SplitView, {
+      global: { plugins: [pinia, createAppI18n(['en'])], stubs: { SplitTile: TileStub } },
+    })
+    await nextTick()
+    expect(wrapper.get('.split').classes()).toContain('with-top-chrome')
+
+    workspace.zoomTile('s2')
+    await nextTick()
+    expect(wrapper.get('.split').classes()).not.toContain('with-top-chrome')
+
+    workspace.unzoom()
+    await nextTick()
+    expect(wrapper.get('.split').classes()).toContain('with-top-chrome')
+
+    layout.narrow = true
+    await nextTick()
+    expect(wrapper.get('.split').classes()).not.toContain('with-top-chrome')
+    wrapper.unmount()
   })
 })

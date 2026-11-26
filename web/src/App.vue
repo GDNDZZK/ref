@@ -307,6 +307,7 @@ function toggleSplit(): void {
   flex: 1;
   flex-direction: column;
   min-width: 0;
+  background: var(--background);
 }
 
 .stage {
