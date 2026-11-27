@@ -4572,7 +4572,7 @@ void TestMainWindow::floatingBallModeExpandsAndCollapsesInSingleWindowWithoutWar
 		collapseBtn = findItem(ballWin->contentItem(), [](QQuickItem* item) { return item->objectName() == u"floatingCollapseButton"_s; });
 		return collapseBtn != nullptr && collapseBtn->isVisible();
 	}());
-	QCOMPARE(collapseBtn->property("iconName").toString(), u"float"_s);
+	QCOMPARE(collapseBtn->property("iconName").toString(), u"minus"_s);
 	const QPoint collapseCenter = collapseBtn->mapToScene(QPointF(collapseBtn->width() / 2.0, collapseBtn->height() / 2.0)).toPoint();
 	QTest::mouseMove(ballWin, collapseCenter);
 	QTest::mouseClick(ballWin, Qt::LeftButton, Qt::NoModifier, collapseCenter, 20);

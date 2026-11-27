@@ -312,6 +312,7 @@ Item {
 	Window {
 		id: floatingWindow
 		objectName: "floatingBallWindow"
+		title: "ref-floating"
 		// Independent of Main window, which is hidden while floating mode is active.
 		transientParent: null
 		visible: Workspace.floatingMode
@@ -335,8 +336,8 @@ Item {
 			if (!active && visible)
 				Qt.callLater(root.enforceTopMost)
 		}
-		onVisibilityChanged: {
-			if (visibility === Window.Maximized || visibility === Window.FullScreen) {
+		onVisibilityChanged: nextVisibility => {
+			if (nextVisibility === Window.Maximized || nextVisibility === Window.FullScreen) {
 				visibility = Window.Windowed
 				Qt.callLater(root.syncWindowGeometry)
 			}
@@ -745,8 +746,8 @@ Item {
 					IconButton {
 						objectName: "floatingCollapseButton"
 						buttonSize: root.headerButtonSize
-						iconName: "float"
-						iconSize: 20
+						iconName: "minus"
+						iconSize: 16
 						tooltipText: qsTr("Collapse to ball")
 						Accessible.name: qsTr("Collapse to ball")
 						onClicked: root.collapseToBall()

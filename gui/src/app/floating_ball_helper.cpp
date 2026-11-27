@@ -13,6 +13,11 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#elif QT_CONFIG(xcb)
+#include <QLibrary>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #endif
 #include <algorithm>
 
@@ -72,6 +77,205 @@ const FloatingBallHelper::ScreenGeometry* findScreenForRect(const QRect& rect,
 	}
 	return best;
 }
+
+#if !defined(Q_OS_WIN) && QT_CONFIG(xcb)
+
+constexpr std::uint8_t XcbClientMessage = 33;
+constexpr std::uint8_t XcbFormat32 = 32;
+constexpr std::uint32_t XcbEventMaskSubstructureNotify = 0x00080000U;
+constexpr std::uint32_t XcbEventMaskSubstructureRedirect = 0x00100000U;
+constexpr std::uint32_t NetWmStateAdd = 1U;
+constexpr std::uint32_t NetWmSourceApplication = 1U;
+
+struct XcbCookie
+{
+	std::uint32_t sequence;
+};
+
+struct XcbInternAtomReply
+{
+	std::uint8_t responseType;
+	std::uint8_t pad0;
+	std::uint16_t sequence;
+	std::uint32_t length;
+	std::uint32_t atom;
+};
+
+struct XcbGetGeometryReply
+{
+	std::uint8_t responseType;
+	std::uint8_t depth;
+	std::uint16_t sequence;
+	std::uint32_t length;
+	std::uint32_t root;
+	std::int16_t x;
+	std::int16_t y;
+	std::uint16_t width;
+	std::uint16_t height;
+	std::uint16_t borderWidth;
+	std::uint8_t pad0[2];
+};
+
+struct XcbClientMessageEvent
+{
+	std::uint8_t responseType;
+	std::uint8_t format;
+	std::uint16_t sequence;
+	std::uint32_t window;
+	std::uint32_t type;
+	std::uint32_t data32[5];
+};
+static_assert(sizeof(XcbClientMessageEvent) == 32);
+
+struct XcbApi
+{
+	using InternAtomFn = XcbCookie (*)(xcb_connection_t*, std::uint8_t, std::uint16_t, const char*);
+	using InternAtomReplyFn = XcbInternAtomReply* (*)(xcb_connection_t*, XcbCookie, void**);
+	using GetGeometryFn = XcbCookie (*)(xcb_connection_t*, std::uint32_t);
+	using GetGeometryReplyFn = XcbGetGeometryReply* (*)(xcb_connection_t*, XcbCookie, void**);
+	using SendEventFn = XcbCookie (*)(xcb_connection_t*, std::uint8_t, std::uint32_t, std::uint32_t, const char*);
+	using FlushFn = int (*)(xcb_connection_t*);
+
+	InternAtomFn internAtom = nullptr;
+	InternAtomReplyFn internAtomReply = nullptr;
+	GetGeometryFn getGeometry = nullptr;
+	GetGeometryReplyFn getGeometryReply = nullptr;
+	SendEventFn sendEvent = nullptr;
+	FlushFn flush = nullptr;
+
+	bool valid() const
+	{
+		return internAtom != nullptr && internAtomReply != nullptr && getGeometry != nullptr && getGeometryReply != nullptr && sendEvent != nullptr && flush != nullptr;
+	}
+};
+
+template<typename Fn>
+bool resolveXcbSymbol(QLibrary& lib, const char* symbol, Fn& out)
+{
+	const QFunctionPointer raw = lib.resolve(symbol);
+	if(raw == nullptr)
+	{
+		return false;
+	}
+	static_assert(sizeof(Fn) == sizeof(QFunctionPointer));
+	std::memcpy(&out, &raw, sizeof(out));
+	return true;
+}
+
+const XcbApi& xcbApi()
+{
+	static const XcbApi api = [] {
+		static QLibrary lib(u"xcb"_s, 1);
+		XcbApi loaded;
+		if(!lib.load())
+		{
+			return loaded;
+		}
+		const bool ok = resolveXcbSymbol(lib, "xcb_intern_atom", loaded.internAtom)
+		                && resolveXcbSymbol(lib, "xcb_intern_atom_reply", loaded.internAtomReply)
+		                && resolveXcbSymbol(lib, "xcb_get_geometry", loaded.getGeometry)
+		                && resolveXcbSymbol(lib, "xcb_get_geometry_reply", loaded.getGeometryReply)
+		                && resolveXcbSymbol(lib, "xcb_send_event", loaded.sendEvent)
+		                && resolveXcbSymbol(lib, "xcb_flush", loaded.flush);
+		return ok ? loaded : XcbApi{};
+	}();
+	return api;
+}
+
+struct XcbAtoms
+{
+	xcb_connection_t* conn = nullptr;
+	std::uint32_t netWmState = 0;
+	std::uint32_t netWmStateAbove = 0;
+};
+
+XcbAtoms resolveXcbAtoms(const XcbApi& api, xcb_connection_t* conn)
+{
+	static XcbAtoms cached;
+	if(cached.conn == conn && cached.netWmState != 0 && cached.netWmStateAbove != 0)
+	{
+		return cached;
+	}
+	constexpr const char* stateName = "_NET_WM_STATE";
+	constexpr const char* aboveName = "_NET_WM_STATE_ABOVE";
+	const XcbCookie stateCookie = api.internAtom(conn, 0, static_cast<std::uint16_t>(std::strlen(stateName)), stateName);
+	const XcbCookie aboveCookie = api.internAtom(conn, 0, static_cast<std::uint16_t>(std::strlen(aboveName)), aboveName);
+	XcbInternAtomReply* stateReply = api.internAtomReply(conn, stateCookie, nullptr);
+	XcbInternAtomReply* aboveReply = api.internAtomReply(conn, aboveCookie, nullptr);
+	XcbAtoms result{.conn = conn, .netWmState = 0, .netWmStateAbove = 0};
+	if(stateReply != nullptr)
+	{
+		result.netWmState = stateReply->atom;
+		std::free(stateReply);
+	}
+	if(aboveReply != nullptr)
+	{
+		result.netWmStateAbove = aboveReply->atom;
+		std::free(aboveReply);
+	}
+	if(result.netWmState != 0 && result.netWmStateAbove != 0)
+	{
+		cached = result;
+	}
+	return result;
+}
+
+void sendXcbAlwaysOnTop(QWindow* window)
+{
+	if(qGuiApp == nullptr)
+	{
+		return;
+	}
+	auto* x11 = qGuiApp->nativeInterface<QNativeInterface::QX11Application>();
+	if(x11 == nullptr)
+	{
+		return;
+	}
+	xcb_connection_t* conn = x11->connection();
+	if(conn == nullptr)
+	{
+		return;
+	}
+	const XcbApi& api = xcbApi();
+	if(!api.valid())
+	{
+		return;
+	}
+	const auto xid = static_cast<std::uint32_t>(window->winId());
+	if(xid == 0)
+	{
+		return;
+	}
+	const XcbCookie geomCookie = api.getGeometry(conn, xid);
+	XcbGetGeometryReply* geom = api.getGeometryReply(conn, geomCookie, nullptr);
+	if(geom == nullptr)
+	{
+		return;
+	}
+	const std::uint32_t root = geom->root;
+	std::free(geom);
+	if(root == 0)
+	{
+		return;
+	}
+	const XcbAtoms atoms = resolveXcbAtoms(api, conn);
+	if(atoms.netWmState == 0 || atoms.netWmStateAbove == 0)
+	{
+		return;
+	}
+	XcbClientMessageEvent ev{};
+	ev.responseType = XcbClientMessage;
+	ev.format = XcbFormat32;
+	ev.window = xid;
+	ev.type = atoms.netWmState;
+	ev.data32[0] = NetWmStateAdd;
+	ev.data32[1] = atoms.netWmStateAbove;
+	ev.data32[3] = NetWmSourceApplication;
+	api.sendEvent(conn, 0, root, XcbEventMaskSubstructureNotify | XcbEventMaskSubstructureRedirect, reinterpret_cast<const char*>(&ev));
+	api.flush(conn);
+}
+
+#endif
 
 } // namespace
 
@@ -334,6 +538,19 @@ void FloatingBallHelper::ensureAlwaysOnTop(QWindow* window) const
 				}
 				SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
 			}
+		}
+		return;
+	}
+#elif QT_CONFIG(xcb)
+	if(QGuiApplication::platformName() == u"xcb"_s)
+	{
+		if(!window->flags().testFlag(Qt::WindowStaysOnTopHint))
+		{
+			window->setFlag(Qt::WindowStaysOnTopHint, true);
+		}
+		if(window->isVisible())
+		{
+			sendXcbAlwaysOnTop(window);
 		}
 		return;
 	}
