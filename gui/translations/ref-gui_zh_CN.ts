@@ -4179,22 +4179,22 @@ $ARGUMENTS</translation>
 <context>
     <name>WindowControls</name>
     <message>
-        <location filename="../src/app/WindowControls.qml" line="61"/>
+        <location filename="../src/app/WindowControls.qml" line="20"/>
         <source>Minimize</source>
         <translation>最小化</translation>
     </message>
     <message>
-        <location filename="../src/app/WindowControls.qml" line="92"/>
+        <location filename="../src/app/WindowControls.qml" line="27"/>
         <source>Restore</source>
         <translation>还原</translation>
     </message>
     <message>
-        <location filename="../src/app/WindowControls.qml" line="92"/>
+        <location filename="../src/app/WindowControls.qml" line="27"/>
         <source>Maximize</source>
         <translation>最大化</translation>
     </message>
     <message>
-        <location filename="../src/app/WindowControls.qml" line="137"/>
+        <location filename="../src/app/WindowControls.qml" line="34"/>
         <source>Close</source>
         <translation>关闭</translation>
     </message>

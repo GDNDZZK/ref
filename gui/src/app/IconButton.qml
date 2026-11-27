@@ -744,117 +744,165 @@ CircleButton {
 		}
 	}
 
-	// 10. Folder / Folder-Open: back plate + tab, rising inner document sheet, and bottom-hinged front flap.
+	// 10. Folder / Folder-Open: HiDPI Canvas 3-layer physical sandwich driven by a single continuous `open` spring:
+	// Layer 1 (tabbed back plate) -> Layer 2 (rising document sheet) -> Layer 3 (perspective hinged front flap).
 	Component {
 		id: folderGlyph
 
 		Item {
 			id: folderRoot
 			anchors.fill: parent
-			readonly property real u: iconButton.unitScale
-			readonly property real st: iconButton.strokeWidth
-			readonly property color activeStroke: iconButton.hovered ? Theme.infoText : iconButton.iconColor
+			readonly property real pad: 4
+			property real open: iconButton.pressed ? 0.35 : (iconButton.hovered ? 1.0 : 0.0)
+			property color strokeColor: iconButton.hovered && iconButton.isMutedDefault ? Theme.infoText : iconButton.iconColor
+			property color maskColor: iconButton.color
+			property color tintColor: Theme.info
 
-			// 1. Back tab (upper-left ear).
-			Rectangle {
-				x: 2.0 * folderRoot.u
-				y: 3.4 * folderRoot.u
-				width: 7.4 * folderRoot.u
-				height: 4.2 * folderRoot.u
-				radius: 1.8 * folderRoot.u
-				color: "transparent"
-				border.width: folderRoot.st
-				border.color: iconButton.iconColor
+			Behavior on open { SpringAnimation { spring: 4.5; damping: 0.30; epsilon: 0.004 } }
+			Behavior on strokeColor { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 
-				Behavior on border.color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+			onOpenChanged: folderCanvas.requestPaint()
+			onStrokeColorChanged: folderCanvas.requestPaint()
+			onMaskColorChanged: folderCanvas.requestPaint()
+			onTintColorChanged: folderCanvas.requestPaint()
+
+			Connections {
+				target: iconButton
+				function onGlyphPixelScaleChanged() { folderCanvas.requestPaint() }
 			}
 
-			// 1b. Back body pocket.
-			Rectangle {
-				x: 2.0 * folderRoot.u
-				y: 5.4 * folderRoot.u
-				width: 16.0 * folderRoot.u
-				height: 11.4 * folderRoot.u
-				radius: 2.2 * folderRoot.u
-				color: iconButton.color
-				border.width: folderRoot.st
-				border.color: iconButton.iconColor
+			Canvas {
+				id: folderCanvas
+				x: -folderRoot.pad
+				y: -folderRoot.pad
+				readonly property real logicalW: folderRoot.width + 2 * folderRoot.pad
+				readonly property real logicalH: folderRoot.height + 2 * folderRoot.pad
+				width: Math.max(1, Math.ceil(logicalW * iconButton.glyphPixelScale))
+				height: Math.max(1, Math.ceil(logicalH * iconButton.glyphPixelScale))
+				transformOrigin: Item.TopLeft
+				scale: 1 / iconButton.glyphPixelScale
+				renderTarget: Canvas.Image
 
-				Behavior on border.color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
-			}
+				onWidthChanged: requestPaint()
+				onHeightChanged: requestPaint()
+				Component.onCompleted: requestPaint()
 
-			// Seamless bridge erasing the inner seam between tab and back body.
-			Rectangle {
-				x: 2.0 * folderRoot.u + folderRoot.st
-				y: 5.0 * folderRoot.u
-				width: Math.max(0, 7.4 * folderRoot.u - folderRoot.st * 2)
-				height: folderRoot.st + 1.2 * folderRoot.u
-				color: iconButton.color
-			}
+				function drawRoundedRect(ctx, x, y, w, h, r) {
+					const rr = Math.min(r, w * 0.5, h * 0.5)
+					ctx.beginPath()
+					ctx.moveTo(x + rr, y)
+					ctx.lineTo(x + w - rr, y)
+					ctx.arcTo(x + w, y, x + w, y + rr, rr)
+					ctx.lineTo(x + w, y + h - rr)
+					ctx.arcTo(x + w, y + h, x + w - rr, y + h, rr)
+					ctx.lineTo(x + rr, y + h)
+					ctx.arcTo(x, y + h, x, y + h - rr, rr)
+					ctx.lineTo(x, y + rr)
+					ctx.arcTo(x, y, x + rr, y, rr)
+					ctx.closePath()
+				}
 
-			// 2. Inner document sheet peeking out of the folder pocket on hover.
-			Rectangle {
-				id: folderSheet
-				x: 4.2 * folderRoot.u
-				y: (iconButton.pressed ? 6.0 : (iconButton.hovered ? 3.6 : 7.6)) * folderRoot.u
-				width: 11.6 * folderRoot.u
-				height: 8.6 * folderRoot.u
-				radius: 1.4 * folderRoot.u
-				rotation: iconButton.hovered ? -3 : 0
-				antialiasing: true
-				color: Qt.tint(iconButton.color, Qt.alpha(Theme.info, iconButton.hovered ? 0.22 : 0.0))
-				border.width: Math.max(1.2, folderRoot.st * 0.78)
-				border.color: folderRoot.activeStroke
-				opacity: iconButton.hovered ? 1.0 : 0.0
+				onPaint: {
+					const ctx = getContext("2d")
+					if (!ctx || folderRoot.width <= 0 || folderRoot.height <= 0)
+						return
+					ctx.setTransform(1, 0, 0, 1, 0, 0)
+					ctx.clearRect(0, 0, width, height)
+					const ps = iconButton.glyphPixelScale
+					const u = folderRoot.width / 20.0
+					ctx.setTransform(ps, 0, 0, ps, 0, 0)
+					ctx.translate(folderRoot.pad, folderRoot.pad)
+					ctx.scale(u, u)
 
-				Behavior on y { SpringAnimation { spring: 4.8; damping: 0.26; epsilon: 0.05 } }
-				Behavior on rotation { SpringAnimation { spring: 4.6; damping: 0.28; epsilon: 0.05 } }
-				Behavior on opacity {
-					NumberAnimation {
-						duration: iconButton.hovered ? Motion.quick : 280
-						easing.type: iconButton.hovered ? Motion.ease : Easing.InCubic
+					ctx.lineCap = "round"
+					ctx.lineJoin = "round"
+					const ov = Math.max(0, Math.min(1.25, folderRoot.open))
+					const ovClamped = Math.min(1.0, ov)
+
+					// Layer 1 (always back): single continuous tabbed folder contour (exact folder-20.svg proportion).
+					ctx.beginPath()
+					ctx.moveTo(3.0, 5.8)
+					ctx.arcTo(3.0, 4.0, 4.8, 4.0, 1.8)
+					ctx.lineTo(8.0, 4.0)
+					ctx.lineTo(9.8, 6.0)
+					ctx.lineTo(15.2, 6.0)
+					ctx.arcTo(17.0, 6.0, 17.0, 7.8, 1.8)
+					ctx.lineTo(17.0, 14.8)
+					ctx.arcTo(17.0, 16.6, 15.2, 16.6, 1.8)
+					ctx.lineTo(4.8, 16.6)
+					ctx.arcTo(3.0, 16.6, 3.0, 14.8, 1.8)
+					ctx.closePath()
+					ctx.fillStyle = iconButton.glyphRgba(folderRoot.maskColor, 1.0)
+					ctx.fill()
+					ctx.strokeStyle = iconButton.glyphRgba(folderRoot.strokeColor, 1.0)
+					ctx.lineWidth = 1.75
+					ctx.stroke()
+
+					// Layer 2 (sandwiched): document sheet gliding smoothly out from behind Layer 3.
+					const sheetAlpha = iconButton.smoothstep(0.08, 0.38, ov)
+					if (sheetAlpha > 0.01) {
+						const sheetW = 9.4
+						const sheetH = 7.6
+						const sheetX = (20.0 - sheetW) * 0.5
+						const sheetY = 10.6 + (4.2 - 10.6) * ov
+						const sheetRot = -3.0 * ov
+						ctx.save()
+						// Clip strictly above the folder bottom edge so the tucked sheet never leaks below y = 16.4.
+						ctx.beginPath()
+						ctx.rect(-4.0, -4.0, 28.0, 20.4)
+						ctx.clip()
+						ctx.translate(10.0, sheetY + sheetH * 0.5)
+						ctx.rotate(sheetRot * Math.PI / 180)
+						ctx.translate(-10.0, -(sheetY + sheetH * 0.5))
+						drawRoundedRect(ctx, sheetX, sheetY, sheetW, sheetH, 1.4)
+						ctx.fillStyle = iconButton.glyphRgba(folderRoot.maskColor, sheetAlpha)
+						ctx.fill()
+						ctx.fillStyle = iconButton.glyphRgba(folderRoot.tintColor, 0.16 * sheetAlpha * ovClamped)
+						ctx.fill()
+						ctx.strokeStyle = iconButton.glyphRgba(folderRoot.strokeColor, sheetAlpha)
+						ctx.lineWidth = 1.45
+						ctx.stroke()
+						// Two crisp staggered document lines inside the sheet.
+						ctx.strokeStyle = iconButton.glyphRgba(folderRoot.strokeColor, 0.78 * sheetAlpha)
+						ctx.lineWidth = 1.25
+						ctx.beginPath()
+						ctx.moveTo(sheetX + 2.0, sheetY + 2.3)
+						ctx.lineTo(sheetX + sheetW - 2.0, sheetY + 2.3)
+						ctx.stroke()
+						ctx.strokeStyle = iconButton.glyphRgba(folderRoot.strokeColor, 0.56 * sheetAlpha)
+						ctx.beginPath()
+						ctx.moveTo(sheetX + 2.0, sheetY + 4.1)
+						ctx.lineTo(sheetX + sheetW - 3.6, sheetY + 4.1)
+						ctx.stroke()
+						ctx.restore()
+					}
+
+					// Layer 3 (always front): bottom-hinged perspective front flap physically occluding lower half of sheet.
+					if (ov > 0.005) {
+						const flapStrokeAlpha = iconButton.smoothstep(0.0, 0.16, ov)
+						const flare = 1.15 * Math.max(0.0, ov - 0.06) / 0.94
+						const topY = 8.2 + (10.4 - 8.2) * ov
+						const tlX = 3.0 - flare
+						const trX = 17.0 + flare
+						const flR = 1.5
+						const fbR = 1.8
+						ctx.beginPath()
+						ctx.moveTo(tlX + flR, topY)
+						ctx.lineTo(trX - flR, topY)
+						ctx.arcTo(trX, topY, 17.0, 16.6, flR)
+						ctx.arcTo(17.0, 16.6, 3.0, 16.6, fbR)
+						ctx.arcTo(3.0, 16.6, tlX, topY, fbR)
+						ctx.arcTo(tlX, topY, trX, topY, flR)
+						ctx.closePath()
+						ctx.fillStyle = iconButton.glyphRgba(folderRoot.maskColor, 1.0)
+						ctx.fill()
+						ctx.fillStyle = iconButton.glyphRgba(folderRoot.tintColor, 0.10 * ovClamped)
+						ctx.fill()
+						ctx.strokeStyle = iconButton.glyphRgba(folderRoot.strokeColor, flapStrokeAlpha)
+						ctx.lineWidth = 1.75
+						ctx.stroke()
 					}
 				}
-				Behavior on border.color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
-
-				Rectangle {
-					x: 2.4 * folderRoot.u
-					y: 2.4 * folderRoot.u
-					width: 6.4 * folderRoot.u
-					height: Math.max(1.0, 1.1 * folderRoot.u)
-					radius: height * 0.5
-					color: Theme.infoText
-					opacity: 0.75
-				}
-				Rectangle {
-					x: 2.4 * folderRoot.u
-					y: 4.4 * folderRoot.u
-					width: 4.4 * folderRoot.u
-					height: Math.max(1.0, 1.1 * folderRoot.u)
-					radius: height * 0.5
-					color: Theme.infoText
-					opacity: 0.55
-				}
-			}
-
-			// 3. Bottom-hinged front flap: drops and flares forward in perspective as the folder opens.
-			Rectangle {
-				id: frontFlap
-				readonly property real flapHeight: (iconButton.pressed ? 8.2 : (iconButton.hovered ? 7.2 : 10.0)) * folderRoot.u
-				readonly property real flapWidth: (iconButton.pressed ? 16.8 : (iconButton.hovered ? 17.4 : 16.0)) * folderRoot.u
-				x: (folderRoot.width - width) * 0.5
-				y: 16.8 * folderRoot.u - height
-				width: flapWidth
-				height: flapHeight
-				radius: 2.2 * folderRoot.u
-				antialiasing: true
-				color: Qt.tint(iconButton.color, Qt.alpha(Theme.info, iconButton.hovered ? 0.14 : 0.0))
-				border.width: folderRoot.st
-				border.color: folderRoot.activeStroke
-
-				Behavior on width { SpringAnimation { spring: 5.0; damping: 0.28; epsilon: 0.05 } }
-				Behavior on height { SpringAnimation { spring: 5.0; damping: 0.28; epsilon: 0.05 } }
-				Behavior on border.color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 			}
 		}
 	}
