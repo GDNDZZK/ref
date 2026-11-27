@@ -132,9 +132,9 @@ Window {
 				const origin = themeToggle.mapToItem(themeFade, themeToggle.width / 2, themeToggle.height / 2)
 				const nextDark = theme === ThemeName.dark
 					|| (theme === ThemeName.system && Application.styleHints.colorScheme === Qt.Dark)
-				themeFade.runRadial(page, origin, !nextDark, () => Workspace.settings.theme = theme)
+				themeFade.runRadial(themeTarget, origin, !nextDark, () => Workspace.settings.theme = theme)
 			} else {
-				themeFade.run(page, () => Workspace.settings.theme = theme)
+				themeFade.run(themeTarget, () => Workspace.settings.theme = theme)
 			}
 		}
 		function onDialogChanged() {
@@ -219,6 +219,10 @@ Window {
 		scale: UiScale.factor
 		width: window.width / scale
 		height: window.height / scale
+	// Holds everything clipped by the theme crossfade / radial reveal (including topbar buttons, excluding ThemeToggle).
+	Item {
+		id: themeTarget
+		anchors.fill: parent
 	Item {
 		id: page
 		anchors.fill: parent
@@ -565,11 +569,7 @@ Window {
 		}
 	}
 
-	Crossfade {
-		id: themeFade
-	}
-
-	// Above the snapshot, so their own morph stays visible during the crossfade.
+	// Topbar buttons inside themeTarget so radial/crossfade theme transitions clip them smoothly.
 	IconButton {
 		id: expand
 		anchors {
@@ -619,19 +619,15 @@ Window {
 		onCloseRequested: window.close()
 	}
 
-	ThemeToggle {
-		id: themeToggle
+	Item {
+		id: themeToggleSlot
+		width: themeToggle.width
+		height: themeToggle.height
 		anchors {
 			top: parent.top
 			right: windowControls.visible ? windowControls.left : parent.right
 			topMargin: window.topButtonY
 			rightMargin: windowControls.visible ? Theme.windowButtonGap : Theme.windowButtonMargin
-		}
-		enabled: !dialogs.open
-		holdLightSurface: themeFade.holdingLightToggle
-		onClicked: {
-			window.radialThemePending = true
-			Workspace.requestTheme(Theme.dark ? ThemeName.light : ThemeName.dark)
 		}
 	}
 
@@ -640,7 +636,7 @@ Window {
 		objectName: "notifyToggleButton"
 		anchors {
 			top: parent.top
-			right: themeToggle.left
+			right: themeToggleSlot.left
 			topMargin: window.topButtonY
 			rightMargin: Theme.windowButtonGap
 		}
@@ -703,6 +699,24 @@ Window {
 		onClicked: Workspace.unzoom()
 
 		Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+	}
+	}
+
+	Crossfade {
+		id: themeFade
+	}
+
+	// Above themeFade so the sun/moon morph stays visible at the center of the radial reveal.
+	ThemeToggle {
+		id: themeToggle
+		x: themeToggleSlot.x
+		y: themeToggleSlot.y
+		enabled: !dialogs.open
+		holdLightSurface: themeFade.holdingLightToggle
+		onClicked: {
+			window.radialThemePending = true
+			Workspace.requestTheme(Theme.dark ? ThemeName.light : ThemeName.dark)
+		}
 	}
 	DialogHost {
 		id: dialogs

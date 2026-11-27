@@ -839,7 +839,7 @@ CircleButton {
 					ctx.stroke()
 
 					// Layer 2 (sandwiched): document sheet gliding smoothly out from behind Layer 3.
-					const sheetAlpha = iconButton.smoothstep(0.08, 0.38, ov)
+					const sheetAlpha = iconButton.smoothstep(0.14, 0.42, ov)
 					if (sheetAlpha > 0.01) {
 						const sheetW = 9.4
 						const sheetH = 7.6
@@ -879,28 +879,43 @@ CircleButton {
 
 					// Layer 3 (always front): bottom-hinged perspective front flap physically occluding lower half of sheet.
 					if (ov > 0.005) {
-						const flapStrokeAlpha = iconButton.smoothstep(0.0, 0.16, ov)
-						const flare = 1.15 * Math.max(0.0, ov - 0.06) / 0.94
+						const flapTopAlpha = iconButton.smoothstep(0.0, 0.10, ov)
+						const flapFillAlpha = iconButton.smoothstep(0.10, 0.24, ov)
+						const flare = 1.15 * Math.max(0.0, ov - 0.10) / 0.90
 						const topY = 8.2 + (10.4 - 8.2) * ov
 						const tlX = 3.0 - flare
 						const trX = 17.0 + flare
 						const flR = 1.5
 						const fbR = 1.8
-						ctx.beginPath()
-						ctx.moveTo(tlX + flR, topY)
-						ctx.lineTo(trX - flR, topY)
-						ctx.arcTo(trX, topY, 17.0, 16.6, flR)
-						ctx.arcTo(17.0, 16.6, 3.0, 16.6, fbR)
-						ctx.arcTo(3.0, 16.6, tlX, topY, fbR)
-						ctx.arcTo(tlX, topY, trX, topY, flR)
-						ctx.closePath()
-						ctx.fillStyle = iconButton.glyphRgba(folderRoot.maskColor, 1.0)
-						ctx.fill()
-						ctx.fillStyle = iconButton.glyphRgba(folderRoot.tintColor, 0.10 * ovClamped)
-						ctx.fill()
-						ctx.strokeStyle = iconButton.glyphRgba(folderRoot.strokeColor, flapStrokeAlpha)
-						ctx.lineWidth = 1.75
-						ctx.stroke()
+						if (ov <= 0.10) {
+							// Fade only the top flap edge while aligned with Layer 1 so the outer contour is never thinned.
+							ctx.beginPath()
+							ctx.moveTo(3.0, topY + flR)
+							ctx.arcTo(3.0, topY, 3.0 + flR, topY, flR)
+							ctx.lineTo(17.0 - flR, topY)
+							ctx.arcTo(17.0, topY, 17.0, topY + flR, flR)
+							ctx.strokeStyle = iconButton.glyphRgba(folderRoot.strokeColor, flapTopAlpha)
+							ctx.lineWidth = 1.75
+							ctx.stroke()
+						} else {
+							ctx.beginPath()
+							ctx.moveTo(tlX + flR, topY)
+							ctx.lineTo(trX - flR, topY)
+							ctx.arcTo(trX, topY, 17.0, 16.6, flR)
+							ctx.arcTo(17.0, 16.6, 3.0, 16.6, fbR)
+							ctx.arcTo(3.0, 16.6, tlX, topY, fbR)
+							ctx.arcTo(tlX, topY, trX, topY, flR)
+							ctx.closePath()
+							if (flapFillAlpha > 0.005) {
+								ctx.fillStyle = iconButton.glyphRgba(folderRoot.maskColor, flapFillAlpha)
+								ctx.fill()
+								ctx.fillStyle = iconButton.glyphRgba(folderRoot.tintColor, 0.10 * flapFillAlpha * ovClamped)
+								ctx.fill()
+							}
+							ctx.strokeStyle = iconButton.glyphRgba(folderRoot.strokeColor, 1.0)
+							ctx.lineWidth = 1.75
+							ctx.stroke()
+						}
 					}
 				}
 			}
