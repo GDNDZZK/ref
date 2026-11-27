@@ -4542,7 +4542,8 @@ void TestMainWindow::floatingBallModeExpandsAndCollapsesInSingleWindowWithoutWar
 	QTRY_VERIFY([&] {
 		return ballWin->isVisible()
 		       && ballWin->width() == 380 && ballWin->height() == 520
-		       && panelRoot->isVisible() && !ballRoot->isVisible();
+		       && panelRoot->isVisible() && !ballRoot->isVisible()
+		       && panelRoot->scale() > 0.999 && panelRoot->opacity() > 0.999;
 	}());
 	QCOMPARE(window->findChild<QQuickWindow*>(u"floatingBallWindow"_s), ballWin);
 	QVERIFY(QTest::qWaitForWindowExposed(ballWin));
@@ -4579,7 +4580,8 @@ void TestMainWindow::floatingBallModeExpandsAndCollapsesInSingleWindowWithoutWar
 	QTRY_VERIFY([&] {
 		return ballWin->isVisible()
 		       && ballWin->width() == 56 && ballWin->height() == 56
-		       && ballRoot->isVisible() && !panelRoot->isVisible();
+		       && ballRoot->isVisible() && !panelRoot->isVisible()
+		       && ballRoot->scale() > 0.999 && ballRoot->opacity() > 0.999;
 	}());
 	QCOMPARE(window->findChild<QQuickWindow*>(u"floatingBallWindow"_s), ballWin);
 	QCOMPARE(f.workspace->current(), nullptr);
@@ -4602,7 +4604,8 @@ void TestMainWindow::floatingBallModeExpandsAndCollapsesInSingleWindowWithoutWar
 	QTRY_VERIFY([&] {
 		return ballWin->isVisible()
 		       && ballWin->width() == 380 && ballWin->height() == 520
-		       && panelRoot->isVisible() && !ballRoot->isVisible();
+		       && panelRoot->isVisible() && !ballRoot->isVisible()
+		       && panelRoot->scale() > 0.999 && panelRoot->opacity() > 0.999;
 	}());
 	QCOMPARE(f.workspace->current(), nullptr);
 	QTRY_VERIFY(sessionList->isVisible());
@@ -4676,7 +4679,8 @@ void TestMainWindow::floatingBallModeExpandsAndCollapsesInSingleWindowWithoutWar
 		       && ballWin->width() == 380 && ballWin->height() == 520
 		       && ballWin->minimumWidth() == 380 && ballWin->maximumWidth() == 380
 		       && ballWin->minimumHeight() == 520 && ballWin->maximumHeight() == 520
-		       && panelRoot->isVisible() && !ballRoot->isVisible();
+		       && panelRoot->isVisible() && !ballRoot->isVisible()
+		       && panelRoot->scale() > 0.999 && panelRoot->opacity() > 0.999;
 	}());
 	QTRY_VERIFY(sessionList->isVisible());
 	QQuickItem* splitRow = nullptr;

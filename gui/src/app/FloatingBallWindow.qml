@@ -16,6 +16,9 @@ Item {
 	property bool syncingPosition: false
 	property bool settlingGeometry: false
 	property bool resizingPanel: false
+	property string transitionPhase: "" // "", "expandingOut", "expandingIn", "collapsingOut", "collapsingIn"
+	property bool expandLeft: false
+	property bool expandUp: false
 	property string screenName: ""
 	property int ballX: 0
 	property int ballY: 0
@@ -24,6 +27,14 @@ Item {
 	property string draggingSessionId: ""
 	readonly property bool reorderingRunning: draggingSessionId !== ""
 	property real attentionScale: 1.0
+	readonly property int ballExitMs: 90
+	readonly property int ballEnterMs: 180
+	readonly property int panelEnterMs: 190
+	readonly property int panelExitMs: 130
+	readonly property int commitFrameDelayMs: 24
+	readonly property real ballExitScale: 0.80
+	readonly property real ballEnterScale: 0.78
+	readonly property real panelTransitionScale: 0.95
 
 	readonly property int ballSize: Workspace.settings.floatingBallSize
 	readonly property int ballIconSize: Math.max(16, Math.round(ballSize * 24 / 56))
@@ -142,6 +153,8 @@ Item {
 				panelHeight,
 				screenName
 			)
+			expandLeft = placed.expandLeft === true
+			expandUp = placed.expandUp === true
 			if (supportsWindowPosition) {
 				floatingWindow.x = placed.x
 				floatingWindow.y = placed.y
@@ -197,23 +210,74 @@ Item {
 		Workspace.settings.setFloatingBallPosition(screenName, ballX, ballY)
 	}
 
+	function cancelTransition() {
+		ballExitAnim.stop()
+		panelEnterAnim.stop()
+		panelExitAnim.stop()
+		ballEnterAnim.stop()
+		commitFrameTimer.stop()
+		transitionPhase = ""
+		ballRoot.opacity = 1
+		ballRoot.scale = 1
+		panelRoot.opacity = 1
+		panelRoot.scale = 1
+	}
+
 	function openSessionInPanel(sessionId) {
 		confirmCloseShown = false
 		if (sessionId !== "")
 			Workspace.openSession(sessionId)
-		panelExpanded = true
+		expandPanel()
 	}
 
 	function expandPanel() {
 		ballMenuWindow.visible = false
 		confirmCloseShown = false
-		panelExpanded = true
+		if (panelExpanded && transitionPhase !== "collapsingOut")
+			return
+		if (transitionPhase === "expandingOut" || transitionPhase === "expandingIn")
+			return
+		if (transitionPhase === "collapsingOut") {
+			panelExitAnim.stop()
+			commitFrameTimer.stop()
+			transitionPhase = "expandingIn"
+			panelEnterAnim.restart()
+			return
+		}
+		if (!floatingWindow.visible) {
+			cancelTransition()
+			panelExpanded = true
+			return
+		}
+		ballEnterAnim.stop()
+		commitFrameTimer.stop()
+		transitionPhase = "expandingOut"
+		ballExitAnim.restart()
 	}
 
 	function collapseToBall() {
 		ballMenuWindow.visible = false
 		confirmCloseShown = false
-		panelExpanded = false
+		if (!panelExpanded && transitionPhase !== "expandingOut")
+			return
+		if (transitionPhase === "collapsingOut" || transitionPhase === "collapsingIn")
+			return
+		if (transitionPhase === "expandingOut") {
+			ballExitAnim.stop()
+			commitFrameTimer.stop()
+			transitionPhase = "collapsingIn"
+			ballEnterAnim.restart()
+			return
+		}
+		if (!floatingWindow.visible) {
+			cancelTransition()
+			panelExpanded = false
+			return
+		}
+		panelEnterAnim.stop()
+		commitFrameTimer.stop()
+		transitionPhase = "collapsingOut"
+		panelExitAnim.restart()
 	}
 
 	function openBallMenu(localX, localY) {
@@ -271,9 +335,75 @@ Item {
 		onTriggered: root.settlingGeometry = false
 	}
 
+	Timer {
+		id: commitFrameTimer
+		interval: root.commitFrameDelayMs
+		repeat: false
+		onTriggered: {
+			if (!floatingWindow.visible) {
+				root.cancelTransition()
+				return
+			}
+			if (root.transitionPhase === "expandingOut") {
+				panelRoot.opacity = 0
+				panelRoot.scale = root.panelTransitionScale
+				root.panelExpanded = true
+				root.transitionPhase = "expandingIn"
+				panelEnterAnim.restart()
+			} else if (root.transitionPhase === "collapsingOut") {
+				ballRoot.opacity = 0
+				ballRoot.scale = root.ballEnterScale
+				root.panelExpanded = false
+				root.transitionPhase = "collapsingIn"
+				ballEnterAnim.restart()
+			}
+		}
+	}
+
+	ParallelAnimation {
+		id: ballExitAnim
+		NumberAnimation { target: ballRoot; property: "opacity"; to: 0; duration: root.ballExitMs; easing.type: Easing.InCubic }
+		NumberAnimation { target: ballRoot; property: "scale"; to: root.ballExitScale; duration: root.ballExitMs; easing.type: Easing.InCubic }
+		onFinished: {
+			if (root.transitionPhase === "expandingOut")
+				commitFrameTimer.restart()
+		}
+	}
+
+	ParallelAnimation {
+		id: panelEnterAnim
+		NumberAnimation { target: panelRoot; property: "opacity"; to: 1; duration: root.panelEnterMs; easing.type: Easing.OutCubic }
+		NumberAnimation { target: panelRoot; property: "scale"; to: 1; duration: root.panelEnterMs; easing.type: Easing.OutCubic }
+		onFinished: {
+			if (root.transitionPhase === "expandingIn")
+				root.transitionPhase = ""
+		}
+	}
+
+	ParallelAnimation {
+		id: panelExitAnim
+		NumberAnimation { target: panelRoot; property: "opacity"; to: 0; duration: root.panelExitMs; easing.type: Easing.InCubic }
+		NumberAnimation { target: panelRoot; property: "scale"; to: root.panelTransitionScale; duration: root.panelExitMs; easing.type: Easing.InCubic }
+		onFinished: {
+			if (root.transitionPhase === "collapsingOut")
+				commitFrameTimer.restart()
+		}
+	}
+
+	ParallelAnimation {
+		id: ballEnterAnim
+		NumberAnimation { target: ballRoot; property: "opacity"; to: 1; duration: root.ballEnterMs; easing.type: Easing.OutCubic }
+		NumberAnimation { target: ballRoot; property: "scale"; to: 1; duration: root.ballEnterMs; easing.type: Easing.OutCubic }
+		onFinished: {
+			if (root.transitionPhase === "collapsingIn")
+				root.transitionPhase = ""
+		}
+	}
+
 	Connections {
 		target: Workspace
 		function onFloatingModeChanged() {
+			root.cancelTransition()
 			if (Workspace.floatingMode) {
 				root.resolvePosition()
 				root.positionRestored = true
@@ -350,7 +480,7 @@ Item {
 				return
 			if (Workspace.anySessionWorking() || Workspace.configEditor.dirty) {
 				close.accepted = false
-				if (!root.panelExpanded)
+				if (!root.panelExpanded || root.transitionPhase === "collapsingOut")
 					root.expandPanel()
 				root.confirmCloseShown = true
 			}
@@ -362,11 +492,15 @@ Item {
 			onActivated: Commands.run(CommandId.floating)
 		}
 
-		// 1) Compact 56x56 circular floating ball.
+		// 1) Compact 56x56 circular floating ball (fixed size so window resize frames never stretch it).
 		Item {
 			id: ballRoot
 			objectName: "floatingBallRoot"
-			anchors.fill: parent
+			x: 0
+			y: 0
+			width: root.ballSize
+			height: root.ballSize
+			transformOrigin: Item.Center
 			visible: !root.panelExpanded
 
 			SequentialAnimation {
@@ -496,6 +630,7 @@ Item {
 
 			DragHandler {
 				id: ballDrag
+				enabled: root.transitionPhase !== "expandingOut"
 				target: null
 				dragThreshold: root.dragThreshold
 				grabPermissions: PointerHandler.CanTakeOverFromAnything
@@ -514,7 +649,7 @@ Item {
 							dragStartWinPos = Qt.point(floatingWindow.x, floatingWindow.y)
 						}
 					} else {
-						if (root.supportsWindowPosition) {
+						if (root.supportsWindowPosition && !root.panelExpanded) {
 							root.ballX = floatingWindow.x
 							root.ballY = floatingWindow.y
 							if (floatingWindow.screen)
@@ -544,6 +679,7 @@ Item {
 			MouseArea {
 				id: ballMouse
 				anchors.fill: parent
+				enabled: root.transitionPhase !== "expandingOut"
 				acceptedButtons: Qt.LeftButton | Qt.RightButton
 				onClicked: mouse => {
 					if (mouse.button === Qt.RightButton)
@@ -559,6 +695,11 @@ Item {
 			id: panelRoot
 			objectName: "floatingPanelRoot"
 			anchors.fill: parent
+			transformOrigin: !root.supportsWindowPosition
+				? Item.Center
+				: (root.expandLeft
+					? (root.expandUp ? Item.BottomRight : Item.TopRight)
+					: (root.expandUp ? Item.BottomLeft : Item.TopLeft))
 			visible: root.panelExpanded
 			radius: Theme.radiusLarge
 			color: Theme.background
